@@ -1,8 +1,186 @@
+diff --git a/dist/lib/core.js b/dist/lib/core.js
+index 11407810ed0d60fe0d18c2fe8d9d6a09ae56c554..47ba13b4e7b32a6178fb590364c0bca00ff5ac94 100644
+--- a/dist/lib/core.js
++++ b/dist/lib/core.js
+@@ -94,10 +94,18 @@ const getWebVPNUrl = (urlIn) => {
+     return `https://oauth.tsinghua.edu.cn/lb-auth/lbredirect?scheme=${scheme}&host=${host}&port=${port}&uri=${uri}`;
+ };
+ const getCsrfToken = async () => {
+-    const cookie = await (0, network_1.uFetch)(strings_1.GET_COOKIE_URL);
+-    const q = /XSRF-TOKEN=(.+?);/.exec(cookie + ";");
++    let cookie = await (0, network_1.uFetch)(strings_1.GET_COOKIE_URL);
++    let q = /XSRF-TOKEN=(.+?);/.exec(cookie + ";");
+     if (q === null || q[1] === undefined) {
+-        throw new Error("Failed to get csrf token.");
++        // PATCH(thu-assistant): webvpn only materializes the XSRF-TOKEN cookie
++        // for info.tsinghua.edu.cn after the portal page has been requested
++        // through the VPN at least once. Visit it, then retry.
++        await (0, network_1.uFetch)("https://webvpn.tsinghua.edu.cn/https/77726476706e69737468656265737421f9f9479369247b59700f81b9991b2631506205de/f/info/gxfw_fg/common/index");
++        cookie = await (0, network_1.uFetch)(strings_1.GET_COOKIE_URL);
++        q = /XSRF-TOKEN=(.+?);/.exec(cookie + ";");
++        if (q === null || q[1] === undefined) {
++            throw new Error("Failed to get csrf token.");
++        }
+     }
+     return q[1];
+ };
 diff --git a/dist/utils/network.js b/dist/utils/network.js
-index c11890ab349ffca14fb0b503a7d91c45cbff8bc6..0c13eacd8768c219915f6e9c227851ade29c2ed0 100644
+index c11890ab349ffca14fb0b503a7d91c45cbff8bc6..e7a773c4ee1f7e9f2e6e41aac69ddeab04ca79d4 100644
 --- a/dist/utils/network.js
 +++ b/dist/utils/network.js
-@@ -239,12 +239,40 @@ const getRedirectUrl = async (url, timeout = 60000) => {
+@@ -24,6 +24,109 @@ const setCookie = (key, value) => {
+     exports.cookies[key] = value;
+ };
+ exports.setCookie = setCookie;
++// ===== PATCH(thu-assistant): backport of upstream 3.16.4 Node redirect/cookie handling =====
++// node-fetch loses set-cookie headers on intermediate redirects when redirect:"follow",
++// so in Node all redirect chains must be followed manually with per-hop cookie updates.
++const splitCombinedSetCookieHeader = (header) => {
++    const cookiesList = [];
++    const lowerHeader = header.toLowerCase();
++    let start = 0;
++    let inExpires = false;
++    for (let i = 0; i < header.length; i++) {
++        if (!inExpires && lowerHeader.startsWith("expires=", i)) {
++            inExpires = true;
++        }
++        else if (inExpires && header[i] === ";") {
++            inExpires = false;
++        }
++        else if (header[i] === ",") {
++            const rest = header.slice(i + 1);
++            if (!inExpires && /^\s*[^=;,\s]+=/.test(rest)) {
++                cookiesList.push(header.slice(start, i).trim());
++                start = i + 1;
++            }
++        }
++    }
++    const finalCookie = header.slice(start).trim();
++    if (finalCookie !== "") {
++        cookiesList.push(finalCookie);
++    }
++    return cookiesList;
++};
++const getSetCookieHeaders = (headers) => {
++    if (typeof headers.getSetCookie === "function") {
++        const setCookieHeaders = headers.getSetCookie();
++        if (setCookieHeaders.length > 0) {
++            return setCookieHeaders;
++        }
++    }
++    if (typeof headers.raw === "function") {
++        const rawHeaders = headers.raw();
++        const setCookieHeaders = rawHeaders["set-cookie"];
++        if (Array.isArray(setCookieHeaders)) {
++            return setCookieHeaders;
++        }
++        if (typeof setCookieHeaders === "string") {
++            return [setCookieHeaders];
++        }
++    }
++    const combinedSetCookieHeader = headers.get("set-cookie");
++    return combinedSetCookieHeader ? splitCombinedSetCookieHeader(combinedSetCookieHeader) : [];
++};
++const updateCookiesFromHeaders = (headers) => {
++    for (const setCookieHeader of getSetCookieHeaders(headers)) {
++        const cookieSegment = setCookieHeader.split(";")[0]?.trim();
++        if (!cookieSegment) {
++            continue;
++        }
++        const separatorIndex = cookieSegment.indexOf("=");
++        if (separatorIndex === -1) {
++            continue;
++        }
++        const key = cookieSegment.slice(0, separatorIndex).trim();
++        const value = cookieSegment.slice(separatorIndex + 1).trim();
++        if (key !== "") {
++            exports.cookies[key] = value;
++        }
++    }
++};
++const getCookieHeader = () => Object.keys(exports.cookies).map((key) => `${key}=${exports.cookies[key]}`).join(";");
++const resolveRedirectUrl = (location, baseUrl) => new URL(location, baseUrl).toString();
++const isRedirectStatus = (status) => [301, 302, 303, 307, 308].includes(status);
++const fetchWithNodeRedirects = async (url, init) => {
++    let location = url;
++    let method = init.method;
++    let body = init.body;
++    const baseHeaders = { ...init.headers };
++    delete baseHeaders.Cookie;
++    for (let i = 0; i < 10; i++) {
++        const response = await (0, cross_fetch_1.default)(location, {
++            ...init,
++            method,
++            body,
++            headers: {
++                ...baseHeaders,
++                Cookie: getCookieHeader(),
++            },
++            redirect: "manual",
++        });
++        updateCookiesFromHeaders(response.headers);
++        if (!isRedirectStatus(response.status)) {
++            return response;
++        }
++        const nextLocation = response.headers.get("location") ?? response.headers.get("Location");
++        if (!nextLocation) {
++            throw new error_1.ResponseStatusError("Redirect response missing location header.");
++        }
++        if (response.status === 303 || ((response.status === 301 || response.status === 302) && method === "POST")) {
++            method = undefined;
++            body = undefined;
++        }
++        location = resolveRedirectUrl(nextLocation, location);
++    }
++    throw new error_1.ResponseStatusError("Max redirect times reached.");
++};
++// ===== END PATCH(thu-assistant) =====
+ /**
+  * An enhanced implementation of `encodeURIComponent`, which supports
+  * arbitrary charset.
+@@ -86,8 +189,11 @@ const uFetch = async (url, post, timeout = 60000, paramEncoding = "UTF-8", seria
+         };
+     // Perform the network request
+     try {
+-        // @ts-ignore
+-        const response = await (0, cross_fetch_1.default)(url, init);
++        // PATCH(thu-assistant): follow redirects manually in Node so that
++        // set-cookie headers on intermediate hops are not lost (upstream 3.16.4).
++        const response = global.FileReader === undefined
++            ? await fetchWithNodeRedirects(url, init)
++            : await (0, cross_fetch_1.default)(url, init);
+         if (response.status !== 200 && response.status !== 201) {
+             let path = url;
+             try {
+@@ -107,25 +213,8 @@ const uFetch = async (url, post, timeout = 60000, paramEncoding = "UTF-8", seria
+             throw new error_1.ResponseStatusError(`Unexpected response status code: ${response.status} (${path})`);
+         }
+         // Manage cookies
+-        response.headers.forEach((value, key) => {
+-            if (key === "set-cookie") {
+-                // TODO: check relevant specifications and rewrite this
+-                if (value.includes("Expires")) {
+-                    const segment = value.split(";")[0];
+-                    const [item, val] = segment.split("=");
+-                    exports.cookies[item.trim()] = val.trim();
+-                }
+-                else {
+-                    for (const v of value.split(",")) {
+-                        const segment = v.split(";")[0];
+-                        const [item, val] = segment.split("=");
+-                        if (val) {
+-                            exports.cookies[item.trim()] = val.trim();
+-                        }
+-                    }
+-                }
+-            }
+-        });
++        // PATCH(thu-assistant): robust set-cookie parsing (upstream 3.16.4)
++        updateCookiesFromHeaders(response.headers);
+         // Detect charset based on content-type
+         const contentType = response.headers.get("Content-Type");
+         let base64 = false;
+@@ -239,12 +328,23 @@ const getRedirectUrl = async (url, timeout = 60000) => {
      // Perform the network request
      try {
          let location = url;
@@ -13,24 +191,7 @@ index c11890ab349ffca14fb0b503a7d91c45cbff8bc6..0c13eacd8768c219915f6e9c227851ad
              const response = await (0, cross_fetch_1.default)(location, init);
 +            // PATCH(thu-assistant): keep the cookie jar up to date on every hop,
 +            // otherwise the login redirect chain bounces forever.
-+            response.headers.forEach((value, key) => {
-+                if (key === "set-cookie") {
-+                    if (value.includes("Expires")) {
-+                        const segment = value.split(";")[0];
-+                        const [item, val] = segment.split("=");
-+                        exports.cookies[item.trim()] = val.trim();
-+                    }
-+                    else {
-+                        for (const v of value.split(",")) {
-+                            const segment = v.split(";")[0];
-+                            const [item, val] = segment.split("=");
-+                            if (val) {
-+                                exports.cookies[item.trim()] = val.trim();
-+                            }
-+                        }
-+                    }
-+                }
-+            });
++            updateCookiesFromHeaders(response.headers);
              if (response.status !== 301 && response.status !== 302) {
                  return location;
              }

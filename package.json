@@ -8,8 +8,11 @@
     "dev": "tsx src/index.ts",
     "step1": "tsx scripts/step1-infohelper.ts",
     "step2": "OPENSSL_CONF=${PWD}/openssl.cnf tsx scripts/step2-login.ts",
+    "debug:csrf": "OPENSSL_CONF=${PWD}/openssl.cnf tsx scripts/debug-csrf.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "debug:roam": "OPENSSL_CONF=${PWD}/openssl.cnf tsx scripts/debug-roam.ts",
+    "debug:chain": "OPENSSL_CONF=${PWD}/openssl.cnf tsx scripts/debug-chain.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

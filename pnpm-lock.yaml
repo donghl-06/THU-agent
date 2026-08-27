@@ -6,7 +6,7 @@ settings:
 
 patchedDependencies:
   '@thu-info/lib':
-    hash: 75e0d90a5df876ac13f80d063630f506ae4c3330a44b70aa87d34f70454aecad
+    hash: 19f78714232f93b31957e05f27a3adeb93476a1efa817032c7ef6bdac1a0c4f0
     path: patches/@thu-info__lib.patch
 
 importers:
@@ -15,7 +15,7 @@ importers:
     dependencies:
       '@thu-info/lib':
         specifier: ^3.15.2
-        version: 3.15.2(patch_hash=75e0d90a5df876ac13f80d063630f506ae4c3330a44b70aa87d34f70454aecad)
+        version: 3.15.2(patch_hash=19f78714232f93b31957e05f27a3adeb93476a1efa817032c7ef6bdac1a0c4f0)
       dotenv:
         specifier: ^16.4.0
         version: 16.6.1
@@ -1078,7 +1078,7 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.63.0':
     optional: true
 
-  '@thu-info/lib@3.15.2(patch_hash=75e0d90a5df876ac13f80d063630f506ae4c3330a44b70aa87d34f70454aecad)':
+  '@thu-info/lib@3.15.2(patch_hash=19f78714232f93b31957e05f27a3adeb93476a1efa817032c7ef6bdac1a0c4f0)':
     dependencies:
       abort-controller: 3.0.0
       cheerio: 1.2.0
