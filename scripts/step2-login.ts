@@ -15,6 +15,19 @@ const rl = readline.createInterface({input: process.stdin, output: process.stdou
 
 const helper = new InfoHelper();
 
+// 固定设备指纹 + 信任此设备：首次信任后，同指纹登录可跳过二次认证。
+// 注意：这会在你的清华账号「多因子认证」里登记一个名为 thu-assistant-dev 的信任设备，
+// 可随时到 https://id.tsinghua.edu.cn/ 的管理页面删除。
+helper.fingerprint = config.thu.fingerprint;
+helper.trustFingerprintHook = async () => true;
+helper.trustFingerprintNameHook = async () => "thu-assistant-dev";
+helper.twoFactorAuthLimitHook = async () => {
+    console.log(
+        "\n信任设备数量已达上限，请到 https://id.tsinghua.edu.cn/ 的" +
+        "「多因子认证」管理页面删除旧设备后重试。",
+    );
+};
+
 // 账号开启了二次认证时，库会通过这两个 hook 向我们"回调提问"：
 helper.twoFactorMethodHook = async (hasWeChatBool, phone, hasTotp) => {
     console.log("\n账号需要二次认证，可用方式：");

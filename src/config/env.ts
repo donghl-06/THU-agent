@@ -22,6 +22,10 @@ export const config = {
         get password() {
             return required("THU_PASSWORD");
         },
+        /** 固定设备指纹（32 位 hex）。配合信任设备可跳过每次的二次认证 */
+        get fingerprint() {
+            return required("THU_FINGERPRINT");
+        },
     },
     deepseek: {
         get apiKey() {
