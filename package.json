@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/index.ts",
+    "step1": "tsx scripts/step1-infohelper.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
@@ -16,6 +17,7 @@
     "vitest": "^2.1.0"
   },
   "dependencies": {
+    "@thu-info/lib": "^3.15.2",
     "dotenv": "^16.4.0"
   }
 }
