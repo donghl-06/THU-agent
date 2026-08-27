@@ -1,0 +1,47 @@
+diff --git a/dist/utils/network.js b/dist/utils/network.js
+index c11890ab349ffca14fb0b503a7d91c45cbff8bc6..0c13eacd8768c219915f6e9c227851ade29c2ed0 100644
+--- a/dist/utils/network.js
++++ b/dist/utils/network.js
+@@ -239,12 +239,40 @@ const getRedirectUrl = async (url, timeout = 60000) => {
+     // Perform the network request
+     try {
+         let location = url;
+-        for (let i = 0; i < 5; i++) {
++        // PATCH(thu-assistant): backport of upstream 3.16.4 fix —
++        // the WebVPN and ID flow may now require more than five hops before landing.
++        for (let i = 0; i < 10; i++) {
+             const response = await (0, cross_fetch_1.default)(location, init);
++            // PATCH(thu-assistant): keep the cookie jar up to date on every hop,
++            // otherwise the login redirect chain bounces forever.
++            response.headers.forEach((value, key) => {
++                if (key === "set-cookie") {
++                    if (value.includes("Expires")) {
++                        const segment = value.split(";")[0];
++                        const [item, val] = segment.split("=");
++                        exports.cookies[item.trim()] = val.trim();
++                    }
++                    else {
++                        for (const v of value.split(",")) {
++                            const segment = v.split(";")[0];
++                            const [item, val] = segment.split("=");
++                            if (val) {
++                                exports.cookies[item.trim()] = val.trim();
++                            }
++                        }
++                    }
++                }
++            });
+             if (response.status !== 301 && response.status !== 302) {
+                 return location;
+             }
+-            location = (_a = response.headers.get("Location")) !== null && _a !== void 0 ? _a : "";
++            // PATCH(thu-assistant): resolve possibly-relative Location headers
++            // against the current URL, and re-send the updated cookies.
++            location = new URL((_a = response.headers.get("Location")) !== null && _a !== void 0 ? _a : "", location).toString();
++            init.headers = {
++                ...headers,
++                Cookie: Object.keys(exports.cookies).map((key) => `${key}=${exports.cookies[key]}`).join(";"),
++            };
+         }
+         throw new error_1.ResponseStatusError("Max redirect times reached.");
+     }
