@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "step1": "tsx scripts/step1-infohelper.ts",
+    "step2": "OPENSSL_CONF=${PWD}/openssl.cnf tsx scripts/step2-login.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
@@ -19,5 +20,6 @@
   "dependencies": {
     "@thu-info/lib": "^3.15.2",
     "dotenv": "^16.4.0"
-  }
+  },
+  "packageManager": "pnpm@10.33.0+sha512.10568bb4a6afb58c9eb3630da90cc9516417abebd3fabbe6739f0ae795728da1491e9db5a544c76ad8eb7570f5c4bb3d6c637b2cb41bfdcdb47fa823c8649319"
 }
