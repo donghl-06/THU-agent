@@ -297,7 +297,7 @@ THU-agent/                        ← 项目根（git 仓库）
 
 ```text
 [已完成] Step 0  环境 + 脚手架
-[下一步] Step 1  阅读 thu-info-lib README，跑通 new InfoHelper()
-         Step 2  test-login.ts 登录成功
+[已完成] Step 1  pnpm step1 — InfoHelper 实例化验证通过
+[下一步] Step 2  cp .env.example .env 填入账号 → scripts/step2-login.ts 登录成功
          Step 3  getSchedule() 拿到真实课表
 ```
