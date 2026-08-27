@@ -298,6 +298,9 @@ THU-agent/                        ← 项目根（git 仓库）
 ```text
 [已完成] Step 0  环境 + 脚手架
 [已完成] Step 1  pnpm step1 — InfoHelper 实例化验证通过
-[下一步] Step 2  cp .env.example .env 填入账号 → scripts/step2-login.ts 登录成功
-         Step 3  getSchedule() 拿到真实课表
+[已完成] Step 2  pnpm step2 — 登录 + getUserInfo() 通过（2FA 信任设备、两处库补丁）
+[已完成] Step 3  pnpm step3 — getSchedule() 真实数据链路打通（夏季学期无课属正常）
+[下一步] Step 4  建立 src/client/ThuClient.ts，收拢登录/调用逻辑
+         Step 5  src/skills/base/types.ts 已定（脚手架时已写）
+         Step 6  实现第一个 Skill：get_schedule
 ```
