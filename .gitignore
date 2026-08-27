@@ -1,0 +1,20 @@
+# 依赖
+node_modules/
+
+# 构建产物
+dist/
+
+# 参考仓库（只读，不进 git）
+reference/
+
+# 环境变量与凭证 —— 绝不提交
+.env
+.env.local
+*.secret
+
+# 日志
+*.log
+
+# 系统/编辑器
+.DS_Store
+.vscode/
