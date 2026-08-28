@@ -14,7 +14,7 @@
  */
 import {uFetch, getRedirectUrl} from "@thu-info/lib/dist/utils/network";
 import {sm2} from "sm-crypto";
-import {createHash, createDecipheriv} from "node:crypto";
+import {createHash, createDecipheriv, createCipheriv} from "node:crypto";
 import "../../utils/httpProxy"; // 全局 fetch 走 https_proxy（若设置）
 import {config} from "../../config/env";
 import {ThuError} from "../errors";
@@ -113,6 +113,23 @@ export interface SportsUser {
     id: string;
     nickName?: string;
     account?: string;
+}
+
+/** 滑块拼图验证码（getDragCaptcha 的返回） */
+export interface DragCaptcha {
+    token: string;
+    /** AES-128-ECB 密钥（每次验证码会话独立） */
+    secretKey: string;
+    /** 背景图（base64 PNG） */
+    backgroundBase64: string;
+    /** 拼图块（base64 PNG） */
+    jigsawBase64: string;
+}
+
+/** AES-128-ECB + PKCS7，base64 输出（对齐前端 CryptoJS 与旧项目 captcha.py） */
+function aes128EcbEncrypt(plain: string, key: string): string {
+    const c = createCipheriv("aes-128-ecb", Buffer.from(key, "utf8"), null);
+    return Buffer.concat([c.update(plain, "utf8"), c.final()]).toString("base64");
 }
 
 /** 预约下单结果 */
@@ -310,20 +327,55 @@ export class SportsClient {
         return this.api<SportsUser>("/system/login/getLoginUser");
     }
 
-    /** 预约提交是否需要滑块验证码（/api/reserve/enableValidCode） */
+    /** 预约提交是否需要滑块验证码（/api/reserve/enableValidCode，配置项 RESV_CODE，"1"=开启） */
     async isCaptchaEnabled(): Promise<boolean> {
-        const r = await this.api<unknown>("/api/reserve/enableValidCode");
-        // 返回结构未文档化：布尔/字符串/对象都兜底成"truthy 且不为 false/N/0"
-        if (typeof r === "boolean") return r;
-        if (typeof r === "string") return !["false", "N", "0", ""].includes(r);
-        if (r && typeof r === "object") {
-            const v = (r as Record<string, unknown>);
-            const flag = v.enableValidCode ?? v.enable ?? v.value ?? v.status;
-            if (typeof flag === "string") return !["false", "N", "0", ""].includes(flag);
-            return Boolean(flag);
-        }
-        return Boolean(r);
+        const r = await this.api<{sysValue?: string}>("/api/reserve/enableValidCode");
+        return r?.sysValue === "1";
     }
+
+    /**
+     * 拉取滑块拼图验证码（AJ-Captcha blockPuzzle）。
+     * 注意：这两个端点的响应外壳是 {success, repData}，不是通常的 {code, data}。
+     */
+    async getDragCaptcha(): Promise<DragCaptcha> {
+        await this.login();
+        const resp = (await this.rawRequest("/system/captcha/drag/get", {
+            method: "POST",
+            body: {
+                captchaType: "blockPuzzle",
+                clientUid: createHash("md5").update(`${Date.now()}${Math.random()}`).digest("hex"),
+                ts: Date.now(),
+            },
+        })) as {success?: boolean; repData?: Record<string, string>};
+        const d = resp.repData ?? {};
+        if (!resp.success || !d.secretKey || !d.token || !d.originalImageBase64 || !d.jigsawImageBase64) {
+            throw new ThuError("UPSTREAM_ERROR", "滑块验证码拉取失败（响应结构不完整）");
+        }
+        return {
+            token: d.token,
+            secretKey: d.secretKey,
+            backgroundBase64: d.originalImageBase64,
+            jigsawBase64: d.jigsawImageBase64,
+        };
+    }
+
+    /**
+     * 校验滑块位置并生成 addReserve 的 captcha 字段值。
+     * 加密方式（与前端 CryptoJS 一致）：AES-128-ECB + PKCS7，key = secretKey 的 UTF-8 字节。
+     */
+    async verifyDragCaptcha(cap: DragCaptcha, x: number): Promise<string> {
+        const pointJson = aes128EcbEncrypt(JSON.stringify({x, y: 5}), cap.secretKey);
+        const resp = (await this.rawRequest("/system/captcha/drag/check", {
+            method: "POST",
+            body: {captchaType: "blockPuzzle", pointJson, token: cap.token},
+        })) as {success?: boolean; repData?: {result?: boolean}};
+        if (!resp.success || resp.repData?.result !== true) {
+            throw new ThuError("UPSTREAM_ERROR", "滑块验证码校验未通过（X 坐标不对？可以重试）");
+        }
+        // 预约提交用：AES(token + "---" + {"x":X,"y":5})
+        return aes128EcbEncrypt(`${cap.token}---${JSON.stringify({x, y: 5})}`, cap.secretKey);
+    }
+
 
     /**
      * 预约一个场次（写操作，会真实下单）。

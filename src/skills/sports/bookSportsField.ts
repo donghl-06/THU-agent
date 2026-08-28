@@ -16,6 +16,10 @@ import {ThuError} from "../../client/errors";
 import {fail, ok, type Skill, type SkillResult} from "../base/types";
 import {formatDate, parseDate} from "../base/dateUtils";
 
+/** 滑块验证码求解器：拿到背景图/拼图块（base64 PNG），返回缺口 X 坐标。
+ *  由运行环境提供（CLI：存图给用户看、人工报 X；未来可换图像识别自动解） */
+export type CaptchaSolver = (images: {backgroundBase64: string; jigsawBase64: string}) => Promise<number>;
+
 export interface BookSportsFieldData {
     venue: string;
     field: string;
@@ -30,11 +34,14 @@ export interface BookSportsFieldData {
     message: string;
 }
 
-type SportsBooker = Pick<SportsClient, "listScenes" | "getFieldPage" | "bookSession">;
+type SportsBooker = Pick<
+    SportsClient,
+    "listScenes" | "getFieldPage" | "bookSession" | "isCaptchaEnabled" | "getDragCaptcha" | "verifyDragCaptcha"
+>;
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
-export function createBookSportsFieldSkill(client: SportsBooker): Skill {
+export function createBookSportsFieldSkill(client: SportsBooker, opts: {captchaSolver?: CaptchaSolver} = {}): Skill {
     return {
         name: "book_sports_field",
         description:
@@ -131,6 +138,24 @@ export function createBookSportsFieldSkill(client: SportsBooker): Skill {
                     chosen = named;
                 }
 
+                // 验证码：系统开启滑块验证时，先过码再下单。
+                // 没有过码器的环境直接报错，不静默失败。
+                let captcha: string | undefined;
+                if (await client.isCaptchaEnabled()) {
+                    if (!opts.captchaSolver) {
+                        return fail(
+                            "CAPTCHA_REQUIRED",
+                            "当前预约需要滑块验证码，但运行环境没有提供过码方式（CLI 下会把图给用户看、人工报位置）。",
+                        );
+                    }
+                    const cap = await client.getDragCaptcha();
+                    const x = await opts.captchaSolver({
+                        backgroundBase64: cap.backgroundBase64,
+                        jigsawBase64: cap.jigsawBase64,
+                    });
+                    captcha = await client.verifyDragCaptcha(cap, x);
+                }
+
                 const result: BookResult = await client.bookSession({
                     sceneUuid: scene.uuid,
                     sceneUseType: "SPORT_GROUP",
@@ -141,6 +166,7 @@ export function createBookSportsFieldSkill(client: SportsBooker): Skill {
                     date: dateStr,
                     startTime: chosen.session.start,
                     endTime: chosen.session.end,
+                    ...(captcha ? {captcha} : {}),
                 });
 
                 const time = `${chosen.session.start}-${chosen.session.end}`;

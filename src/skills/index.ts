@@ -10,9 +10,14 @@ import {createGetCampusCardInfoSkill} from "./card/getCampusCardInfo";
 import {createGetClassroomStateSkill} from "./classroom/getClassroomState";
 import {createGetLibrarySeatsSkill} from "./library/getLibrarySeats";
 import {createGetSportsResourcesSkill} from "./sports/getSportsResources";
-import {createBookSportsFieldSkill} from "./sports/bookSportsField";
+import {createBookSportsFieldSkill, type CaptchaSolver} from "./sports/bookSportsField";
 
-export function createAllSkills(): Skill[] {
+export interface SkillAssemblyOptions {
+    /** 滑块验证码求解器（CLI 人工过码）。不提供时预约遇验证码会报 CAPTCHA_REQUIRED */
+    captchaSolver?: CaptchaSolver;
+}
+
+export function createAllSkills(opts: SkillAssemblyOptions = {}): Skill[] {
     const thu = new ThuClient();
     const sports = new SportsClient();
     return [
@@ -22,6 +27,6 @@ export function createAllSkills(): Skill[] {
         createGetLibrarySeatsSkill(thu),
         createGetSportsResourcesSkill(sports),
         // 写操作：Harness 会在执行前向用户确认（requiresConfirmation）
-        createBookSportsFieldSkill(sports),
+        createBookSportsFieldSkill(sports, {captchaSolver: opts.captchaSolver}),
     ];
 }

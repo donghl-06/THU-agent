@@ -96,12 +96,16 @@ Iso10126 填充，base64。当前用到的端点都是明文 JSON，先保留兜
   需到官方网页/App 完成支付，超时订单取消；`freeOrder` = 免费场次直接成功。
 - `payType` 枚举：`PAY_ONLINE`（线上）/ `PAY_OFFLINE`（线下，不产生线上扣款）/ `PAY_CARD`（次卡，需 purchaseUuid）。
 - `formParam`：`{formId: 场地 formRuleVo.formUuid（无则""), deployUuid:"", variables:{}, chooseCandidates:{}}`。
-- **验证码**：提交阶段可能需要滑块拼图验证码（AJ-Captcha 系）。
-  链：`POST /system/captcha/drag/get`（拿背景图+拼图+secretKey+token）→
-  图像匹配求缺口 X → `POST /system/captcha/drag/check`（pointJson 用 AES-128-ECB/secretKey 加密）
-  → addReserve 的 `captcha` 字段 = AES_ECB(token + "---" + {"x":X,"y":5}, secretKey)。
-  是否开启由 `GET /api/reserve/enableValidCode` 决定。解法参考用户已验证的旧项目
-  （OpenCV 模板匹配本地解 / 第三方打码 / 人工兜底），本项目暂未实装自动过码。
+- **验证码**：提交阶段需要滑块拼图验证码（AJ-Captcha blockPuzzle；
+  `GET /api/reserve/enableValidCode` 实测返回配置项 `sysKey=RESV_CODE, sysValue="1"` = 开启）。
+  链：`POST /system/captcha/drag/get`（body: `{captchaType:"blockPuzzle", clientUid, ts}`，
+  响应外壳是 `{success, repData}` 而非常规 `{code, data}`，
+  repData 含 `secretKey/token/originalImageBase64/jigsawImageBase64`）→
+  求缺口 X → `POST /system/captcha/drag/check`（`pointJson` = AES-128-ECB-PKCS7
+  加密 `{"x":X,"y":5}`，key=secretKey，base64）→
+  addReserve 的 `captcha` 字段 = 同法加密 `token + "---" + {"x":X,"y":5}`。
+  SportsClient 已实现 getDragCaptcha/verifyDragCaptcha；X 的求解由运行环境注入
+  （CLI 存图人工报坐标，即旧项目 ManualSolver 思路；OpenCV 自动解可后续移植）。
 
 ### 与真实抓包的差异修正（2026-08-29，来自用户旧项目 auto--badminton-booking-system）
 

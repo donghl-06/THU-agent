@@ -65,7 +65,31 @@ const confirmWrite = async (call: {function: {name: string; arguments: string}})
     return answer === "y" || answer === "yes";
 };
 
-const agent = new Agent(createAllSkills(), SYSTEM_PROMPT, undefined, confirmWrite);
+/**
+ * 人工滑块过码：把背景图和拼图块存到临时目录，请用户看图报缺口 X 坐标。
+ * （用户旧项目 ManualSolver 同款思路；以后可换图像识别自动解）
+ */
+const manualCaptchaSolver = async (images: {backgroundBase64: string; jigsawBase64: string}): Promise<number> => {
+    const {writeFileSync} = await import("node:fs");
+    const {tmpdir} = await import("node:os");
+    const {join} = await import("node:path");
+    const bgPath = join(tmpdir(), "captcha-bg.png");
+    const jigsawPath = join(tmpdir(), "captcha-jigsaw.png");
+    writeFileSync(bgPath, Buffer.from(images.backgroundBase64, "base64"));
+    writeFileSync(jigsawPath, Buffer.from(images.jigsawBase64, "base64"));
+    console.log("\n🧩 预约需要滑块验证码。请打开这两张图，看拼图缺口在背景图里的水平位置：");
+    console.log(`    背景图：${bgPath}`);
+    console.log(`    拼图块：${jigsawPath}`);
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+        const answer = (await promptUser("    缺口左边缘的 X 坐标（像素，如 152）：")).trim();
+        const x = Number.parseInt(answer, 10);
+        if (Number.isFinite(x) && x >= 0 && x <= 400) return x;
+        console.log("    请输入 0-400 的整数像素值。");
+    }
+};
+
+const agent = new Agent(createAllSkills({captchaSolver: manualCaptchaSolver}), SYSTEM_PROMPT, undefined, confirmWrite);
 
 console.log("清华小助手已就绪（输入 exit 退出）\n");
 

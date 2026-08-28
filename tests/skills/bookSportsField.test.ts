@@ -28,21 +28,24 @@ const FIELDS: SportsField[] = [
     field("f3", "羽03", [{uuid: "s3", start: "06:00", end: "08:00", available: false}]),
 ];
 
-function fakeClient(bookImpl?: () => Promise<BookResult>) {
-    const calls: {sceneUuid: string; sessionUuid: string; siteUuid: string}[] = [];
+function fakeClient(opts: {bookImpl?: () => Promise<BookResult>; captcha?: boolean} = {}) {
+    const calls: {sceneUuid: string; sessionUuid: string; siteUuid: string; captcha?: string}[] = [];
     return {
         calls,
         listScenes: async () => SCENES,
         getFieldPage: async (sceneUuid: string) => sceneUuid === "u1" ? FIELDS : [],
-        bookSession: async (req: {sceneUuid: string; sessionUuid: string; siteUuid: string}): Promise<BookResult> => {
+        isCaptchaEnabled: async () => opts.captcha ?? false,
+        getDragCaptcha: async () => ({token: "t", secretKey: "k", backgroundBase64: "bg", jigsawBase64: "jg"}),
+        verifyDragCaptcha: async (_cap: unknown, x: number) => `captcha-x${x}`,
+        bookSession: async (req: {sceneUuid: string; sessionUuid: string; siteUuid: string; captcha?: string}): Promise<BookResult> => {
             calls.push(req);
-            return bookImpl ? bookImpl() : {resvIds: ["r1"], orderGenerated: false, freeOrder: true};
+            return opts.bookImpl ? opts.bookImpl() : {resvIds: ["r1"], orderGenerated: false, freeOrder: true};
         },
     };
 }
 
-const exec = (client: ReturnType<typeof fakeClient>, input?: unknown) =>
-    createBookSportsFieldSkill(client as never).execute(input) as Promise<{
+const exec = (client: ReturnType<typeof fakeClient>, input?: unknown, captchaSolver?: (images: unknown) => Promise<number>) =>
+    createBookSportsFieldSkill(client as never, captchaSolver ? {captchaSolver: captchaSolver as never} : {}).execute(input) as Promise<{
         success: boolean; data?: BookSportsFieldData; error?: {code: string; message: string};
     }>;
 
@@ -89,12 +92,36 @@ describe("book_sports_field Skill（假数据，不真实下单）", () => {
     });
 
     it("生成待支付订单时如实告知需支付", async () => {
-        const client = fakeClient(async () => ({resvIds: ["r1"], orderGenerated: true, freeOrder: false}));
+        const client = fakeClient({bookImpl: async () => ({resvIds: ["r1"], orderGenerated: true, freeOrder: false})});
         const r = await exec(client, {resourceName: "气膜馆", date: "2026-08-30", sessionStart: "06:00"});
         expect(r.success).toBe(true);
         expect(r.data!.orderGenerated).toBe(true);
         expect(r.data!.message).toContain("支付");
         expect(r.data!.message).toContain("40 元");
+    });
+
+    it("验证码开启且没有过码器时拒绝执行（CAPTCHA_REQUIRED），不下单", async () => {
+        const client = fakeClient({captcha: true});
+        const r = await exec(client, {resourceName: "气膜馆", date: "2026-08-30", sessionStart: "06:00"});
+        expect(r.success).toBe(false);
+        expect(r.error!.code).toBe("CAPTCHA_REQUIRED");
+        expect(client.calls).toHaveLength(0);
+    });
+
+    it("验证码开启时走过码流程：求解器返回 X，captcha 值传给下单", async () => {
+        const client = fakeClient({captcha: true});
+        const solverCalls: unknown[] = [];
+        const r = await exec(
+            client,
+            {resourceName: "气膜馆", date: "2026-08-30", sessionStart: "06:00"},
+            async (images) => {
+                solverCalls.push(images);
+                return 152;
+            },
+        );
+        expect(r.success).toBe(true);
+        expect(solverCalls).toHaveLength(1);
+        expect(client.calls[0].captcha).toBe("captcha-x152");
     });
 
     it("参数校验：缺 resourceName / 非法 sessionStart / 非法日期", async () => {
