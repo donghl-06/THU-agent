@@ -63,12 +63,13 @@ export class ThuClient {
     }
 
     /** 获取课表。nextSemesterIndex 省略时查当前学期 */
-    async getSchedule(nextSemesterIndex?: number): Promise<ReturnType<InfoHelper["getSchedule"]>> {
+    // ReturnType 对 async 方法已含 Promise，不要再包一层
+    async getSchedule(nextSemesterIndex?: number): ReturnType<InfoHelper["getSchedule"]> {
         return this.call(() => this.helper.getSchedule(nextSemesterIndex));
     }
 
     /** 获取当前用户基本信息（姓名、邮箱名） */
-    async getUserInfo(): Promise<ReturnType<InfoHelper["getUserInfo"]>> {
+    async getUserInfo(): ReturnType<InfoHelper["getUserInfo"]> {
         return this.call(() => this.helper.getUserInfo());
     }
 }
