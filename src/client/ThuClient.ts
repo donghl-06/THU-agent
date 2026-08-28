@@ -72,4 +72,27 @@ export class ThuClient {
     async getUserInfo(): ReturnType<InfoHelper["getUserInfo"]> {
         return this.call(() => this.helper.getUserInfo());
     }
+
+    /** 获取校园卡信息（余额、卡片状态等） */
+    async getCampusCardInfo(): ReturnType<InfoHelper["getCampusCardInfo"]> {
+        return this.call(() => this.helper.getCampusCardInfo());
+    }
+
+    /** 获取学期日历（开学日、周数等） */
+    async getCalendar(): ReturnType<InfoHelper["getCalendar"]> {
+        return this.call(() => this.helper.getCalendar());
+    }
+
+    /** 获取可查询的教学楼列表（含查询用的 searchName 与当前周次） */
+    async getClassroomList(): ReturnType<InfoHelper["getClassroomList"]> {
+        return this.call(() => this.helper.getClassroomList());
+    }
+
+    /** 获取某教学楼某周的教室占用状态（42 格 = 7 天 × 每天 6 个时段） */
+    async getClassroomState(
+        building: string,
+        week: number,
+    ): ReturnType<InfoHelper["getClassroomState"]> {
+        return this.call(() => this.helper.getClassroomState(building, week));
+    }
 }

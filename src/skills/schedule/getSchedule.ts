@@ -11,6 +11,7 @@
 import type {ThuClient} from "../../client/ThuClient";
 import {ThuError} from "../../client/errors";
 import {fail, ok, type Skill, type SkillResult} from "../base/types";
+import {dayOfWeekOf, formatDate, parseDate, weekNumberOf} from "../base/dateUtils";
 
 export interface ScheduleCourse {
     name: string;
@@ -36,24 +37,6 @@ export interface ScheduleData {
 
 /** 只依赖 ThuClient 的 getSchedule，方便测试时注入假实现 */
 type ScheduleSource = Pick<ThuClient, "getSchedule">;
-
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-/** 严格解析 YYYY-MM-DD（本地时区），非法日期返回 null */
-function parseDate(s: string): Date | null {
-    if (!DATE_RE.test(s)) return null;
-    const [y, m, d] = s.split("-").map(Number);
-    const date = new Date(y, m - 1, d);
-    if (date.getFullYear() !== y || date.getMonth() !== m - 1 || date.getDate() !== d) {
-        return null; // 如 2026-02-30 会被 JS 静默进位，必须拒绝
-    }
-    return date;
-}
-
-function formatDate(d: Date): string {
-    const p = (n: number) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
 
 export function createGetScheduleSkill(client: ScheduleSource): Skill {
     return {
@@ -98,15 +81,12 @@ export function createGetScheduleSkill(client: ScheduleSource): Skill {
 
             // 3. 规范化输出：按日期过滤当天课程
             const {schedule, calendar} = scheduleData;
-            const dayOfWeek = target.getDay() === 0 ? 7 : target.getDay();
-            // calendar.firstDay 是 "yyyy-MM-dd"，必须用本地时区解析，
-            // 直接 new Date(calendar.firstDay) 会按 UTC 解析导致周次差一天
-            const firstDayTime = parseDate(calendar.firstDay)?.getTime();
-            if (firstDayTime === undefined) {
+            const dayOfWeek = dayOfWeekOf(target);
+            const firstDay = parseDate(calendar.firstDay);
+            if (firstDay === null) {
                 return fail("UPSTREAM_ERROR", `无法解析学期开学日期：${calendar.firstDay}`);
             }
-            const weekNumber =
-                Math.floor((target.getTime() - firstDayTime) / 604800000) + 1;
+            const weekNumber = weekNumberOf(firstDay, target);
 
             const base: ScheduleData = {
                 date: formatDate(target),
