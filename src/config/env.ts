@@ -40,4 +40,19 @@ export const config = {
             return process.env.LLM_MODEL ?? "k3-256k";
         },
     },
+    /** 超级鹰打码平台（预约滑块验证码用，单次约 0.01 元）。不预约可不填 */
+    chaojiying: {
+        get user() {
+            return process.env.CJY_USER ?? "";
+        },
+        get password() {
+            return process.env.CJY_PASSWORD ?? "";
+        },
+        get softId() {
+            return process.env.CJY_SOFT_ID ?? "";
+        },
+        get configured() {
+            return Boolean(process.env.CJY_USER && process.env.CJY_PASSWORD && process.env.CJY_SOFT_ID);
+        },
+    },
 };

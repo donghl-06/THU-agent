@@ -360,19 +360,20 @@ export class SportsClient {
     }
 
     /**
-     * 校验滑块位置并生成 addReserve 的 captcha 字段值。
-     * 加密方式（与前端 CryptoJS 一致）：AES-128-ECB + PKCS7，key = secretKey 的 UTF-8 字节。
+     * 校验一个滑块候选位置（不抛异常，返回是否通过）。
+     * pointJson = AES-128-ECB-PKCS7 加密 {"x":X,"y":5}（key=secretKey）。
      */
-    async verifyDragCaptcha(cap: DragCaptcha, x: number): Promise<string> {
+    async checkDragCaptcha(cap: DragCaptcha, x: number): Promise<boolean> {
         const pointJson = aes128EcbEncrypt(JSON.stringify({x, y: 5}), cap.secretKey);
         const resp = (await this.rawRequest("/system/captcha/drag/check", {
             method: "POST",
             body: {captchaType: "blockPuzzle", pointJson, token: cap.token},
         })) as {success?: boolean; repData?: {result?: boolean}};
-        if (!resp.success || resp.repData?.result !== true) {
-            throw new ThuError("UPSTREAM_ERROR", "滑块验证码校验未通过（X 坐标不对？可以重试）");
-        }
-        // 预约提交用：AES(token + "---" + {"x":X,"y":5})
+        return resp.success === true && resp.repData?.result === true;
+    }
+
+    /** 校验通过后，生成 addReserve 的 captcha 字段值：AES(token + "---" + {"x":X,"y":5}) */
+    buildCaptchaValue(cap: DragCaptcha, x: number): string {
         return aes128EcbEncrypt(`${cap.token}---${JSON.stringify({x, y: 5})}`, cap.secretKey);
     }
 

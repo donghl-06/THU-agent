@@ -104,8 +104,10 @@ Iso10126 填充，base64。当前用到的端点都是明文 JSON，先保留兜
   求缺口 X → `POST /system/captcha/drag/check`（`pointJson` = AES-128-ECB-PKCS7
   加密 `{"x":X,"y":5}`，key=secretKey，base64）→
   addReserve 的 `captcha` 字段 = 同法加密 `token + "---" + {"x":X,"y":5}`。
-  SportsClient 已实现 getDragCaptcha/verifyDragCaptcha；X 的求解由运行环境注入
-  （CLI 存图人工报坐标，即旧项目 ManualSolver 思路；OpenCV 自动解可后续移植）。
+  SportsClient 已实现 getDragCaptcha/checkDragCaptcha/buildCaptchaValue；
+  X 的求解走超级鹰打码平台（src/client/captcha/chaojiying.ts，移植自旧项目的
+  ChaojiyingSolver：codetype 9900 返回候选缺口矩形，按"矩形高度≈拼图块高度"排序，
+  逐个 drag/check 验证；.env 配 CJY_USER/CJY_PASSWORD/CJY_SOFT_ID，单次约 0.01 元）。
 
 ### 与真实抓包的差异修正（2026-08-29，来自用户旧项目 auto--badminton-booking-system）
 

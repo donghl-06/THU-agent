@@ -11,15 +11,19 @@ import {createGetClassroomStateSkill} from "./classroom/getClassroomState";
 import {createGetLibrarySeatsSkill} from "./library/getLibrarySeats";
 import {createGetSportsResourcesSkill} from "./sports/getSportsResources";
 import {createBookSportsFieldSkill, type CaptchaSolver} from "./sports/bookSportsField";
+import {createChaojiyingSolver} from "../client/captcha/chaojiying";
+import {config} from "../config/env";
 
 export interface SkillAssemblyOptions {
-    /** 滑块验证码求解器（CLI 人工过码）。不提供时预约遇验证码会报 CAPTCHA_REQUIRED */
+    /** 滑块验证码求解器。不提供且 .env 配了超级鹰（CJY_*）时自动用超级鹰；
+     *  两者都没有时预约遇验证码会报 CAPTCHA_REQUIRED */
     captchaSolver?: CaptchaSolver;
 }
 
 export function createAllSkills(opts: SkillAssemblyOptions = {}): Skill[] {
     const thu = new ThuClient();
     const sports = new SportsClient();
+    const captchaSolver = opts.captchaSolver ?? (config.chaojiying.configured ? createChaojiyingSolver() : undefined);
     return [
         createGetScheduleSkill(thu),
         createGetCampusCardInfoSkill(thu),

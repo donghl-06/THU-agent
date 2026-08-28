@@ -36,7 +36,8 @@ function fakeClient(opts: {bookImpl?: () => Promise<BookResult>; captcha?: boole
         getFieldPage: async (sceneUuid: string) => sceneUuid === "u1" ? FIELDS : [],
         isCaptchaEnabled: async () => opts.captcha ?? false,
         getDragCaptcha: async () => ({token: "t", secretKey: "k", backgroundBase64: "bg", jigsawBase64: "jg"}),
-        verifyDragCaptcha: async (_cap: unknown, x: number) => `captcha-x${x}`,
+        checkDragCaptcha: async (_cap: unknown, _x: number) => true,
+        buildCaptchaValue: (_cap: unknown, x: number) => `captcha-x${x}`,
         bookSession: async (req: {sceneUuid: string; sessionUuid: string; siteUuid: string; captcha?: string}): Promise<BookResult> => {
             calls.push(req);
             return opts.bookImpl ? opts.bookImpl() : {resvIds: ["r1"], orderGenerated: false, freeOrder: true};
@@ -44,8 +45,8 @@ function fakeClient(opts: {bookImpl?: () => Promise<BookResult>; captcha?: boole
     };
 }
 
-const exec = (client: ReturnType<typeof fakeClient>, input?: unknown, captchaSolver?: (images: unknown) => Promise<number>) =>
-    createBookSportsFieldSkill(client as never, captchaSolver ? {captchaSolver: captchaSolver as never} : {}).execute(input) as Promise<{
+const exec = (client: ReturnType<typeof fakeClient>, input?: unknown, captchaSolver?: (ctx: {backgroundBase64: string; jigsawBase64: string; tryX: (x: number) => Promise<boolean>}) => Promise<number>) =>
+    createBookSportsFieldSkill(client as never, captchaSolver ? {captchaSolver} : {}).execute(input) as Promise<{
         success: boolean; data?: BookSportsFieldData; error?: {code: string; message: string};
     }>;
 
@@ -108,20 +109,36 @@ describe("book_sports_field Skill（假数据，不真实下单）", () => {
         expect(client.calls).toHaveLength(0);
     });
 
-    it("验证码开启时走过码流程：求解器返回 X，captcha 值传给下单", async () => {
+    it("验证码开启时走过码流程：求解器用 tryX 找到 X，captcha 值传给下单", async () => {
         const client = fakeClient({captcha: true});
         const solverCalls: unknown[] = [];
         const r = await exec(
             client,
             {resourceName: "气膜馆", date: "2026-08-30", sessionStart: "06:00"},
-            async (images) => {
-                solverCalls.push(images);
+            async (ctx) => {
+                solverCalls.push(ctx.backgroundBase64);
+                // 模拟求解器：逐个候选验证，152 通过
+                expect(await ctx.tryX(100)).toBe(true); // 假 client 全部通过
                 return 152;
             },
         );
         expect(r.success).toBe(true);
         expect(solverCalls).toHaveLength(1);
         expect(client.calls[0].captcha).toBe("captcha-x152");
+    });
+
+    it("求解器连续失败时报 CAPTCHA_FAILED，不下单", async () => {
+        const client = fakeClient({captcha: true});
+        const r = await exec(
+            client,
+            {resourceName: "气膜馆", date: "2026-08-30", sessionStart: "06:00"},
+            async () => {
+                throw new Error("3 个候选均未通过验证");
+            },
+        );
+        expect(r.success).toBe(false);
+        expect(r.error!.code).toBe("CAPTCHA_FAILED");
+        expect(client.calls).toHaveLength(0);
     });
 
     it("参数校验：缺 resourceName / 非法 sessionStart / 非法日期", async () => {

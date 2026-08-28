@@ -16,9 +16,14 @@ import {ThuError} from "../../client/errors";
 import {fail, ok, type Skill, type SkillResult} from "../base/types";
 import {formatDate, parseDate} from "../base/dateUtils";
 
-/** 滑块验证码求解器：拿到背景图/拼图块（base64 PNG），返回缺口 X 坐标。
- *  由运行环境提供（CLI：存图给用户看、人工报 X；未来可换图像识别自动解） */
-export type CaptchaSolver = (images: {backgroundBase64: string; jigsawBase64: string}) => Promise<number>;
+/** 滑块验证码求解器：拿到背景图/拼图块（base64 PNG）和一个验证回调，
+ *  逐个候选 X 调 tryX 验证，返回通过验证的缺口 X 坐标。
+ *  由运行环境提供（默认接超级鹰打码平台，见 src/client/captcha/chaojiying.ts） */
+export type CaptchaSolver = (ctx: {
+    backgroundBase64: string;
+    jigsawBase64: string;
+    tryX: (x: number) => Promise<boolean>;
+}) => Promise<number>;
 
 export interface BookSportsFieldData {
     venue: string;
@@ -36,10 +41,12 @@ export interface BookSportsFieldData {
 
 type SportsBooker = Pick<
     SportsClient,
-    "listScenes" | "getFieldPage" | "bookSession" | "isCaptchaEnabled" | "getDragCaptcha" | "verifyDragCaptcha"
+    "listScenes" | "getFieldPage" | "bookSession" | "isCaptchaEnabled" | "getDragCaptcha" | "checkDragCaptcha" | "buildCaptchaValue"
 >;
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+/** 验证码整链重试次数（每次取一张新图重新识别；滑块识别本身有误差） */
+const CAPTCHA_MAX_ATTEMPTS = 3;
 
 export function createBookSportsFieldSkill(client: SportsBooker, opts: {captchaSolver?: CaptchaSolver} = {}): Skill {
     return {
@@ -145,15 +152,31 @@ export function createBookSportsFieldSkill(client: SportsBooker, opts: {captchaS
                     if (!opts.captchaSolver) {
                         return fail(
                             "CAPTCHA_REQUIRED",
-                            "当前预约需要滑块验证码，但运行环境没有提供过码方式（CLI 下会把图给用户看、人工报位置）。",
+                            "当前预约需要滑块验证码，但未配置打码平台。请在 .env 填入超级鹰账号" +
+                            "（CJY_USER/CJY_PASSWORD/CJY_SOFT_ID，注册见 chaojiying.com，单次识别约 0.01 元）。",
                         );
                     }
-                    const cap = await client.getDragCaptcha();
-                    const x = await opts.captchaSolver({
-                        backgroundBase64: cap.backgroundBase64,
-                        jigsawBase64: cap.jigsawBase64,
-                    });
-                    captcha = await client.verifyDragCaptcha(cap, x);
+                    // 每次取新图重新识别：识别有误时换一张图比死磕一张成功率高
+                    for (let attempt = 1; attempt <= CAPTCHA_MAX_ATTEMPTS; attempt++) {
+                        const cap = await client.getDragCaptcha();
+                        try {
+                            const x = await opts.captchaSolver({
+                                backgroundBase64: cap.backgroundBase64,
+                                jigsawBase64: cap.jigsawBase64,
+                                tryX: (candidate) => client.checkDragCaptcha(cap, candidate),
+                            });
+                            captcha = client.buildCaptchaValue(cap, x);
+                            break;
+                        } catch (e) {
+                            if (attempt === CAPTCHA_MAX_ATTEMPTS) {
+                                const why = e instanceof Error ? e.message : String(e);
+                                return fail(
+                                    "CAPTCHA_FAILED",
+                                    `滑块验证码连续 ${CAPTCHA_MAX_ATTEMPTS} 次识别失败（${why}），未下单。请稍后重试。`,
+                                );
+                            }
+                        }
+                    }
                 }
 
                 const result: BookResult = await client.bookSession({
