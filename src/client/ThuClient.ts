@@ -116,4 +116,13 @@ export class ThuClient {
     ): ReturnType<InfoHelper["getLibrarySectionList"]> {
         return this.call(() => this.helper.getLibrarySectionList(floor, dateChoice));
     }
+
+    /** 获取某场馆项目某天的场地资源（gymId/itemId 见 lib 的 sportsIdInfoList） */
+    async getSportsResources(
+        gymId: string,
+        itemId: string,
+        date: string,
+    ): ReturnType<InfoHelper["getSportsResources"]> {
+        return this.call(() => this.helper.getSportsResources(gymId, itemId, date));
+    }
 }
