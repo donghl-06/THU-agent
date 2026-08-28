@@ -320,6 +320,11 @@ THU-agent/                        ← 项目根（git 仓库）
                   "现在图书馆还有座位吗？"（get_library_seats）、
                   "今晚气膜馆羽毛球还有场吗？"（get_sports_resources）
                   双层测试 40 个全绿（harness 单测用脚本化假 LLM + Kimi 真实链路集成测试）
-[下一步] Step 12 V0.2 里程碑：多 Skill 串联——"我今晚没课的话想去打羽毛球，
-                  帮我看看什么时候合适"，验证模型自主组合 get_schedule + get_sports_resources
+[已完成] Step 12 V0.2 里程碑 🎉🎉：多 Skill 串联真实验证通过——
+                  "我今晚没课的话想去打羽毛球，帮我看看什么时候合适"
+                  模型自主连调 get_schedule + get_sports_resources，
+                  综合两者给出建议（"今天没课随便安排；黄金时段已订完，
+                  只剩 22:00 后夜场，气膜馆 12 片全空……"），还主动提出查明天。
+                  至此系统真正具有 Agent 特征，不再是 API Chatbot
+[下一步] Step 13 Write Skills + 用户确认流（预约等写操作，模型提议→用户确认→才执行）
 ```
