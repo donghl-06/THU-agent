@@ -19,6 +19,20 @@ const echoSkill: Skill = {
     },
 };
 
+/** 写操作测试 Skill：记录是否被执行 */
+function fakeWriteSkill(state: {executed: boolean}): Skill {
+    return {
+        name: "book_thing",
+        description: "预约测试，仅测试用",
+        inputSchema: {type: "object", properties: {what: {type: "string"}}},
+        requiresConfirmation: true,
+        async execute(input) {
+            state.executed = true;
+            return ok({booked: input});
+        },
+    };
+}
+
 /** 脚本化假 LLM：按队列依次返回预设的 message，记下发来的 messages */
 function fakeLlm(script: ChatMessage[]): LlmClient & {seen: ChatMessage[][]} {
     const seen: ChatMessage[][] = [];
@@ -140,5 +154,40 @@ describe("Agent Loop", () => {
         await agent.ask("我刚才说什么了？");
         // 第二次调用应带着完整历史
         expect(llm.seen[1].map((m) => m.role)).toEqual(["system", "user", "assistant", "user"]);
+    });
+});
+
+describe("写操作确认流", () => {
+    it("用户同意后写操作才真正执行", async () => {
+        const state = {executed: false};
+        const llm = fakeLlm([toolCallMsg("book_thing", {what: "羽毛球"}), textMsg("订好了")]);
+        const confirm = async () => true; // 模拟用户输入 y
+        const agent = new Agent([fakeWriteSkill(state)], "你是测试助手", llm, confirm);
+        const result = await agent.ask("帮我订");
+        expect(state.executed).toBe(true);
+        expect(result.answer).toBe("订好了");
+        expect(JSON.parse(result.toolCalls[0].result).success).toBe(true);
+    });
+
+    it("用户拒绝时不执行，并把 USER_REJECTED 喂回模型", async () => {
+        const state = {executed: false};
+        const llm = fakeLlm([toolCallMsg("book_thing", {what: "羽毛球"}), textMsg("好的，已取消")]);
+        const confirm = async () => false; // 模拟用户输入 n
+        const agent = new Agent([fakeWriteSkill(state)], "你是测试助手", llm, confirm);
+        const result = await agent.ask("帮我订");
+        expect(state.executed).toBe(false);
+        const toolResult = JSON.parse(result.toolCalls[0].result);
+        expect(toolResult.success).toBe(false);
+        expect(toolResult.error.code).toBe("USER_REJECTED");
+        expect(result.answer).toBe("好的，已取消");
+    });
+
+    it("没有确认通道的环境拒绝执行写操作（fail closed）", async () => {
+        const state = {executed: false};
+        const llm = fakeLlm([toolCallMsg("book_thing", {what: "羽毛球"}), textMsg("这里没法确认")]);
+        const agent = new Agent([fakeWriteSkill(state)], "你是测试助手", llm); // 不传 confirm
+        const result = await agent.ask("帮我订");
+        expect(state.executed).toBe(false);
+        expect(JSON.parse(result.toolCalls[0].result).error.code).toBe("CONFIRMATION_UNAVAILABLE");
     });
 });

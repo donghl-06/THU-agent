@@ -7,6 +7,7 @@
 import {describe, expect, it} from "vitest";
 import {createGetSportsResourcesSkill, type SportsResourcesData} from "../../src/skills/sports/getSportsResources";
 import type {SportsField} from "../../src/client/sports/SportsClient";
+import {ThuError} from "../../src/client/errors";
 
 const SCENES = [
     {uuid: "u1", sceneName: "气膜馆羽毛球", relatedType: "DEV"},
@@ -23,9 +24,9 @@ function field(
     overall: {reserveStatus: "Y" | "N"; reserveStatusReason?: string} = {reserveStatus: "Y"},
 ): SportsField {
     return {
-        uuid, siteName, siteType: "DEV", kindName: "羽毛球", location: "",
+        uuid, siteName, siteType: "DEV", kindName: "羽毛球", location: "", sceneUuid: "u-x",
         reserveStatus: {...overall, availableRange: []},
-        sessions: sessions.map((s) => ({feeYuan: null, ...s})),
+        sessions: sessions.map((s, i) => ({uuid: `${uuid}-s${i}`, feeYuan: null, ...s})),
         supportPeriod: false,
         bookableWindow: null,
         feeRuleVo: null,
@@ -119,7 +120,7 @@ describe("get_sports_resources Skill（假数据，无网络）", () => {
         const client = {
             listScenes: async () => [{uuid: "u9", sceneName: "测试馆", relatedType: "DEV"}],
             getFieldPage: async (): Promise<SportsField[]> => [{
-                uuid: "f9", siteName: "测01", siteType: "DEV", kindName: "测试", location: "",
+                uuid: "f9", siteName: "测01", siteType: "DEV", kindName: "测试", location: "", sceneUuid: "u9",
                 reserveStatus: {reserveStatus: "Y", availableRange: [{startTime: "06:00", endTime: "09:00"}]},
                 sessions: [],
                 supportPeriod: true,
@@ -141,9 +142,9 @@ describe("get_sports_resources Skill（假数据，无网络）", () => {
         const client = {
             listScenes: async () => [{uuid: "u8", sceneName: "夜场馆", relatedType: "DEV"}],
             getFieldPage: async (): Promise<SportsField[]> => [{
-                uuid: "f8", siteName: "夜01", siteType: "DEV", kindName: "羽毛球", location: "",
+                uuid: "f8", siteName: "夜01", siteType: "DEV", kindName: "羽毛球", location: "", sceneUuid: "u8",
                 reserveStatus: {reserveStatus: "Y", availableRange: [{startTime: "22:00", endTime: "23:59"}]},
-                sessions: [{start: "20:00", end: "22:00", available: false, reason: "场次已被锁场", feeYuan: 40}],
+                sessions: [{uuid: "f8-s0", start: "20:00", end: "22:00", available: false, reason: "场次已被锁场", feeYuan: 40}],
                 supportPeriod: false,
                 bookableWindow: {start: "08:00", end: "23:59"},
                 feeRuleVo: null,
@@ -155,6 +156,24 @@ describe("get_sports_resources Skill（假数据，无网络）", () => {
         };
         expect(r.success).toBe(true);
         expect(r.data!.venues[0].sessions).toHaveLength(0); // 22:00-23:59 不得出现
+    });
+
+    it("单场景查询失败时降级为 note，不影响其他场景", async () => {
+        const client = {
+            listScenes: async () => SCENES,
+            getFieldPage: async (sceneUuid: string, _date: string): Promise<SportsField[]> => {
+                if (sceneUuid === "u2") throw new ThuError("NETWORK_ERROR", "体育系统网络请求失败（fetch failed）");
+                return FIELDS[sceneUuid] ?? [];
+            },
+        };
+        const s = createGetSportsResourcesSkill(client as never);
+        const r = (await s.execute({resourceName: "羽毛球", date: "2026-08-29"})) as {
+            success: boolean; data?: SportsResourcesData;
+        };
+        expect(r.success).toBe(true);
+        // 气膜馆正常出数据，综体的失败写进 note
+        expect(r.data!.venues[0].sessions.length).toBeGreaterThan(0);
+        expect(r.data!.note).toContain("综体羽毛球（查询失败");
     });
 
     it("全部未开放时正常返回空 sessions + note（暑假闭馆场景）", async () => {

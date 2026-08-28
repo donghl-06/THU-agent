@@ -7,7 +7,7 @@
  * Skill 不负责：LLM 推理、规划、对话状态、Prompt、工具路由、Agent Loop。
  */
 
-/** JSON Schema 的宽松表示，用于描述 Skill 输入参数（会原样发给 DeepSeek） */
+/** JSON Schema 的宽松表示，用于描述 Skill 输入参数（会原样发给 LLM） */
 export type JSONSchema = Record<string, unknown>;
 
 export interface Skill {
@@ -20,7 +20,14 @@ export interface Skill {
     /** 参数的 JSON Schema。模型只靠它填参数，务必写清楚 */
     inputSchema: JSONSchema;
 
-    /** 执行入口。必须能脱离 DeepSeek / Harness / Chat UI 独立调用 */
+    /**
+     * 为 true 表示这是写操作（预约/取消/充值等）。
+     * Harness 必须在执行前把操作详情展示给用户、拿到明确同意；
+     * 没有确认通道的环境必须拒绝执行（fail closed，plan4ai.md 安全红线）。
+     */
+    requiresConfirmation?: boolean;
+
+    /** 执行入口。必须能脱离 LLM / Harness / Chat UI 独立调用 */
     execute(input: unknown): Promise<SkillResult>;
 }
 

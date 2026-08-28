@@ -16,6 +16,7 @@ export type ThuErrorCode =
     | "NETWORK_ERROR" // 网络不通（清华服务器偶发，重试通常有效）
     | "TIMEOUT" // 请求超时
     | "UPSTREAM_ERROR" // 清华服务端返回异常状态
+    | "MAINTENANCE" // 服务端计划维护中（公告里含维护时间段）
     | "LIB_ERROR" // 库抛出的其他业务错误（保留原始 message）
     | "UNKNOWN";
 

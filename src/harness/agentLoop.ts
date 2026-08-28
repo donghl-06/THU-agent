@@ -10,7 +10,7 @@
  */
 import type {Skill} from "../skills/base/types";
 import {createLlmClient, type LlmClient} from "./llmClient";
-import {ToolRegistry} from "./toolRegistry";
+import {ToolRegistry, type ConfirmFn} from "./toolRegistry";
 import type {ChatMessage} from "./types";
 
 /** 单轮对话最多允许的工具调用轮数（防模型失控死循环） */
@@ -28,9 +28,15 @@ export class Agent {
     private readonly registry: ToolRegistry;
     private readonly messages: ChatMessage[] = [];
 
-    constructor(skills: Skill[], systemPrompt: string, llm?: LlmClient) {
+    /**
+     * @param skills 注册的技能清单
+     * @param systemPrompt 系统提示词
+     * @param llm 可选注入（测试用假 LLM）
+     * @param confirm 写操作的用户确认回调；不写则写操作一律拒绝执行
+     */
+    constructor(skills: Skill[], systemPrompt: string, llm?: LlmClient, confirm?: ConfirmFn) {
         this.llm = llm ?? createLlmClient();
-        this.registry = new ToolRegistry(skills);
+        this.registry = new ToolRegistry(skills, confirm);
         this.messages.push({role: "system", content: systemPrompt});
     }
 

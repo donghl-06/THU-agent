@@ -3,14 +3,23 @@
  *
  * 模型只能通过 name/description/inputSchema 认识工具——这三个字段的
  * 质量直接决定模型会不会用对工具（plan4ai.md 第 5 节）。
+ *
+ * 写操作安全闸：标了 requiresConfirmation 的 Skill，执行前必须过
+ * confirm 回调（由 UI 层实现，向用户展示操作并等明确同意）。
+ * 没配 confirm 回调时写操作一律拒绝执行（fail closed）。
  */
 import type {Skill, SkillResult} from "../skills/base/types";
 import type {ToolCall, ToolSchema} from "./types";
 
+/** 用户确认回调：展示这次写操作，返回用户是否同意执行 */
+export type ConfirmFn = (call: ToolCall, skill: Skill) => Promise<boolean>;
+
 export class ToolRegistry {
     private readonly skills = new Map<string, Skill>();
+    private readonly confirm?: ConfirmFn;
 
-    constructor(skills: Skill[]) {
+    constructor(skills: Skill[], confirm?: ConfirmFn) {
+        this.confirm = confirm;
         for (const s of skills) {
             if (this.skills.has(s.name)) {
                 throw new Error(`重复的 Skill 名：${s.name}`);
@@ -44,6 +53,20 @@ export class ToolRegistry {
                 success: false,
                 error: {code: "BAD_ARGUMENTS", message: `工具参数不是合法 JSON：${call.function.arguments.slice(0, 200)}`},
             } satisfies SkillResult);
+        }
+        if (skill.requiresConfirmation) {
+            if (!this.confirm) {
+                return JSON.stringify({
+                    success: false,
+                    error: {code: "CONFIRMATION_UNAVAILABLE", message: "这是写操作，需要用户确认，但当前环境没有确认通道，已拒绝执行。"},
+                } satisfies SkillResult);
+            }
+            if (!(await this.confirm(call, skill))) {
+                return JSON.stringify({
+                    success: false,
+                    error: {code: "USER_REJECTED", message: "用户拒绝了这次操作，未执行。请告知用户已取消，不要再自动重试。"},
+                } satisfies SkillResult);
+            }
         }
         const result = await skill.execute(input);
         return JSON.stringify(result);

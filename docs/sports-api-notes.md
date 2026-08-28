@@ -39,11 +39,16 @@ sign = MD5("appId=<appId>&nonce=<nonce>&timeStamp=<timeStamp>&key=57325972627c40
 
 key 是原厂前端混淆硬编码（chunk.chunk-common 模块 bac8/df43），所有学校部署通用。
 
-## 限流
+## 限流与维护
 
-服务端有频率限制，突发请求返回 `{"code":500,"message":"请求频繁，请稍后再试"}`。
-SportsClient 对限流做线性退避重试（1.5s 起步，最多 3 次）；调用方应避免大规模并行
-（多场景查询请串行）。
+- **限流**：服务端有频率限制，突发请求返回 `{"code":500,"message":"请求频繁，请稍后再试"}`。
+  SportsClient 对限流做线性退避重试（1.5s 起步，最多 3 次）；调用方应避免大规模并行
+  （多场景查询请串行）。
+- **每日维护**：每天凌晨 01:00–02:00 系统维护，期间 SSO 入口不跳转（返回 200 +
+  `{"code":500,"message":"系统维护中, 维护时间01:00 - 02:00"}`），API 同样返回该公告，
+  部分连接直接断开。SportsClient 识别后抛 `ThuError("MAINTENANCE", …)`，
+  错误信息里带维护时间段（2026-08-29 实测）。
+- 网络层失败（TIMEOUT/NETWORK_ERROR）同样退避重试（全场景查询百余请求，单次抖动不应整体失败）。
 
 ## 响应加密（兜底）
 
@@ -60,6 +65,38 @@ Iso10126 填充，base64。当前用到的端点都是明文 JSON，先保留兜
 | `/venue/site/api/site/choose` | GET | `sceneUuid, siteType, siteUuid` | 位置级联：CAMPUS→BUILDING→FLOOR→ROOM，逐级传上一级 uuid |
 | `/venue/site/api/reserve/current/page` | POST | 见下 | 某场景某天的场地列表（**必须按房间维度查**） |
 | `/venue/site/api/reserve/current/detail` | POST | 见下 | 单块场地的分时详情 |
+| `/venue/site/system/login/getLoginUser` | GET | — | 当前登录用户 `{id, nickName, account, ...}`（预约的 resvMember 需要 id） |
+| `/venue/site/api/reserve/addReserve` | POST | 见下 | 下单预约（写操作） |
+| `/venue/site/resv/order/check` | POST | `{resvUuidList, userId}` | 下单后检查是否生成待支付订单 `{orderGenerated, freeOrder}` |
+| `/venue/site/api/reserve/reserveRecord` | POST | — | 我的预约记录 |
+| `/venue/site/api/reserve/cancelReserve` | POST | — | 取消预约（未实装） |
+
+**addReserve** body（单场地单场次，逆向自前端 chunk-0e504f6d 的 addReserve/submit 方法）：
+
+```json
+{
+  "sceneUuid": "<场景uuid>",
+  "sceneUseType": "SPORT_GROUP",
+  "siteUuid": "<场地uuid>",
+  "siteType": "DEV",
+  "reserveTime": [{"sessionDetailUuid": "<场次uuid>",
+                   "reserveTime": {"startTime": "YYYY-MM-DD HH:mm:00", "endTime": "YYYY-MM-DD HH:mm:00"}}],
+  "siteSessionReserve": [<同上结构>],
+  "resvMember": ["<getLoginUser 的 id>"],
+  "resvKind": "CURRENT_RESERVE",
+  "payType": "PAY_ONLINE",
+  "purchaseUuid": "",
+  "formParam": {},
+  "captcha": ""
+}
+```
+
+- 成功返回 `data.resvIds`（数组）；多场地用 `addMultiReserve` + `multiSiteSessionReserve`（未实装）。
+- 下单后必须 `orderCheck`：`orderGenerated && !freeOrder` = 生成了待支付订单，
+  需到官方网页/App 完成支付，超时订单取消；`freeOrder` = 免费场次直接成功。
+- `payType` 枚举：`PAY_ONLINE`（默认，线上）/ `PAY_OFFLINE`（线下）/ `PAY_CARD`（次卡，需 purchaseUuid）。
+- `formParam`：场地有 `formRuleVo`（申请表单）时需填 `formId` 等；气膜馆等无表单场景传 `{}`。
+- 部分场景可能开验证码（前端 `hasVerify`），遇到时 addReserve 会报错，暂不支持自动过验证码。
 
 **current/page** body（缺 classTypeEnum/classTypeUuid/sceneUseType 会返回空列表）：
 

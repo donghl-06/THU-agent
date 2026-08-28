@@ -139,22 +139,31 @@ export function createGetSportsResourcesSkill(client: SportsSource): Skill {
                 }
 
                 // 串行查询：每个场景内部要走位置级联（4 级）+ 按房间查询，
-                // 并行容易触发服务端限流（"请求频繁"）
-                const fieldLists: SportsField[][] = [];
+                // 并行容易触发服务端限流（"请求频繁"）。
+                // 单场景失败（网络抖动等）降级为 note，不拖累其他场景。
+                const fieldLists: (SportsField[] | null)[] = [];
+                const failedScenes: string[] = [];
                 for (const s of matched) {
-                    fieldLists.push(await client.getFieldPage(s.uuid, dateStr));
+                    try {
+                        fieldLists.push(await client.getFieldPage(s.uuid, dateStr));
+                    } catch (e) {
+                        fieldLists.push(null);
+                        failedScenes.push(
+                            `${s.sceneName}（查询失败：${e instanceof ThuError ? e.message : "未知错误"}）`,
+                        );
+                    }
                 }
 
                 const venues: SportsVenue[] = matched.map((scene, i) => ({
                     name: scene.sceneName,
-                    sessions: aggregateSessions(fieldLists[i]),
+                    sessions: fieldLists[i] === null ? [] : aggregateSessions(fieldLists[i]),
                 }));
 
                 // 收集不可约原因：整个场景没有任何可订场次时给出解释
-                const closedReasons = new Set<string>();
+                const closedReasons = new Set<string>(failedScenes);
                 venues.forEach((venue, i) => {
-                    if (venue.sessions.length > 0) return;
                     const fields = fieldLists[i];
+                    if (fields === null || venue.sessions.length > 0) return;
                     // 场地整体状态为 N（未开放/表单缺失等）→ 用服务端给的原因；
                     // 状态正常但场次全满/锁场 → 如实说明
                     const allClosed = fields.every((f) => f.reserveStatus?.reserveStatus !== "Y");
@@ -169,7 +178,7 @@ export function createGetSportsResourcesSkill(client: SportsSource): Skill {
                     date: dateStr,
                     venues,
                     ...(closedReasons.size > 0
-                        ? {note: `以下场景当前不可预约：${[...closedReasons].join("、")}`}
+                        ? {note: `以下场景暂无可约时段或查询失败：${[...closedReasons].join("、")}`}
                         : {}),
                 });
             } catch (e) {

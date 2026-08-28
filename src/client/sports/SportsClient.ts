@@ -46,6 +46,8 @@ export interface SportsScene {
 
 /** 一个场次（分时预约的最小单元，如 06:00-08:00） */
 export interface SportsSession {
+    /** 场次 uuid（预约提交时的 sessionDetailUuid） */
+    uuid: string;
     /** "HH:MM" */
     start: string;
     end: string;
@@ -63,6 +65,8 @@ export interface SportsField {
     siteType: string;
     kindName: string;
     location: string;
+    /** 所属场景 uuid（预约提交用） */
+    sceneUuid: string;
     reserveStatus: {
         reserveStatus: "Y" | "N";
         reserveStatusReason?: string;
@@ -101,6 +105,23 @@ interface SportsApiResponse<T> {
     count?: number;
 }
 
+/** 当前登录用户信息（getLoginUser） */
+export interface SportsUser {
+    id: string;
+    nickName?: string;
+    account?: string;
+}
+
+/** 预约下单结果 */
+export interface BookResult {
+    /** 预约记录 uuid 列表 */
+    resvIds: string[];
+    /** 是否生成了订单 */
+    orderGenerated: boolean;
+    /** 是否免支付（免费场次） */
+    freeOrder: boolean;
+}
+
 export class SportsClient {
     private accessToken = "";
     /** 进行中的登录 Promise，防并发重复登录（与 lib 的 outstandingLoginPromise 同思路） */
@@ -119,6 +140,9 @@ export class SportsClient {
         // ① SSO 入口 → 应落在 id.tsinghua.edu.cn 直连登录表单
         const formUrl = await getRedirectUrl(SSO_ENTRY);
         if (!formUrl?.includes("id.tsinghua.edu.cn") || !formUrl.includes("/auth/login/form")) {
+            // 系统维护时 SSO 入口不跳转，直接返回 200 + 维护公告 JSON
+            const maintenance = await this.probeMaintenance();
+            if (maintenance) throw new ThuError("MAINTENANCE", maintenance);
             throw new ThuError("UPSTREAM_ERROR", `体育系统 SSO 链异常，终点：${formUrl}`);
         }
         // ② 表单页抓 SM2 公钥（与库登录同一方案）
@@ -166,6 +190,16 @@ export class SportsClient {
         this.accessToken = tokenJson.data.token;
     }
 
+    /** 系统维护探测：返回人性化的维护提示，不在维护期返回 null */
+    private async probeMaintenance(): Promise<string | null> {
+        try {
+            const body = await uFetch(SSO_ENTRY);
+            const m = /系统维护中[，,]?\s*维护时间([^"]+)/.exec(body);
+            if (m) return `体育系统维护中（维护时间${m[1].trim()}），请维护结束后再试。`;
+        } catch { /* 探测失败就走原报错 */ }
+        return null;
+    }
+
     /** 请求签名参数（每个 API 调用都要，见 docs/sports-api-notes.md） */
     private signParams(): string {
         const nonce = Array.from({length: 32},
@@ -201,7 +235,8 @@ export class SportsClient {
             if (e instanceof Error && e.name === "TimeoutError") {
                 throw new ThuError("TIMEOUT", "体育系统请求超时，稍后重试通常有效。", e);
             }
-            throw new ThuError("NETWORK_ERROR", "体育系统网络请求失败，请检查网络后重试。", e);
+            // 透出 cause 链上的真实原因（ECONNRESET/ENOTFOUND/…），"fetch failed" 本身没有信息量
+            throw new ThuError("NETWORK_ERROR", `体育系统网络请求失败（${networkCause(e)}），稍后重试通常有效。`, e);
         }
         const text = await resp.text();
         try {
@@ -219,29 +254,111 @@ export class SportsClient {
         }
     }
 
-    /** 统一 API 入口：确保已登录 + token 过期自动重登一次 + 限流退避重试 + 错误归一化 */
+    /** 统一 API 入口：确保已登录 + token 过期自动重登一次 + 限流退避重试 + 网络抖动重试 + 错误归一化 */
     private async api<T>(path: string, opts?: {method?: "GET" | "POST"; body?: unknown}): Promise<T> {
         await this.login();
-        let result = (await this.rawRequest(path, opts)) as SportsApiResponse<T>;
+        let result = (await this.requestWithNetworkRetry(path, opts)) as SportsApiResponse<T>;
         if (result.errorCode === LOGIN_EXPIRED_CODE) {
             this.accessToken = "";
             await this.login();
-            result = (await this.rawRequest(path, opts)) as SportsApiResponse<T>;
+            result = (await this.requestWithNetworkRetry(path, opts)) as SportsApiResponse<T>;
         }
         // 服务端限流（"请求频繁，请稍后再试"）：退避后重试，级联查询容易触发
         for (let retry = 0; retry < RATE_LIMIT_MAX_RETRIES && result.message?.includes("请求频繁"); retry++) {
             await new Promise((r) => setTimeout(r, RATE_LIMIT_BACKOFF_MS * (retry + 1)));
-            result = (await this.rawRequest(path, opts)) as SportsApiResponse<T>;
+            result = (await this.requestWithNetworkRetry(path, opts)) as SportsApiResponse<T>;
         }
         if (result.code !== 0) {
+            // 系统维护公告（"系统维护中, 维护时间01:00 - 02:00"）单独成类，便于模型如实转告
+            if (result.message?.includes("系统维护中")) {
+                throw new ThuError("MAINTENANCE", `体育系统维护中（${result.message}），请维护结束后再试。`);
+            }
             throw new ThuError("UPSTREAM_ERROR", `体育系统接口报错：${result.message ?? `code=${result.code}`}`);
         }
         return result.data as T;
     }
 
+    /**
+     * 网络层失败（TIMEOUT/NETWORK_ERROR）退避重试。
+     * 全场景查询要串行发百余个请求，任何一次抖动都不应让整体失败。
+     */
+    private async requestWithNetworkRetry(
+        path: string,
+        opts?: {method?: "GET" | "POST"; body?: unknown},
+    ): Promise<unknown> {
+        for (let attempt = 0; ; attempt++) {
+            try {
+                return await this.rawRequest(path, opts);
+            } catch (e) {
+                const retriable = e instanceof ThuError && (e.code === "NETWORK_ERROR" || e.code === "TIMEOUT");
+                if (!retriable || attempt >= RATE_LIMIT_MAX_RETRIES) throw e;
+                await new Promise((r) => setTimeout(r, RATE_LIMIT_BACKOFF_MS * (attempt + 1)));
+            }
+        }
+    }
+
     /** 全部预约场景（气膜馆羽毛球、综体羽毛球、西体台球……） */
     async listScenes(): Promise<SportsScene[]> {
         return this.api<SportsScene[]>("/api/site/scene/list");
+    }
+
+    /** 当前登录用户（预约提交的 resvMember 需要用户 id） */
+    async getLoginUser(): Promise<SportsUser> {
+        return this.api<SportsUser>("/system/login/getLoginUser");
+    }
+
+    /**
+     * 预约一个场次（写操作，会真实下单）。
+     * 链路与前端一致：addReserve → orderCheck（判断是否生成了待支付订单）。
+     * 载荷结构逆向自前端 chunk（docs/sports-api-notes.md）。
+     */
+    async bookSession(req: {
+        sceneUuid: string;
+        sceneUseType: string;
+        siteUuid: string;
+        siteType: string;
+        sessionUuid: string;
+        /** 场次日期 YYYY-MM-DD 与起止 "HH:MM" */
+        date: string;
+        startTime: string;
+        endTime: string;
+    }): Promise<BookResult> {
+        const user = await this.getLoginUser();
+        const sessionItem = {
+            sessionDetailUuid: req.sessionUuid,
+            reserveTime: {
+                startTime: `${req.date} ${req.startTime}:00`,
+                endTime: `${req.date} ${req.endTime}:00`,
+            },
+        };
+        const added = await this.api<{resvIds?: string[]} | string[]>("/api/reserve/addReserve", {
+            method: "POST",
+            body: {
+                sceneUuid: req.sceneUuid,
+                sceneUseType: req.sceneUseType,
+                siteUuid: req.siteUuid,
+                siteType: req.siteType,
+                reserveTime: [sessionItem],
+                siteSessionReserve: [sessionItem],
+                resvMember: [user.id],
+                resvKind: "CURRENT_RESERVE",
+                payType: "PAY_ONLINE",
+                purchaseUuid: "",
+                formParam: {},
+                captcha: "",
+            },
+        });
+        // addReserve 的 data：单场为 {resvIds:[...]}，多场为 [...]（前端两种都处理）
+        const resvIds = Array.isArray(added) ? added : added?.resvIds ?? [];
+        const check = await this.api<{orderGenerated?: boolean; freeOrder?: boolean}>(
+            "/resv/order/check",
+            {method: "POST", body: {resvUuidList: resvIds, userId: user.id}},
+        );
+        return {
+            resvIds,
+            orderGenerated: check?.orderGenerated ?? false,
+            freeOrder: check?.freeOrder ?? false,
+        };
     }
 
     /** 场景的位置级联：校区 → 楼栋 → 楼层 → 房间，返回全部 ROOM 节点 */
@@ -293,6 +410,7 @@ export class SportsClient {
             siteType: f.siteType,
             kindName: f.kindName,
             location: (f as unknown as {siteLocation?: {location?: string}}).siteLocation?.location ?? "",
+            sceneUuid,
             reserveStatus: f.reserveStatus ?? null,
             sessions: parseSessions(f),
             supportPeriod: (f as unknown as {supportPeriod?: string}).supportPeriod === "Y",
@@ -304,6 +422,7 @@ export class SportsClient {
 
 /** sessionVo 原始条目（只取用到的字段） */
 interface RawSession {
+    uuid?: string;
     beginTime?: string;
     endTime?: string;
     reserveStatus?: {reserveStatus?: string; reserveStatusReason?: string};
@@ -315,10 +434,11 @@ function parseSessions(f: SportsField): SportsSession[] {
     const raw = (f as unknown as {sessionVo?: RawSession[]}).sessionVo;
     if (!Array.isArray(raw)) return [];
     return raw
-        .filter((s) => s.beginTime && s.endTime)
+        .filter((s) => s.uuid && s.beginTime && s.endTime)
         .map((s) => {
             const available = s.reserveStatus?.reserveStatus === "Y";
             return {
+                uuid: s.uuid!,
                 start: s.beginTime!,
                 end: s.endTime!,
                 available,
@@ -331,6 +451,17 @@ function parseSessions(f: SportsField): SportsSession[] {
             };
         })
         .sort((a, b) => a.start.localeCompare(b.start));
+}
+
+/** 从 fetch 的 cause 链里挖出真正的底层原因（ECONNRESET/ENOTFOUND/…） */
+function networkCause(e: unknown): string {
+    let cur: unknown = e;
+    const parts: string[] = [];
+    while (cur instanceof Error) {
+        parts.push(cur.message);
+        cur = cur.cause;
+    }
+    return parts.join(" ← ");
 }
 
 /** 从 reserveRule.laterLineTime 解析可约时间窗（"08:00:00" → "08:00"） */
