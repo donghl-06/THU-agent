@@ -7,8 +7,9 @@
  * 模型不需要也不应该传 uuid——输入全是人能读懂的语义参数
  * （场馆关键词/日期/时段/场地名），Skill 内部解析成 sessionUuid 等标识符。
  *
- * 支付说明：付费场次会生成待支付订单（orderGenerated && !freeOrder），
- * 本 Skill 只负责下单，不碰支付；结果里如实告知用户需去官方渠道支付。
+ * 支付说明：下单固定走 PAY_OFFLINE（线下支付），不产生线上扣款；
+ * 付费场次的费用到场馆线下支付。若 orderCheck 仍返回待支付订单
+ * （orderGenerated && !freeOrder），结果里如实告知用户去官方渠道处理。
  */
 import type {BookResult, SportsClient} from "../../client/sports/SportsClient";
 import {ThuError} from "../../client/errors";
@@ -135,6 +136,7 @@ export function createBookSportsFieldSkill(client: SportsBooker): Skill {
                     sceneUseType: "SPORT_GROUP",
                     siteUuid: chosen.field.uuid,
                     siteType: chosen.field.siteType,
+                    formUuid: chosen.field.formUuid,
                     sessionUuid: chosen.session.uuid,
                     date: dateStr,
                     startTime: chosen.session.start,
@@ -143,9 +145,11 @@ export function createBookSportsFieldSkill(client: SportsBooker): Skill {
 
                 const time = `${chosen.session.start}-${chosen.session.end}`;
                 const fee = chosen.session.feeYuan;
+                // 下单走 PAY_OFFLINE（线下支付）：不产生线上扣款。
+                // orderCheck 返回 orderGenerated && !freeOrder 时说明仍需走支付流程，如实告知。
                 const message = result.orderGenerated && !result.freeOrder
-                    ? `已下单，生成了待支付订单${fee !== null ? `（${fee} 元）` : ""}，请尽快到体育场馆预约系统完成支付，超时订单会取消。`
-                    : `预约成功${fee === 0 || result.freeOrder ? "（免费场次，无需支付）" : ""}。`;
+                    ? `已下单，生成了待支付订单${fee !== null ? `（${fee} 元）` : ""}，请到体育场馆预约系统的"我的预约"里完成支付/确认，超时订单会取消。`
+                    : `预约成功（线下支付${fee !== null && fee > 0 ? `，${fee} 元请到场馆支付` : "，本场次免费"}）。`;
                 return ok({
                     venue: scene.sceneName,
                     field: chosen.field.siteName,

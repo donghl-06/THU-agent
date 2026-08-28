@@ -14,6 +14,7 @@ function field(uuid: string, siteName: string, sessions: {uuid: string; start: s
     return {
         uuid, siteName, siteType: "DEV", kindName: "羽毛球", location: "", sceneUuid: "u1",
         reserveStatus: {reserveStatus: "Y", availableRange: []},
+        formUuid: "",
         sessions: sessions.map((s) => ({feeYuan: null, ...s})),
         supportPeriod: false,
         bookableWindow: null,

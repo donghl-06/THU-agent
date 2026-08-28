@@ -5,6 +5,7 @@
  * 错误归一化为带 HTTP 状态码的 Error，由上层决定如何展示。
  */
 import {config} from "../config/env";
+import "../utils/httpProxy"; // 全局 fetch 走 https_proxy（若设置）
 import type {ChatMessage, ChatResponse, ToolSchema} from "./types";
 
 const TIMEOUT_MS = 120_000;

@@ -26,6 +26,7 @@ function field(
     return {
         uuid, siteName, siteType: "DEV", kindName: "羽毛球", location: "", sceneUuid: "u-x",
         reserveStatus: {...overall, availableRange: []},
+        formUuid: "",
         sessions: sessions.map((s, i) => ({uuid: `${uuid}-s${i}`, feeYuan: null, ...s})),
         supportPeriod: false,
         bookableWindow: null,
@@ -122,6 +123,7 @@ describe("get_sports_resources Skill（假数据，无网络）", () => {
             getFieldPage: async (): Promise<SportsField[]> => [{
                 uuid: "f9", siteName: "测01", siteType: "DEV", kindName: "测试", location: "", sceneUuid: "u9",
                 reserveStatus: {reserveStatus: "Y", availableRange: [{startTime: "06:00", endTime: "09:00"}]},
+                formUuid: "",
                 sessions: [],
                 supportPeriod: true,
                 bookableWindow: {start: "08:00", end: "22:00"},
@@ -144,6 +146,7 @@ describe("get_sports_resources Skill（假数据，无网络）", () => {
             getFieldPage: async (): Promise<SportsField[]> => [{
                 uuid: "f8", siteName: "夜01", siteType: "DEV", kindName: "羽毛球", location: "", sceneUuid: "u8",
                 reserveStatus: {reserveStatus: "Y", availableRange: [{startTime: "22:00", endTime: "23:59"}]},
+                formUuid: "",
                 sessions: [{uuid: "f8-s0", start: "20:00", end: "22:00", available: false, reason: "场次已被锁场", feeYuan: 40}],
                 supportPeriod: false,
                 bookableWindow: {start: "08:00", end: "23:59"},

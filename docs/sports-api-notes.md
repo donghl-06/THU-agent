@@ -94,9 +94,22 @@ Iso10126 填充，base64。当前用到的端点都是明文 JSON，先保留兜
 - 成功返回 `data.resvIds`（数组）；多场地用 `addMultiReserve` + `multiSiteSessionReserve`（未实装）。
 - 下单后必须 `orderCheck`：`orderGenerated && !freeOrder` = 生成了待支付订单，
   需到官方网页/App 完成支付，超时订单取消；`freeOrder` = 免费场次直接成功。
-- `payType` 枚举：`PAY_ONLINE`（默认，线上）/ `PAY_OFFLINE`（线下）/ `PAY_CARD`（次卡，需 purchaseUuid）。
-- `formParam`：场地有 `formRuleVo`（申请表单）时需填 `formId` 等；气膜馆等无表单场景传 `{}`。
-- 部分场景可能开验证码（前端 `hasVerify`），遇到时 addReserve 会报错，暂不支持自动过验证码。
+- `payType` 枚举：`PAY_ONLINE`（线上）/ `PAY_OFFLINE`（线下，不产生线上扣款）/ `PAY_CARD`（次卡，需 purchaseUuid）。
+- `formParam`：`{formId: 场地 formRuleVo.formUuid（无则""), deployUuid:"", variables:{}, chooseCandidates:{}}`。
+- **验证码**：提交阶段可能需要滑块拼图验证码（AJ-Captcha 系）。
+  链：`POST /system/captcha/drag/get`（拿背景图+拼图+secretKey+token）→
+  图像匹配求缺口 X → `POST /system/captcha/drag/check`（pointJson 用 AES-128-ECB/secretKey 加密）
+  → addReserve 的 `captcha` 字段 = AES_ECB(token + "---" + {"x":X,"y":5}, secretKey)。
+  是否开启由 `GET /api/reserve/enableValidCode` 决定。解法参考用户已验证的旧项目
+  （OpenCV 模板匹配本地解 / 第三方打码 / 人工兜底），本项目暂未实装自动过码。
+
+### 与真实抓包的差异修正（2026-08-29，来自用户旧项目 auto--badminton-booking-system）
+
+该项目对同一系统做过浏览器抓包并有实战成功记录，两处与我们从前端代码读出的结构不同，
+**以抓包为准**（已应用到 SportsClient.bookSession）：
+
+1. `sessionDetailUuid` 只在 `siteSessionReserve` 里；`reserveTime` 只带 `{startTime, endTime}`。
+2. 实战用 `payType: "PAY_OFFLINE"`（推荐）——不动线上资金，到场支付。
 
 **current/page** body（缺 classTypeEnum/classTypeUuid/sceneUseType 会返回空列表）：
 

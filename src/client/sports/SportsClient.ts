@@ -15,6 +15,7 @@
 import {uFetch, getRedirectUrl} from "@thu-info/lib/dist/utils/network";
 import {sm2} from "sm-crypto";
 import {createHash, createDecipheriv} from "node:crypto";
+import "../../utils/httpProxy"; // 全局 fetch 走 https_proxy（若设置）
 import {config} from "../../config/env";
 import {ThuError} from "../errors";
 
@@ -84,6 +85,8 @@ export interface SportsField {
     sessions: SportsSession[];
     /** 是否支持自由时段预约（supportPeriod === "Y"） */
     supportPeriod: boolean;
+    /** 申请表单 uuid（formRuleVo.formUuid，无表单时为 ""）。预约提交的 formParam.formId 用 */
+    formUuid: string;
     /** 实际可约时间窗（来自 reserveRule.laterLineTime，如 08:00-23:59），未知为 null */
     bookableWindow: {start: string; end: string} | null;
     feeRuleVo: unknown;
@@ -307,30 +310,52 @@ export class SportsClient {
         return this.api<SportsUser>("/system/login/getLoginUser");
     }
 
+    /** 预约提交是否需要滑块验证码（/api/reserve/enableValidCode） */
+    async isCaptchaEnabled(): Promise<boolean> {
+        const r = await this.api<unknown>("/api/reserve/enableValidCode");
+        // 返回结构未文档化：布尔/字符串/对象都兜底成"truthy 且不为 false/N/0"
+        if (typeof r === "boolean") return r;
+        if (typeof r === "string") return !["false", "N", "0", ""].includes(r);
+        if (r && typeof r === "object") {
+            const v = (r as Record<string, unknown>);
+            const flag = v.enableValidCode ?? v.enable ?? v.value ?? v.status;
+            if (typeof flag === "string") return !["false", "N", "0", ""].includes(flag);
+            return Boolean(flag);
+        }
+        return Boolean(r);
+    }
+
     /**
      * 预约一个场次（写操作，会真实下单）。
      * 链路与前端一致：addReserve → orderCheck（判断是否生成了待支付订单）。
-     * 载荷结构逆向自前端 chunk（docs/sports-api-notes.md）。
+     * 载荷结构经过双重来源核对：前端 chunk 静态分析 + 用户此前抢场项目
+     * （auto--badminton-booking-system）的真实抓包（docs/sports-api-notes.md）。
+     *
+     * 注意两个实战细节（来自真实抓包，与前端代码有出入，以抓包为准）：
+     * - sessionDetailUuid 只放 siteSessionReserve，reserveTime 只带起止时间
+     * - payType 默认 PAY_OFFLINE（线下支付）：不触发线上扣款订单
      */
     async bookSession(req: {
         sceneUuid: string;
         sceneUseType: string;
         siteUuid: string;
         siteType: string;
+        /** 场地的申请表单 uuid（SportsField.formUuid），无表单传 "" */
+        formUuid: string;
         sessionUuid: string;
         /** 场次日期 YYYY-MM-DD 与起止 "HH:MM" */
         date: string;
         startTime: string;
         endTime: string;
+        /** 滑块验证码 token（enableValidCode 开启时必须）；默认空 */
+        captcha?: string;
     }): Promise<BookResult> {
         const user = await this.getLoginUser();
-        const sessionItem = {
-            sessionDetailUuid: req.sessionUuid,
-            reserveTime: {
-                startTime: `${req.date} ${req.startTime}:00`,
-                endTime: `${req.date} ${req.endTime}:00`,
-            },
+        const timeRange = {
+            startTime: `${req.date} ${req.startTime}:00`,
+            endTime: `${req.date} ${req.endTime}:00`,
         };
+        const sessionItem = {sessionDetailUuid: req.sessionUuid, reserveTime: timeRange};
         const added = await this.api<{resvIds?: string[]} | string[]>("/api/reserve/addReserve", {
             method: "POST",
             body: {
@@ -338,14 +363,19 @@ export class SportsClient {
                 sceneUseType: req.sceneUseType,
                 siteUuid: req.siteUuid,
                 siteType: req.siteType,
-                reserveTime: [sessionItem],
+                reserveTime: [timeRange],
                 siteSessionReserve: [sessionItem],
                 resvMember: [user.id],
                 resvKind: "CURRENT_RESERVE",
-                payType: "PAY_ONLINE",
+                payType: "PAY_OFFLINE",
                 purchaseUuid: "",
-                formParam: {},
-                captcha: "",
+                formParam: {
+                    formId: req.formUuid,
+                    deployUuid: "",
+                    variables: {},
+                    chooseCandidates: {},
+                },
+                captcha: req.captcha ?? "",
             },
         });
         // addReserve 的 data：单场为 {resvIds:[...]}，多场为 [...]（前端两种都处理）
@@ -414,6 +444,7 @@ export class SportsClient {
             reserveStatus: f.reserveStatus ?? null,
             sessions: parseSessions(f),
             supportPeriod: (f as unknown as {supportPeriod?: string}).supportPeriod === "Y",
+            formUuid: (f as unknown as {formRuleVo?: {formUuid?: string} | null}).formRuleVo?.formUuid ?? "",
             bookableWindow: parseBookableWindow(f),
             feeRuleVo: f.feeRuleVo ?? null,
         }));
