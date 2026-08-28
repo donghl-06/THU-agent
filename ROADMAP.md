@@ -302,6 +302,9 @@ THU-agent/                        ← 项目根（git 仓库）
 [已完成] Step 3  pnpm step3 — getSchedule() 真实数据链路打通（夏季学期无课属正常）
 [已完成] Step 4  src/client/ThuClient.ts + auth.ts + errors.ts，step2/3 已改走 ThuClient
 [已完成] Step 5  src/skills/base/types.ts（脚手架时已写）
-[下一步] Step 6  实现第一个 Skill：get_schedule（src/skills/schedule/getSchedule.ts）
-         Step 7  为 get_schedule 写独立测试（tests/）
+[已完成] Step 6  get_schedule Skill（src/skills/schedule/getSchedule.ts）
+[已完成] Step 7  独立测试 7 个全过（6 单测无网络 + 1 集成测试真实链路）
+[下一步] Step 8  按优先级扩展 4 个 Read Skill：
+                  get_campus_card_info → get_classroom_state → get_library_seats → get_sports_resources
+         Step 9  每个新 Skill 都配独立测试（复用 Step 7 的双层测试模式）
 ```
