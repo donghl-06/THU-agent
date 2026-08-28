@@ -310,7 +310,16 @@ THU-agent/                        ← 项目根（git 仓库）
                   ⚠️ 旧体育系统（50.tsinghua.edu.cn）2026-08 整体下线，上游库无法修复。
                   已逆向对接新系统 www.sports.tsinghua.edu.cn（SportsClient，公网直连，
                   见 docs/sports-api-notes.md），真实场地数据验证吻合。
-[下一步] Step 10 最小 DeepSeek Harness（src/harness/）：工具注册 → Tool Schema →
-                  Function Calling → 执行 → 结果回传 → Agent Loop
-                  需要 .env 里填 DEEPSEEK_API_KEY
+[已完成] Step 10 最小 Harness（src/harness/，OpenAI 兼容协议，纯 fetch 无 SDK）：
+                  types.ts（消息/工具类型）→ toolRegistry.ts（Skill→Tool Schema、按名分发）
+                  → llmClient.ts（chat.completions 调用）→ agentLoop.ts（Agent 闭环，
+                  10 轮上限防失控）。LLM 配置泛化为 LLM_API_KEY/LLM_BASE_URL/LLM_MODEL，
+                  Kimi/GLM/DeepSeek 任意切换（当前用 Kimi for Coding 端点 + k3-256k）
+[已完成] Step 11 V0.1 里程碑 🎉：pnpm agent 命令行 Agent 上线，
+                  真实验证三问全通过——"我今天下午有什么课？"（自主调 get_schedule）、
+                  "现在图书馆还有座位吗？"（get_library_seats）、
+                  "今晚气膜馆羽毛球还有场吗？"（get_sports_resources）
+                  双层测试 40 个全绿（harness 单测用脚本化假 LLM + Kimi 真实链路集成测试）
+[下一步] Step 12 V0.2 里程碑：多 Skill 串联——"我今晚没课的话想去打羽毛球，
+                  帮我看看什么时候合适"，验证模型自主组合 get_schedule + get_sports_resources
 ```

@@ -10,7 +10,7 @@
  * 可约判定：reserveStatus.reserveStatus === "Y" 且 availableRange 非空。
  * 场馆未开放时（如暑假）正常返回空 sessions + note，不算错误。
  */
-import type {SportsClient} from "../../client/sports/SportsClient";
+import type {SportsClient, SportsField} from "../../client/sports/SportsClient";
 import {ThuError} from "../../client/errors";
 import {fail, ok, type Skill, type SkillResult} from "../base/types";
 import {formatDate, parseDate} from "../base/dateUtils";
@@ -103,7 +103,7 @@ export function createGetSportsResourcesSkill(client: SportsSource): Skill {
 
                 // 串行查询：每个场景内部要走位置级联（4 级）+ 按房间查询，
                 // 并行容易触发服务端限流（"请求频繁"）
-                const fieldLists = [];
+                const fieldLists: SportsField[][] = [];
                 for (const s of matched) {
                     fieldLists.push(await client.getFieldPage(s.uuid, dateStr));
                 }

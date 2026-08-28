@@ -27,10 +27,17 @@ export const config = {
             return required("THU_FINGERPRINT");
         },
     },
-    deepseek: {
+    llm: {
         get apiKey() {
-            return required("DEEPSEEK_API_KEY");
+            return required("LLM_API_KEY");
         },
-        baseUrl: process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com",
+        /** OpenAI 兼容接口地址。默认 Kimi for Coding 端点（sk-kimi- 开头的 key） */
+        get baseUrl() {
+            return process.env.LLM_BASE_URL ?? "https://api.kimi.com/coding/v1";
+        },
+        /** 模型名，如 k3-256k（以平台控制台的模型 ID 为准） */
+        get model() {
+            return process.env.LLM_MODEL ?? "k3-256k";
+        },
     },
 };

@@ -13,7 +13,8 @@
     "test": "OPENSSL_CONF=${PWD}/openssl.cnf vitest run",
     "typecheck": "tsc --noEmit",
     "debug:roam": "OPENSSL_CONF=${PWD}/openssl.cnf tsx scripts/debug-roam.ts",
-    "debug:chain": "OPENSSL_CONF=${PWD}/openssl.cnf tsx scripts/debug-chain.ts"
+    "debug:chain": "OPENSSL_CONF=${PWD}/openssl.cnf tsx scripts/debug-chain.ts",
+    "agent": "OPENSSL_CONF=${PWD}/openssl.cnf tsx scripts/step10-agent.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

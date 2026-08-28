@@ -12,8 +12,8 @@ Agent 自主判断并组合多个校园能力（查课表 → 推理空闲时间
 ## 架构分层
 
 ```text
-DeepSeek Model      ← 推理与决策（最后接入）
-DeepSeek Harness    ← Agent 运行时（src/harness/，阶段 C）
+LLM（Kimi/GLM/DeepSeek，OpenAI 兼容协议）← 推理与决策
+Harness             ← Agent 运行时：工具注册、Agent Loop（src/harness/）
 THU Skills          ← Agent 可调用的原子能力（src/skills/）
 ThuClient           ← 统一封装登录/会话/重试（src/client/）
 SportsClient        ← 新版体育场馆系统客户端（src/client/sports/，独立链路）
@@ -26,7 +26,7 @@ SportsClient        ← 新版体育场馆系统客户端（src/client/sports/�
 - Node.js ≥ 22
 - pnpm 10（`npm install -g pnpm`）
 - 清华大学 Info 账号（用于登录校园服务）
-- DeepSeek API Key（阶段 C 才需要）
+- 任意 OpenAI 兼容的 LLM API Key（Kimi / GLM / DeepSeek 均可）
 
 ## 配置步骤
 
@@ -45,6 +45,21 @@ cp .env.example .env
 #   THU_PASSWORD    密码
 #   THU_FINGERPRINT 设备指纹（32 位 hex，可用以下命令生成）
 node -e "console.log(require('crypto').randomUUID().replace(/-/g,''))"
+#   LLM_API_KEY / LLM_BASE_URL / LLM_MODEL  LLM 配置（Kimi 示例见 .env.example 注释）
+```
+
+## 和小助手对话（V0.1 里程碑 🎉）
+
+```bash
+pnpm agent   # 命令行 Agent：注册全部 5 个查询技能，模型自主决定调哪个
+```
+
+试试这些问法：
+
+```text
+我今天下午有什么课？
+现在图书馆还有座位吗？
+今晚气膜馆羽毛球还有场吗？
 ```
 
 ⚠️ `.env` 已在 `.gitignore` 中，**绝不要**把真实凭证写进 `.env.example` 或任何会被提交的文件。
@@ -62,8 +77,9 @@ pnpm step3   # 获取真实课表
 其他命令：
 
 ```bash
+pnpm agent       # 命令行对话 Agent（需要 LLM_* 配置）
 pnpm dev         # 项目入口（当前为占位）
-pnpm test        # Skill 独立测试（vitest）
+pnpm test        # 全部测试（Skill + Harness 单测 + 真实链路集成测试）
 pnpm typecheck   # TypeScript 类型检查
 ```
 
