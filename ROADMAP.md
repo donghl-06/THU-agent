@@ -304,7 +304,12 @@ THU-agent/                        ← 项目根（git 仓库）
 [已完成] Step 5  src/skills/base/types.ts（脚手架时已写）
 [已完成] Step 6  get_schedule Skill（src/skills/schedule/getSchedule.ts）
 [已完成] Step 7  独立测试 7 个全过（6 单测无网络 + 1 集成测试真实链路）
-[下一步] Step 8  按优先级扩展 4 个 Read Skill：
-                  get_campus_card_info → get_classroom_state → get_library_seats → get_sports_resources
-         Step 9  每个新 Skill 都配独立测试（复用 Step 7 的双层测试模式）
+[已完成] Step 8  5 个 Read Skill 全部实现：
+                  get_schedule / get_campus_card_info / get_classroom_state / get_library_seats / get_sports_resources
+[已完成] Step 9  全部配双层独立测试（25 过 1 跳过）
+                  ⚠️ get_sports_resources 集成测试暂停：50.tsinghua.edu.cn 经 webvpn 全站
+                  PARSE_FAILED（上游故障，2026-08-28 确认），恢复后取消 it.skip 即可
+[下一步] Step 10 最小 DeepSeek Harness（src/harness/）：工具注册 → Tool Schema →
+                  Function Calling → 执行 → 结果回传 → Agent Loop
+                  需要 .env 里填 DEEPSEEK_API_KEY
 ```
