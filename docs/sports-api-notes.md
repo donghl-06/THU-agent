@@ -30,11 +30,20 @@
 ## 请求签名（每个 API 调用都要）
 
 ```text
+header: token: <accessToken>
+header: x-api-version: 2.0.0     ← 关键！缺失时服务端走旧版逻辑，
+                                    所有场地返回 N(申请表单信息缺失)
 query: appId=1497016617475903488 & nonce=<32位随机> & timeStamp=<毫秒> & sign=<md5>
 sign = MD5("appId=<appId>&nonce=<nonce>&timeStamp=<timeStamp>&key=57325972627c40bd8c77296d39293705")
 ```
 
 key 是原厂前端混淆硬编码（chunk.chunk-common 模块 bac8/df43），所有学校部署通用。
+
+## 限流
+
+服务端有频率限制，突发请求返回 `{"code":500,"message":"请求频繁，请稍后再试"}`。
+SportsClient 对限流做线性退避重试（1.5s 起步，最多 3 次）；调用方应避免大规模并行
+（多场景查询请串行）。
 
 ## 响应加密（兜底）
 
@@ -48,19 +57,25 @@ Iso10126 填充，base64。当前用到的端点都是明文 JSON，先保留兜
 | `/venue/site/api/site/scene/list` | GET | — | 全部预约场景（33 个）：`[{uuid, sceneName, relatedType:"DEV", ...}]` |
 | `/venue/site/api/site/scene/detail` | GET | `uuid` | 场景详情（`id, sceneName, status, ...`） |
 | `/venue/site/api/site/siteType` | GET | `sceneUuid` | 场地类型筛选项 `[{label, value}]`（全校通用表） |
-| `/venue/site/api/reserve/current/page` | POST | 见下 | 某场景某天的场地列表 |
+| `/venue/site/api/site/choose` | GET | `sceneUuid, siteType, siteUuid` | 位置级联：CAMPUS→BUILDING→FLOOR→ROOM，逐级传上一级 uuid |
+| `/venue/site/api/reserve/current/page` | POST | 见下 | 某场景某天的场地列表（**必须按房间维度查**） |
 | `/venue/site/api/reserve/current/detail` | POST | 见下 | 单块场地的分时详情 |
 
-**current/page** body:
+**current/page** body（缺 classTypeEnum/classTypeUuid/sceneUseType 会返回空列表）：
 
 ```json
 {
   "sceneUuid": "<场景uuid>",
-  "reserveDate": "YYYY-MM-DD",
-  "pageNum": 1, "pageSize": 50,
   "resvKind": "CURRENT_RESERVE",
-  "siteKindId": "<可选，siteType 的 value>",
-  "searchValue": "<可选>"
+  "siteType": "DEV",
+  "searchValue": "",
+  "siteKindId": "",
+  "classTypeEnum": "ROOM",
+  "classTypeUuid": "<site/choose 级联到 ROOM 级的 uuid>",
+  "reserveDate": "YYYY-MM-DD",
+  "sceneUseType": "SPORT_GROUP",
+  "pageSize": 999,
+  "pageNum": 1
 }
 ```
 
@@ -68,9 +83,12 @@ Iso10126 填充，base64。当前用到的端点都是明文 JSON，先保留兜
 
 - `uuid` / `siteName`（如 "羽01"）/ `siteType`（"DEV"）/ `kindName`（"羽毛球"）
 - `siteLocation.location`（"清华/气膜馆/1F/气膜馆羽毛球场"）
-- `openRule.fullOpenTime`（按 MON..SUN 的开放时段）
 - `reserveStatus`: `{reserveStatus: "Y"|"N", reserveStatusReason, availableRange: [{startTime, endTime}]}`
-- `reserveRule` / `formRuleVo` / `feeRuleVo`（开放时非空，含预约规则/表单/费用）
+  —— `availableRange` 是**空闲可约时间段**（精确到分钟，如 "20:30-23:59"）
+- `reserveRule.laterLineTime`: `{lowerRange:"08:00:00", upperRange:"23:59:59"}` —— 实际可约时间窗，
+  `availableRange` 可能越出它（如空闲段从 00:00 开始），展示前需裁剪
+- `reserveRule.timeInterval`（预约粒度，分钟）/ `limitValue`（限约次数）
+- `formRuleVo` / `feeRuleVo`（预约表单/费用规则）
 
 **current/detail** body:
 
@@ -84,16 +102,19 @@ Iso10126 填充，base64。当前用到的端点都是明文 JSON，先保留兜
 }
 ```
 
-返回单块场地详情，结构同上，`reserveStatus.availableRange` 是**可约时间段**。
+返回单块场地详情，结构同上。
 
 ## 可约性判定
 
-`reserveStatus.reserveStatus === "Y"` 且 `availableRange` 非空 → 可约。
-`"N"` 时 `reserveStatusReason` 给出原因（如"未开放"、"申请表单信息缺失"）。
+`reserveStatus.reserveStatus === "Y"` 且 `availableRange ∩ laterLineTime` 非空 → 可约。
+`"N"` 时 `reserveStatusReason` 给出原因（如"未开放"、"场次信息缺失"）。
 
-## 当前状态（2026-08-28，暑假）
+## 排障史（2026-08-28）
 
-全部 33 个场景、未来 4 天所有场地均返回 `N(申请表单信息缺失)`，
-`formRuleVo`/`reserveRule` 为 null——**判断为暑期真实闭馆**（秋季学期开放安排见
-"清华体育"公众号）。Skill 实现需优雅处理该状态（返回 note 而非报错）。
-学期开始场馆开放后，`availableRange` 会给出真实可约时段。
+初版实现所有场馆均返回 `N(申请表单信息缺失)`，疑似暑期闭馆——**是假象**。
+用户确认浏览器端可正常预约后，逐字复刻浏览器请求做消融实验，定位根因：
+**缺少 `x-api-version: 2.0.0` 请求头**（服务端按它区分新旧版 API 逻辑），
+外加 `current/page` 必须带位置级联参数（`classTypeEnum=ROOM` + `classTypeUuid` +
+`sceneUseType=SPORT_GROUP`）。修正后真实数据吻合（当晚 19 点查询，各馆只剩
+22 点后的空闲段，周六白天全满）。
+教训：对接无文档系统时，**尽早抓取浏览器真实请求做对照**，比纯静态分析快得多。

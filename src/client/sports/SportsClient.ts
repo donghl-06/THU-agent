@@ -34,6 +34,9 @@ const NONCE_ALPHABET = "ABCDEFGHJKMNPQRSTWXYZabcdefhijkmnprstwxyz0123456789";
 const LOGIN_EXPIRED_CODE = 1130002;
 /** 单个 API 请求的超时（毫秒） */
 const API_TIMEOUT_MS = 30_000;
+/** 限流重试：次数与基础退避（毫秒，线性递增） */
+const RATE_LIMIT_MAX_RETRIES = 3;
+const RATE_LIMIT_BACKOFF_MS = 1500;
 
 export interface SportsScene {
     uuid: string;
@@ -50,9 +53,19 @@ export interface SportsField {
     reserveStatus: {
         reserveStatus: "Y" | "N";
         reserveStatusReason?: string;
+        /** 空闲可约时间段（可能越出实际可约时间窗，用 bookableWindow 裁剪） */
         availableRange: {startTime: string; endTime: string}[];
     } | null;
+    /** 实际可约时间窗（来自 reserveRule.laterLineTime，如 08:00-23:59），未知为 null */
+    bookableWindow: {start: string; end: string} | null;
     feeRuleVo: unknown;
+}
+
+/** 位置级联节点（校区→楼栋→楼层→房间） */
+interface ChooseNode {
+    uuid: string;
+    siteName: string;
+    siteType: string;
 }
 
 interface SportsApiResponse<T> {
@@ -153,6 +166,9 @@ export class SportsClient {
                 signal: AbortSignal.timeout(API_TIMEOUT_MS),
                 headers: {
                     ...(opts.authed !== false && this.accessToken ? {token: this.accessToken} : {}),
+                    // 关键：服务端按此头区分 API 版本，缺了会走旧版逻辑——
+                    // 所有场地返回"申请表单信息缺失"（2026-08-28 消融实验确认）
+                    "x-api-version": "2.0.0",
                     ...(opts.body !== undefined ? {"Content-Type": "application/json"} : {}),
                 },
                 ...(opts.body !== undefined ? {body: JSON.stringify(opts.body)} : {}),
@@ -179,13 +195,18 @@ export class SportsClient {
         }
     }
 
-    /** 统一 API 入口：确保已登录 + token 过期自动重登一次 + 错误归一化 */
+    /** 统一 API 入口：确保已登录 + token 过期自动重登一次 + 限流退避重试 + 错误归一化 */
     private async api<T>(path: string, opts?: {method?: "GET" | "POST"; body?: unknown}): Promise<T> {
         await this.login();
         let result = (await this.rawRequest(path, opts)) as SportsApiResponse<T>;
         if (result.errorCode === LOGIN_EXPIRED_CODE) {
             this.accessToken = "";
             await this.login();
+            result = (await this.rawRequest(path, opts)) as SportsApiResponse<T>;
+        }
+        // 服务端限流（"请求频繁，请稍后再试"）：退避后重试，级联查询容易触发
+        for (let retry = 0; retry < RATE_LIMIT_MAX_RETRIES && result.message?.includes("请求频繁"); retry++) {
+            await new Promise((r) => setTimeout(r, RATE_LIMIT_BACKOFF_MS * (retry + 1)));
             result = (await this.rawRequest(path, opts)) as SportsApiResponse<T>;
         }
         if (result.code !== 0) {
@@ -199,26 +220,67 @@ export class SportsClient {
         return this.api<SportsScene[]>("/api/site/scene/list");
     }
 
-    /** 某场景某天的场地列表（含每块场地的可约状态） */
+    /** 场景的位置级联：校区 → 楼栋 → 楼层 → 房间，返回全部 ROOM 节点 */
+    private async listRooms(sceneUuid: string): Promise<ChooseNode[]> {
+        let nodes = await this.api<ChooseNode[]>(
+            `/api/site/choose?sceneUuid=${sceneUuid}&siteType=CAMPUS&siteUuid=`,
+        ) ?? [];
+        for (const level of ["BUILDING", "FLOOR", "ROOM"] as const) {
+            const next: ChooseNode[] = [];
+            for (const n of nodes) {
+                const children = await this.api<ChooseNode[]>(
+                    `/api/site/choose?sceneUuid=${sceneUuid}&siteType=${level}&siteUuid=${n.uuid}`,
+                );
+                next.push(...(children ?? []));
+            }
+            nodes = next;
+        }
+        return nodes;
+    }
+
+    /**
+     * 某场景某天的场地列表（含每块场地的可约状态）。
+     * 服务端要求按"房间"维度查询（classTypeEnum=ROOM + classTypeUuid），
+     * 否则返回空列表——先走位置级联拿到全部房间，再逐房间查询合并。
+     */
     async getFieldPage(sceneUuid: string, date: string): Promise<SportsField[]> {
-        const data = await this.api<SportsField[]>("/api/reserve/current/page", {
-            method: "POST",
-            body: {
-                sceneUuid,
-                reserveDate: date,
-                pageNum: 1,
-                pageSize: 100,
-                resvKind: "CURRENT_RESERVE",
-            },
-        });
-        return (data ?? []).map((f) => ({
+        const rooms = await this.listRooms(sceneUuid);
+        const perRoom = await Promise.all(rooms.map((room) =>
+            this.api<SportsField[]>("/api/reserve/current/page", {
+                method: "POST",
+                body: {
+                    sceneUuid,
+                    resvKind: "CURRENT_RESERVE",
+                    siteType: "DEV",
+                    searchValue: "",
+                    siteKindId: "",
+                    classTypeEnum: "ROOM",
+                    classTypeUuid: room.uuid,
+                    reserveDate: date,
+                    sceneUseType: "SPORT_GROUP",
+                    pageSize: 999,
+                    pageNum: 1,
+                },
+            }),
+        ));
+        return perRoom.flat().map((f) => ({
             uuid: f.uuid,
             siteName: f.siteName,
             siteType: f.siteType,
             kindName: f.kindName,
             location: (f as unknown as {siteLocation?: {location?: string}}).siteLocation?.location ?? "",
             reserveStatus: f.reserveStatus ?? null,
+            bookableWindow: parseBookableWindow(f),
             feeRuleVo: f.feeRuleVo ?? null,
         }));
     }
+}
+
+/** 从 reserveRule.laterLineTime 解析可约时间窗（"08:00:00" → "08:00"） */
+function parseBookableWindow(f: SportsField): {start: string; end: string} | null {
+    const ll = (f as unknown as {
+        reserveRule?: {laterLineTime?: {lowerRange?: string; upperRange?: string}};
+    }).reserveRule?.laterLineTime;
+    if (!ll?.lowerRange || !ll?.upperRange) return null;
+    return {start: ll.lowerRange.slice(0, 5), end: ll.upperRange.slice(0, 5)};
 }

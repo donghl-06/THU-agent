@@ -82,7 +82,8 @@ pnpm typecheck   # TypeScript 类型检查
 - **体育场馆**：旧系统 50.tsinghua.edu.cn 已于 2026-08 整体下线。
   本项目直接对接新系统 <https://www.sports.tsinghua.edu.cn/venue/>（公网直连，
   无需 webvpn），登录链路与接口逆向笔记见 [docs/sports-api-notes.md](docs/sports-api-notes.md)。
-  暑期内所有场馆返回"未开放"属正常（真实闭馆），学期开始后会返回真实可约时段。
+  注意新系统 API 必须带 `x-api-version: 2.0.0` 请求头，且按房间维度查询，
+  否则会拿到"场馆未开放"的假数据。
 - **参考仓库**：开发参考 <https://github.com/thu-info-community/thu-info-app>
   （克隆到 `reference/` 目录，只读，不进 git）。
 

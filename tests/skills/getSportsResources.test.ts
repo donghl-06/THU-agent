@@ -86,6 +86,25 @@ describe("get_sports_resources Skill（假数据，无网络）", () => {
         expect((await exec({date: "今晚"})).success).toBe(false);
     });
 
+    it("空闲段按 bookableWindow 裁剪（越出时间窗的部分不展示）", async () => {
+        const client = {
+            listScenes: async () => [{uuid: "u9", sceneName: "测试馆", relatedType: "DEV"}],
+            getFieldPage: async () => [{
+                uuid: "f9", siteName: "测01", siteType: "DEV", kindName: "测试", location: "",
+                reserveStatus: {reserveStatus: "Y", availableRange: [{startTime: "06:00", endTime: "09:00"}]},
+                bookableWindow: {start: "08:00", end: "22:00"},
+                feeRuleVo: null,
+            }],
+        };
+        const s = createGetSportsResourcesSkill(client as never);
+        const r = (await s.execute({resourceName: "测试馆", date: "2026-08-28"})) as {
+            success: boolean; data?: SportsResourcesData;
+        };
+        expect(r.success).toBe(true);
+        // 06:00-09:00 裁剪为 08:00-09:00
+        expect(r.data!.venues[0].sessions[0].time).toBe("08:00-09:00");
+    });
+
     it("全部未开放时正常返回空 sessions + note（暑假闭馆场景）", async () => {
         const r = await exec({resourceName: "台球", date: "2026-08-28"});
         expect(r.success).toBe(true);

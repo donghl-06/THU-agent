@@ -40,6 +40,17 @@ export interface SportsResourcesData {
 
 type SportsSource = Pick<SportsClient, "listScenes" | "getFieldPage">;
 
+/** 把空闲段裁剪到可约时间窗内；完全在窗外返回 null。"HH:MM" 字符串可按字典序比较 */
+function clipRange(
+    range: {startTime: string; endTime: string},
+    window: {start: string; end: string} | null,
+): {start: string; end: string} | null {
+    if (!window) return {start: range.startTime, end: range.endTime};
+    const start = range.startTime < window.start ? window.start : range.startTime;
+    const end = range.endTime > window.end ? window.end : range.endTime;
+    return start < end ? {start, end} : null;
+}
+
 export function createGetSportsResourcesSkill(client: SportsSource): Skill {
     return {
         name: "get_sports_resources",
@@ -90,18 +101,25 @@ export function createGetSportsResourcesSkill(client: SportsSource): Skill {
                     );
                 }
 
-                const fieldLists = await Promise.all(
-                    matched.map((s) => client.getFieldPage(s.uuid, dateStr)),
-                );
+                // 串行查询：每个场景内部要走位置级联（4 级）+ 按房间查询，
+                // 并行容易触发服务端限流（"请求频繁"）
+                const fieldLists = [];
+                for (const s of matched) {
+                    fieldLists.push(await client.getFieldPage(s.uuid, dateStr));
+                }
 
                 const venues: SportsVenue[] = matched.map((scene, i) => {
                     const fields = fieldLists[i];
-                    // 按可约时间段聚合：同一时间段内可订的场地归在一起
+                    // 按可约时间段聚合：同一时间段内可订的场地归在一起。
+                    // availableRange 可能越出实际可约时间窗（如空闲段从 00:00 开始），
+                    // 用 bookableWindow（reserveRule.laterLineTime）裁剪。
                     const sessions = new Map<string, SportsTimeSession>();
                     for (const f of fields) {
                         if (f.reserveStatus?.reserveStatus !== "Y") continue;
                         for (const range of f.reserveStatus.availableRange) {
-                            const time = `${range.startTime}-${range.endTime}`;
+                            const clipped = clipRange(range, f.bookableWindow);
+                            if (!clipped) continue;
+                            const time = `${clipped.start}-${clipped.end}`;
                             let s = sessions.get(time);
                             if (!s) {
                                 s = {time, total: fields.length, availableFields: [], cost: null};

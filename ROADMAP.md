@@ -306,10 +306,10 @@ THU-agent/                        ← 项目根（git 仓库）
 [已完成] Step 7  独立测试 7 个全过（6 单测无网络 + 1 集成测试真实链路）
 [已完成] Step 8  5 个 Read Skill 全部实现：
                   get_schedule / get_campus_card_info / get_classroom_state / get_library_seats / get_sports_resources
-[已完成] Step 9  全部配双层独立测试（27 全过，含真实链路）
+[已完成] Step 9  全部配双层独立测试（28 全过，含真实链路）
                   ⚠️ 旧体育系统（50.tsinghua.edu.cn）2026-08 整体下线，上游库无法修复。
                   已逆向对接新系统 www.sports.tsinghua.edu.cn（SportsClient，公网直连，
-                  见 docs/sports-api-notes.md）。暑期场馆真实闭馆，Skill 返回"未开放"备注属正常。
+                  见 docs/sports-api-notes.md），真实场地数据验证吻合。
 [下一步] Step 10 最小 DeepSeek Harness（src/harness/）：工具注册 → Tool Schema →
                   Function Calling → 执行 → 结果回传 → Agent Loop
                   需要 .env 里填 DEEPSEEK_API_KEY
