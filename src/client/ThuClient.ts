@@ -95,4 +95,25 @@ export class ThuClient {
     ): ReturnType<InfoHelper["getClassroomState"]> {
         return this.call(() => this.helper.getClassroomState(building, week));
     }
+
+    /** 获取图书馆馆区列表（总馆、文科馆等） */
+    async getLibraryList(): ReturnType<InfoHelper["getLibraryList"]> {
+        return this.call(() => this.helper.getLibraryList());
+    }
+
+    /** 获取某馆的楼层列表。dateChoice：0 今天 / 1 明天 */
+    async getLibraryFloorList(
+        library: Parameters<InfoHelper["getLibraryFloorList"]>[0],
+        dateChoice: 0 | 1,
+    ): ReturnType<InfoHelper["getLibraryFloorList"]> {
+        return this.call(() => this.helper.getLibraryFloorList(library, dateChoice));
+    }
+
+    /** 获取某楼层的区域列表（含座位总数/空位数）。dateChoice：0 今天 / 1 明天 */
+    async getLibrarySectionList(
+        floor: Parameters<InfoHelper["getLibrarySectionList"]>[0],
+        dateChoice: 0 | 1,
+    ): ReturnType<InfoHelper["getLibrarySectionList"]> {
+        return this.call(() => this.helper.getLibrarySectionList(floor, dateChoice));
+    }
 }
