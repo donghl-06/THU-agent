@@ -81,6 +81,10 @@ while (true) {
         for (const t of toolCalls) {
             // 打印工具调用轨迹，方便观察模型行为
             console.log(`  [调工具] ${t.name}(${t.input})`);
+            // 失败的工具调用把原因直接摆出来，免得模型转述时丢信息
+            if (t.result.includes('"success":false')) {
+                console.log(`  [工具报错] ${t.result}`);
+            }
         }
         console.log(`助手：${answer}\n`);
     } catch (e) {

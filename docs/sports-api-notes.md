@@ -103,7 +103,9 @@ Iso10126 填充，base64。当前用到的端点都是明文 JSON，先保留兜
   repData 含 `secretKey/token/originalImageBase64/jigsawImageBase64`）→
   求缺口 X → `POST /system/captcha/drag/check`（`pointJson` = AES-128-ECB-PKCS7
   加密 `{"x":X,"y":5}`，key=secretKey，base64）→
-  addReserve 的 `captcha` 字段 = 同法加密 `token + "---" + {"x":X,"y":5}`。
+  **check 通过时 repData.token 会下发新 token**（真实抓包确认，旧项目 captcha.py
+  Step 4），addReserve 的 `captcha` 字段 = 同法加密 `新token + "---" + {"x":X,"y":5}`。
+  SportsClient 的 checkDragCaptcha 通过时会直接更新 cap.token。
   SportsClient 已实现 getDragCaptcha/checkDragCaptcha/buildCaptchaValue；
   X 的求解走超级鹰打码平台（src/client/captcha/chaojiying.ts，移植自旧项目的
   ChaojiyingSolver：codetype 9900 返回候选缺口矩形，按"矩形高度≈拼图块高度"排序，

@@ -362,14 +362,22 @@ export class SportsClient {
     /**
      * 校验一个滑块候选位置（不抛异常，返回是否通过）。
      * pointJson = AES-128-ECB-PKCS7 加密 {"x":X,"y":5}（key=secretKey）。
+     *
+     * 注意（真实抓包确认）：校验通过时服务端会在 repData.token 里下发
+     * 一个新 token，addReserve 的 captcha 字段必须用这个新 token 计算，
+     * 所以通过时本方法会直接更新 cap.token。
      */
     async checkDragCaptcha(cap: DragCaptcha, x: number): Promise<boolean> {
         const pointJson = aes128EcbEncrypt(JSON.stringify({x, y: 5}), cap.secretKey);
         const resp = (await this.rawRequest("/system/captcha/drag/check", {
             method: "POST",
             body: {captchaType: "blockPuzzle", pointJson, token: cap.token},
-        })) as {success?: boolean; repData?: {result?: boolean}};
-        return resp.success === true && resp.repData?.result === true;
+        })) as {success?: boolean; repData?: {result?: boolean; token?: string}};
+        const passed = resp.success === true && resp.repData?.result === true;
+        if (passed && resp.repData?.token) {
+            cap.token = resp.repData.token;
+        }
+        return passed;
     }
 
     /** 校验通过后，生成 addReserve 的 captcha 字段值：AES(token + "---" + {"x":X,"y":5}) */
