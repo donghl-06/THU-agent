@@ -5,10 +5,13 @@
  * 由 SportsClient 封装（旧系统 50.tsinghua.edu.cn 已下线，见 docs/sports-api-notes.md）。
  *
  * 本 Skill 负责：按关键词匹配场景（如“羽毛球”同时命中气膜馆/综体/西体羽毛球），
- * 把每块场地的可约时间段聚合成"时段 → 可订场地"的结构。
+ * 把每块场地的可约场次聚合成"时段 → 可订场地"的结构。
  *
- * 可约判定：reserveStatus.reserveStatus === "Y" 且 availableRange 非空。
- * 场馆未开放时（如暑假）正常返回空 sessions + note，不算错误。
+ * 可约判定（2026-08-29 修正）：以每块场地的**场次表**（sessions）为准——
+ * 场次 available === true 才是真的可约。场地级的 reserveStatus.availableRange
+ * 只是"没被场次覆盖的空白时间"（含打烊后的时间），不能用来判断可约。
+ * 仅当场地支持自由时段预约（supportPeriod）且没有场次表时，才回退用 availableRange。
+ * 场馆未开放/全部订满时正常返回空 sessions + note，不算错误。
  */
 import type {SportsClient, SportsField} from "../../client/sports/SportsClient";
 import {ThuError} from "../../client/errors";
@@ -49,6 +52,40 @@ function clipRange(
     const start = range.startTime < window.start ? window.start : range.startTime;
     const end = range.endTime > window.end ? window.end : range.endTime;
     return start < end ? {start, end} : null;
+}
+
+/** 聚合一个场景的场地列表为"时段 → 可订场地" */
+function aggregateSessions(fields: SportsField[]): SportsTimeSession[] {
+    const sessions = new Map<string, SportsTimeSession>();
+    for (const f of fields) {
+        if (f.sessions.length > 0) {
+            // 场次制（主流）：只统计 available 的场次
+            for (const s of f.sessions) {
+                if (!s.available) continue;
+                const time = `${s.start}-${s.end}`;
+                let agg = sessions.get(time);
+                if (!agg) {
+                    agg = {time, total: fields.length, availableFields: [], cost: s.feeYuan};
+                    sessions.set(time, agg);
+                }
+                agg.availableFields.push(f.siteName);
+            }
+        } else if (f.supportPeriod && f.reserveStatus?.reserveStatus === "Y") {
+            // 自由时段制（回退路径）：availableRange 裁剪到可约时间窗
+            for (const range of f.reserveStatus.availableRange) {
+                const clipped = clipRange(range, f.bookableWindow);
+                if (!clipped) continue;
+                const time = `${clipped.start}-${clipped.end}`;
+                let agg = sessions.get(time);
+                if (!agg) {
+                    agg = {time, total: fields.length, availableFields: [], cost: null};
+                    sessions.set(time, agg);
+                }
+                agg.availableFields.push(f.siteName);
+            }
+        }
+    }
+    return [...sessions.values()].sort((a, b) => a.time.localeCompare(b.time));
 }
 
 export function createGetSportsResourcesSkill(client: SportsSource): Skill {
@@ -108,41 +145,24 @@ export function createGetSportsResourcesSkill(client: SportsSource): Skill {
                     fieldLists.push(await client.getFieldPage(s.uuid, dateStr));
                 }
 
-                const venues: SportsVenue[] = matched.map((scene, i) => {
-                    const fields = fieldLists[i];
-                    // 按可约时间段聚合：同一时间段内可订的场地归在一起。
-                    // availableRange 可能越出实际可约时间窗（如空闲段从 00:00 开始），
-                    // 用 bookableWindow（reserveRule.laterLineTime）裁剪。
-                    const sessions = new Map<string, SportsTimeSession>();
-                    for (const f of fields) {
-                        if (f.reserveStatus?.reserveStatus !== "Y") continue;
-                        for (const range of f.reserveStatus.availableRange) {
-                            const clipped = clipRange(range, f.bookableWindow);
-                            if (!clipped) continue;
-                            const time = `${clipped.start}-${clipped.end}`;
-                            let s = sessions.get(time);
-                            if (!s) {
-                                s = {time, total: fields.length, availableFields: [], cost: null};
-                                sessions.set(time, s);
-                            }
-                            s.availableFields.push(f.siteName);
-                        }
-                    }
-                    return {
-                        name: scene.sceneName,
-                        sessions: [...sessions.values()].sort((a, b) => a.time.localeCompare(b.time)),
-                    };
-                });
+                const venues: SportsVenue[] = matched.map((scene, i) => ({
+                    name: scene.sceneName,
+                    sessions: aggregateSessions(fieldLists[i]),
+                }));
 
-                // 收集未开放原因（如"未开放""申请表单信息缺失"——暑假闭馆时常见）
+                // 收集不可约原因：整个场景没有任何可订场次时给出解释
                 const closedReasons = new Set<string>();
-                fieldLists.forEach((fields, i) => {
+                venues.forEach((venue, i) => {
+                    if (venue.sessions.length > 0) return;
+                    const fields = fieldLists[i];
+                    // 场地整体状态为 N（未开放/表单缺失等）→ 用服务端给的原因；
+                    // 状态正常但场次全满/锁场 → 如实说明
                     const allClosed = fields.every((f) => f.reserveStatus?.reserveStatus !== "Y");
-                    if (allClosed) {
-                        const reason = fields.find((f) => f.reserveStatus?.reserveStatusReason)
-                            ?.reserveStatus?.reserveStatusReason;
-                        closedReasons.add(reason ? `${matched[i].sceneName}（${reason}）` : matched[i].sceneName);
-                    }
+                    const reason = allClosed
+                        ? fields.find((f) => f.reserveStatus?.reserveStatusReason)
+                            ?.reserveStatus?.reserveStatusReason
+                        : undefined;
+                    closedReasons.add(reason ? `${venue.name}（${reason}）` : `${venue.name}（场次已全部订满或锁场）`);
                 });
 
                 return ok({

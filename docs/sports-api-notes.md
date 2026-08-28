@@ -83,10 +83,14 @@ Iso10126 填充，base64。当前用到的端点都是明文 JSON，先保留兜
 
 - `uuid` / `siteName`（如 "羽01"）/ `siteType`（"DEV"）/ `kindName`（"羽毛球"）
 - `siteLocation.location`（"清华/气膜馆/1F/气膜馆羽毛球场"）
+- **`sessionVo`: 场次表——真正的可约单元**（见下方"可约性判定"）：
+  `[{beginTime:"06:00", endTime:"08:00", reserveStatus:{reserveStatus:"Y"|"N", reserveStatusReason}, userFeeDetails:{chargingUnitPrice: 4000(分)}}]`
 - `reserveStatus`: `{reserveStatus: "Y"|"N", reserveStatusReason, availableRange: [{startTime, endTime}]}`
-  —— `availableRange` 是**空闲可约时间段**（精确到分钟，如 "20:30-23:59"）
-- `reserveRule.laterLineTime`: `{lowerRange:"08:00:00", upperRange:"23:59:59"}` —— 实际可约时间窗，
-  `availableRange` 可能越出它（如空闲段从 00:00 开始），展示前需裁剪
+  —— ⚠️ `availableRange` **不是**"开放可约时间段"，而是"未被任何场次/预约覆盖的空白时间段"
+  （2026-08-29 实锤，见排障史）。打烊后（22:00-23:59）没有场次，也会显示成"空闲"，**不可用于可约判定**
+- `supportPeriod`: "Y" 表示该场地支持自由时段预约（此时无 sessionVo，才参考 availableRange）
+- `reserveRule.laterLineTime`: `{lowerRange:"08:00:00", upperRange:"23:59:59"}` —— 预约时间窗限制，
+  仅在自由时段回退路径用来裁剪 availableRange
 - `reserveRule.timeInterval`（预约粒度，分钟）/ `limitValue`（限约次数）
 - `formRuleVo` / `feeRuleVo`（预约表单/费用规则）
 
@@ -106,8 +110,11 @@ Iso10126 填充，base64。当前用到的端点都是明文 JSON，先保留兜
 
 ## 可约性判定
 
-`reserveStatus.reserveStatus === "Y"` 且 `availableRange ∩ laterLineTime` 非空 → 可约。
-`"N"` 时 `reserveStatusReason` 给出原因（如"未开放"、"场次信息缺失"）。
+**以场次表 `sessionVo` 为准**：`session.available === true`（即 `reserveStatus.reserveStatus === "Y"`）
+的场次才是真的可约；`reserveStatusReason` 给出不可约原因
+（"当前场次预约人数已满" / "场次已被锁场"）。
+仅当场地 `supportPeriod === "Y"`（自由时段制、无场次表）时，才回退用
+`availableRange ∩ laterLineTime` 判定。
 
 ## 排障史（2026-08-28）
 
@@ -118,3 +125,14 @@ Iso10126 填充，base64。当前用到的端点都是明文 JSON，先保留兜
 `sceneUseType=SPORT_GROUP`）。修正后真实数据吻合（当晚 19 点查询，各馆只剩
 22 点后的空闲段，周六白天全满）。
 教训：对接无文档系统时，**尽早抓取浏览器真实请求做对照**，比纯静态分析快得多。
+
+## 排障史（2026-08-29，第二次语义误判）
+
+上一版把场地级 `reserveStatus.availableRange` 当成"开放可约时间段"，
+导致 Agent 报告"22:00-24:00 12 片全空可约"——**用户实锤该时段场馆根本不开放**。
+dump 原始 JSON 后真相大白：气膜馆每天只有 06:00–22:00 的 8 个场次（`sessionVo`），
+`availableRange` 是这些场次的**补集**（00:25-06:00、22:00-23:59 正是"没有任何场次"的空白段），
+场地级 `reserveStatus: "Y"` 只表示"存在空白段"，与可约性无关。
+修复：可约判定改为以 `sessionVo` 场次为单位；`availableRange` 仅在
+`supportPeriod === "Y"` 的自由时段场地作回退。
+教训：**聚合/补集类字段要警惕"空白≠可约"**，语义必须以"浏览器实际能点什么"为准。

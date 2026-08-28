@@ -44,6 +44,19 @@ export interface SportsScene {
     relatedType: string | null;
 }
 
+/** 一个场次（分时预约的最小单元，如 06:00-08:00） */
+export interface SportsSession {
+    /** "HH:MM" */
+    start: string;
+    end: string;
+    /** 该场次当前是否可约 */
+    available: boolean;
+    /** 不可约原因（"当前场次预约人数已满"/"场次已被锁场"等），可约时无此字段 */
+    reason?: string;
+    /** 当前用户该场次价格（元，由分的 userFeeDetails 换算），未知为 null */
+    feeYuan: number | null;
+}
+
 export interface SportsField {
     uuid: string;
     siteName: string;
@@ -53,9 +66,20 @@ export interface SportsField {
     reserveStatus: {
         reserveStatus: "Y" | "N";
         reserveStatusReason?: string;
-        /** 空闲可约时间段（可能越出实际可约时间窗，用 bookableWindow 裁剪） */
+        /**
+         * 注意：这是"未被任何场次/预约覆盖的空白时间段"，不是"开放可约时间段"！
+         * 场馆打烊后（如 22:00-23:59）没有场次，会在这里显示成"空闲"——不可用于可约判定。
+         * 可约性以 sessions 为准（2026-08-29 用户实锤纠正，见 docs/sports-api-notes.md）。
+         */
         availableRange: {startTime: string; endTime: string}[];
     } | null;
+    /**
+     * 场次表（真正的可约单元）。空数组表示该场地按自由时段预约
+     * （supportPeriod=true），此时才参考 availableRange。
+     */
+    sessions: SportsSession[];
+    /** 是否支持自由时段预约（supportPeriod === "Y"） */
+    supportPeriod: boolean;
     /** 实际可约时间窗（来自 reserveRule.laterLineTime，如 08:00-23:59），未知为 null */
     bookableWindow: {start: string; end: string} | null;
     feeRuleVo: unknown;
@@ -270,10 +294,43 @@ export class SportsClient {
             kindName: f.kindName,
             location: (f as unknown as {siteLocation?: {location?: string}}).siteLocation?.location ?? "",
             reserveStatus: f.reserveStatus ?? null,
+            sessions: parseSessions(f),
+            supportPeriod: (f as unknown as {supportPeriod?: string}).supportPeriod === "Y",
             bookableWindow: parseBookableWindow(f),
             feeRuleVo: f.feeRuleVo ?? null,
         }));
     }
+}
+
+/** sessionVo 原始条目（只取用到的字段） */
+interface RawSession {
+    beginTime?: string;
+    endTime?: string;
+    reserveStatus?: {reserveStatus?: string; reserveStatusReason?: string};
+    userFeeDetails?: {chargingUnitPrice?: number};
+}
+
+/** 从 sessionVo 解析场次表，按开始时间排序 */
+function parseSessions(f: SportsField): SportsSession[] {
+    const raw = (f as unknown as {sessionVo?: RawSession[]}).sessionVo;
+    if (!Array.isArray(raw)) return [];
+    return raw
+        .filter((s) => s.beginTime && s.endTime)
+        .map((s) => {
+            const available = s.reserveStatus?.reserveStatus === "Y";
+            return {
+                start: s.beginTime!,
+                end: s.endTime!,
+                available,
+                ...(!available && s.reserveStatus?.reserveStatusReason
+                    ? {reason: s.reserveStatus.reserveStatusReason}
+                    : {}),
+                feeYuan: typeof s.userFeeDetails?.chargingUnitPrice === "number"
+                    ? s.userFeeDetails.chargingUnitPrice / 100
+                    : null,
+            };
+        })
+        .sort((a, b) => a.start.localeCompare(b.start));
 }
 
 /** 从 reserveRule.laterLineTime 解析可约时间窗（"08:00:00" → "08:00"） */
