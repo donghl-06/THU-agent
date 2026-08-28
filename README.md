@@ -16,6 +16,7 @@ DeepSeek Model      ← 推理与决策（最后接入）
 DeepSeek Harness    ← Agent 运行时（src/harness/，阶段 C）
 THU Skills          ← Agent 可调用的原子能力（src/skills/）
 ThuClient           ← 统一封装登录/会话/重试（src/client/）
+SportsClient        ← 新版体育场馆系统客户端（src/client/sports/，独立链路）
 @thu-info/lib       ← 清华校园服务 SDK（npm 依赖 + 本地补丁）
 ```
 
@@ -78,6 +79,10 @@ pnpm typecheck   # TypeScript 类型检查
   「多因子认证」管理页面删除。
 - **调试脚本**：`pnpm debug:csrf` / `pnpm debug:roam` / `pnpm debug:chain`
   用于诊断登录/漫游链路问题。
+- **体育场馆**：旧系统 50.tsinghua.edu.cn 已于 2026-08 整体下线。
+  本项目直接对接新系统 <https://www.sports.tsinghua.edu.cn/venue/>（公网直连，
+  无需 webvpn），登录链路与接口逆向笔记见 [docs/sports-api-notes.md](docs/sports-api-notes.md)。
+  暑期内所有场馆返回"未开放"属正常（真实闭馆），学期开始后会返回真实可约时段。
 - **参考仓库**：开发参考 <https://github.com/thu-info-community/thu-info-app>
   （克隆到 `reference/` 目录，只读，不进 git）。
 

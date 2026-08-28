@@ -10,6 +10,9 @@
  * 非职责：业务参数校验、输出裁剪 —— 那是 Skill 层的事。
  *
  * 注意：只在确认可用后才添加新的 API 包装方法，不提前堆方法。
+ *
+ * 体育场馆查询不在这里：旧系统 50.tsinghua.edu.cn 已下线，
+ * 新系统由 src/client/sports/SportsClient.ts 单独封装（见 docs/sports-api-notes.md）。
  */
 import {InfoHelper} from "@thu-info/lib";
 import {config} from "../config/env";
@@ -115,14 +118,5 @@ export class ThuClient {
         dateChoice: 0 | 1,
     ): ReturnType<InfoHelper["getLibrarySectionList"]> {
         return this.call(() => this.helper.getLibrarySectionList(floor, dateChoice));
-    }
-
-    /** 获取某场馆项目某天的场地资源（gymId/itemId 见 lib 的 sportsIdInfoList） */
-    async getSportsResources(
-        gymId: string,
-        itemId: string,
-        date: string,
-    ): ReturnType<InfoHelper["getSportsResources"]> {
-        return this.call(() => this.helper.getSportsResources(gymId, itemId, date));
     }
 }

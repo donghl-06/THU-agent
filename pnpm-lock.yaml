@@ -19,6 +19,9 @@ importers:
       dotenv:
         specifier: ^16.4.0
         version: 16.6.1
+      sm-crypto:
+        specifier: ^0.5.7
+        version: 0.5.7
     devDependencies:
       '@types/node':
         specifier: ^22.0.0
@@ -720,6 +723,9 @@ packages:
   sm-crypto@0.4.0:
     resolution: {integrity: sha512-OexH2V1EqmhXuOIPGoCl55OjMF0wwPUM/zhUjT0Q6vHBeopSRvTNRy76/1eRoFs3VBKt39hdFnxwpFmooHYa2A==}
 
+  sm-crypto@0.5.7:
+    resolution: {integrity: sha512-Bxz1jWGtI7t/bn6Vbf4iGKcntslKVYAi6oBTtboTL+0WhqBTwsDFinIxIezjkBidxt8aNnEF1V3ZYU6TI0V1gQ==}
+
   source-map-js@1.2.1:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
     engines: {node: '>=0.10.0'}
@@ -1407,6 +1413,10 @@ snapshots:
   siginfo@2.0.0: {}
 
   sm-crypto@0.4.0:
+    dependencies:
+      jsbn: 1.1.0
+
+  sm-crypto@0.5.7:
     dependencies:
       jsbn: 1.1.0
 

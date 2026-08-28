@@ -54,3 +54,20 @@ const rootText = rootHtml
     .trim();
 console.log("\n根路径页面标题：", JSON.stringify(rootTitle));
 console.log("根路径可见文字：", JSON.stringify(rootText.slice(0, 300)));
+
+// 方向 1：/http/ 前缀换成 /https/（50 站可能已强制 HTTPS）
+const httpsUrl =
+    "https://webvpn.tsinghua.edu.cn/https/77726476706e69737468656265737421a5a70f8834396657761d88e29d51367b6a00/gymbook/gymBookAction.do?ms=viewGymBook&viewType=m&gymnasium_id=3998000&item_id=4045681&time_date=2026-08-28";
+const httpsHtml = await uFetch(httpsUrl);
+const httpsTitle = /<title>(.*?)<\/title>/s.exec(httpsHtml)?.[1]?.trim();
+console.log("\n/https/ 变体页面标题：", JSON.stringify(httpsTitle));
+console.log("/https/ 变体是否含 limitBookCount：", httpsHtml.includes("limitBookCount"));
+if (!httpsHtml.includes("limitBookCount")) {
+    const t = httpsHtml
+        .replace(/<script[\s\S]*?<\/script>/g, "")
+        .replace(/<style[\s\S]*?<\/style>/g, "")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    console.log("/https/ 变体可见文字：", JSON.stringify(t.slice(0, 300)));
+}
