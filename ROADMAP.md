@@ -396,5 +396,17 @@ THU-agent/                        ← 项目根（git 仓库）
                   收获：评测先暴露的是自己断言/用例的问题（措辞过死、与 prompt
                   规则打架、低估读操作的合理加分），模型本身行为全部合规。
                   已知抖动：w02（模型偶尔漏问支付方式，有 PAY_TYPE_REQUIRED 兜底）
-[下一步] Step 15 Read Skills 扩充（成绩单/体测/宿舍/电费/校园网/研讨间查询）
+[已完成] Step 15 Read Skills 扩充：落地 3 个（get_report 成绩单 /
+                  get_electricity 电费 / get_library_rooms 研讨间查询），
+                  单测 12 + 真实链路集成 3 全绿，评测 single 类扩到 17 条全过。
+                  实测砍掉 3 个（原因记录在案）：
+                  ✗ 体测 getPhysicalExamResult：tyjx 系统有自己登录态，
+                    lib 接口已失效（返回 jsp.timeout 页），需单独逆向，暂不做
+                  ✗ 校园网 getNetworkBalance/getOnlineDevices：usereg 登录需
+                    图形验证码，需先接打码，暂不做
+                  ✗ 宿舍卫生 getDormScore：上游返回的是公示图片（base64 JPEG），
+                    文本模型无法消费，等多模态（Step 20）再议
+                  研讨间接口部分馆别（文图/法律馆等）持续报"操作失败"，
+                  做了逐类别降级（failedKinds），北馆正常
+[下一步] Step 16 图书馆座位+研讨间预约/取消（write skills）
 ```

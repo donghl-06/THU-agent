@@ -119,4 +119,32 @@ export class ThuClient {
     ): ReturnType<InfoHelper["getLibrarySectionList"]> {
         return this.call(() => this.helper.getLibrarySectionList(floor, dateChoice));
     }
+
+    /** 获取成绩单（全部学期课程：名称/学分/等级/绩点）。bx=true 附带必限任标记 */
+    async getReport(): ReturnType<InfoHelper["getReport"]> {
+        return this.call(() => this.helper.getReport(true, true));
+    }
+
+    /** 获取宿舍电费余额与更新时间（上游可能返回 remainder=null + "暂时无法查询"） */
+    async getEleRemainder(): ReturnType<InfoHelper["getEleRemainder"]> {
+        return this.call(() => this.helper.getEleRemainder());
+    }
+
+    /** 获取宿舍电费缴费记录（[账号, 订单号, 时间, 渠道, 金额, 状态][] 元组） */
+    async getElePayRecord(): ReturnType<InfoHelper["getElePayRecord"]> {
+        return this.call(() => this.helper.getElePayRecord());
+    }
+
+    /** 获取图书馆研讨间的类别列表（kindId/kindName + 房间） */
+    async getLibraryRoomBookingInfoList(): ReturnType<InfoHelper["getLibraryRoomBookingInfoList"]> {
+        return this.call(() => this.helper.getLibraryRoomBookingInfoList());
+    }
+
+    /** 获取某研讨间类别某天的房间资源与占用。date: yyyyMMdd */
+    async getLibraryRoomBookingResourceList(
+        date: string,
+        kindId: number,
+    ): ReturnType<InfoHelper["getLibraryRoomBookingResourceList"]> {
+        return this.call(() => this.helper.getLibraryRoomBookingResourceList(date, kindId));
+    }
 }

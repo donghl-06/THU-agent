@@ -82,6 +82,27 @@ const CANNED: Record<string, (input: Record<string, unknown>) => SkillResult> = 
         }],
         note: "",
     }),
+    get_report: () => ok({
+        count: 2,
+        courses: [
+            {name: "数据结构", credit: 3, grade: "A", point: 4.0, semester: "2025-2026-1"},
+            {name: "线性代数", credit: 3, grade: "B+", point: 3.3, semester: "2025-2026-1"},
+        ],
+    }),
+    get_electricity: () => ok({
+        remainder: 88.5,
+        remainderNote: "2026-08-29 08:00",
+        recentPayRecords: [{time: "2026-08-17 07:58:02", amount: "20.00", channel: "微信", status: "已成功"}],
+    }),
+    get_library_rooms: () => ok({
+        date: "2026-08-29",
+        rooms: [{
+            kindName: "北馆单人研读间（三层）", roomName: "3F-01", devName: "北馆3F-01",
+            minUser: 1, maxUser: 1, minMinute: 30, maxMinute: 240,
+            openStart: "08:00", openEnd: "22:00", booked: [{start: "10:00", end: "12:00"}],
+        }],
+        failedKinds: [],
+    }),
     // 镜像真实 skill 的关键契约：付费场次没传 payType 时反问支付方式
     book_sports_field: (input) => {
         if (input.payType === undefined) {

@@ -10,6 +10,9 @@ import {createGetCampusCardInfoSkill} from "./card/getCampusCardInfo";
 import {createGetClassroomStateSkill} from "./classroom/getClassroomState";
 import {createGetLibrarySeatsSkill} from "./library/getLibrarySeats";
 import {createGetSportsResourcesSkill} from "./sports/getSportsResources";
+import {createGetReportSkill} from "./academic/getReport";
+import {createGetElectricitySkill} from "./dorm/getElectricity";
+import {createGetLibraryRoomsSkill} from "./library/getLibraryRooms";
 import {createBookSportsFieldSkill, type CaptchaSolver} from "./sports/bookSportsField";
 import {createChaojiyingSolver} from "../client/captcha/chaojiying";
 import {config} from "../config/env";
@@ -35,6 +38,10 @@ export function createAllSkills(opts: SkillAssemblyOptions = {}): Skill[] {
         createGetClassroomStateSkill(thu),
         createGetLibrarySeatsSkill(thu),
         createGetSportsResourcesSkill(sports),
+        // Step 15：扩充的读技能
+        createGetReportSkill(thu),
+        createGetElectricitySkill(thu),
+        createGetLibraryRoomsSkill(thu),
         // 写操作：Harness 会在执行前向用户确认（requiresConfirmation）
         createBookSportsFieldSkill(sports, {captchaSolver}),
     ];
