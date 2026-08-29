@@ -326,5 +326,16 @@ THU-agent/                        ← 项目根（git 仓库）
                   综合两者给出建议（"今天没课随便安排；黄金时段已订完，
                   只剩 22:00 后夜场，气膜馆 12 片全空……"），还主动提出查明天。
                   至此系统真正具有 Agent 特征，不再是 API Chatbot
-[下一步] Step 13 Write Skills + 用户确认流（预约等写操作，模型提议→用户确认→才执行）
+[已完成] Step 13 Write Skills + 用户确认流：
+                  Skill 加 requiresConfirmation 标记，Harness 确认流
+                  （模型提议→终端展示参数→用户输入 y→才执行；无确认回调时
+                  失败关闭，拒绝结果回喂模型）；book_sports_field 预约 Skill 落地
+                  （语义参数→uuid 解析、场景必须唯一匹配、PAY_OFFLINE 不动线上资金）。
+                  验证码链路接超级鹰打码平台（单次约 0.01 元，自动过滑块）。
+                  实测修掉两个真问题：drag/check 通过后必须用服务端新 token 下单、
+                  formParam 需先查 brief 换 deployUuid。
+[待验收] 真实下单端到端：链路已推进到 addReserve 最后一环
+                  （验证码✅ 表单✅），实测时恰逢未支付订单阻断 + 目标场次被订走，
+                  等有合适场次时在 pnpm agent 里完成最后一单验收
+[下一步] Step 14 Evaluation（eval/cases.json + eval/runner.ts 批量跑分）
 ```
