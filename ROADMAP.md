@@ -250,6 +250,51 @@ get_campus_card_info  →  get_classroom_state  →  get_library_seats  →  get
   不该调工具的问题、敏感操作），写 `eval/runner.ts` 批量跑分：
   工具选择准确率、参数准确率、多余调用率、安全违规次数。
 
+### 🟪 阶段 E：功能扩充与产品化（Step 15–20）— 从可信到好用
+
+> 2026-08-29 与用户讨论定案。原则：单用户 Web 形态（凭证不出 `.env`）；
+> 小程序/多用户 SaaS 因凭证信任与合规问题排除，多用户只走"本机凭证 App"远期路线。
+
+**Step 15 · Read Skills 扩充**
+- 依托 thu-info 库新增读技能：`get_report`（成绩单）、`get_physical_exam`
+  （体测成绩）、`get_dorm_score`（宿舍卫生）、`get_electricity`（电费余额/
+  缴费记录）、`get_network_status`（校园网余额/在线设备）、
+  `get_library_rooms`（研讨间查询）。
+
+**Step 16 · 图书馆座位/研讨间预约（Write Skills）**
+- 库里现成生产级接口：`bookLibrarySeat`/`cancelBooking`（座位）、
+  `bookLibraryRoom`/`cancelLibraryRoomBooking`（研讨间）、`getBookingRecords`。
+  走 Step 13 的确认流；加"我的预约查询"读技能配合取消场景。
+
+**Step 17 · 性能优化（含基准实验）**
+- LLM 流式输出（SSE，感知提升最大）；模型单轮多 tool_call 时并行执行；
+  场馆列表/位置级联等元数据缓存（约 1 天 TTL）；登录态预热保活；
+  工具执行事件暴露给调用方（为 UI 进度提示铺路）。
+- 先跑基准测一遍现状（首字延迟/完整回答延迟/工具耗时占比），优化后对比。
+
+**Step 18 · 单用户 Web UI**
+- 本地 HTTP 服务（SSE 流式）+ 单页前端：对话界面、写操作确认弹窗、
+  工具进度提示。Harness 层不动，新加 server 适配层。
+- 定位：本人在自己设备上使用；不做多用户账号体系（凭证红线）。
+
+**Step 19 · 支付链路（扫码半自动）**
+- 预约下单（PAY_ONLINE）→ 探测 `placeOrder` 等支付端点 → 拿到微信支付
+  二维码/链接 → Web UI 直接展示 → 用户扫码在手机确认。
+  （微信支付安全模型决定全自动不可能，最后一步必须用户手机确认。）
+- 同模式复用：校园卡充值（`cardRechargeFromWechatAlipay`）、
+  电费充值（`getEleRechargePayCode`），做成 write skill 走确认流。
+- 涉及真钱，用最小面额实测。
+
+**Step 20 · 多模态**
+- 语音输入（浏览器 WebSpeech/ASR）、图片输入（需确认模型端点支持 vision）、
+  TTS 朗读回复、点击音效。依赖 Step 18 的 UI。
+
+**远期（未定步骤号）· 多用户 App（本机凭证模式）**
+- 若未来要给他人用：走 THU Info App 同款信任模型——登录页收学号密码 +
+  LLM key，凭证只存用户设备、直连学校服务器，开发者服务器零凭证。
+  技术路线：桌面（Tauri/Electron 内嵌现有 Node 栈，改动最小）或
+  RN/Flutter 重写 client 层。**明确排除小程序**（信任模型不成立 + 审核风险）。
+
 ---
 
 ## 第五部分：项目目录（当前脚手架实际结构）
