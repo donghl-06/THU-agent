@@ -98,9 +98,12 @@ Iso10126 填充，base64。当前用到的端点都是明文 JSON，先保留兜
 - 下单后必须 `orderCheck`：`orderGenerated && !freeOrder` = 生成了待支付订单，
   需到官方网页/App 完成支付，超时订单取消；`freeOrder` = 免费场次直接成功。
 - `payType` 枚举：`PAY_ONLINE`（线上）/ `PAY_OFFLINE`（线下，不产生线上扣款）/ `PAY_CARD`（次卡，需 purchaseUuid）。
-  **必须按场次 `sessionVo[].userFeeDetails.payType` 传**——有的时段只支持线上支付，
-  硬传 PAY_OFFLINE 会被拒："当前开始时间不支持线下支付"（2026-08-29 实测）。
-  场次没标注时回退 PAY_OFFLINE。
+  场次 `sessionVo[].userFeeDetails.payType` 是数字码，前端映射 `{1:线上, 2:线下, 3:线上}`
+  （chunk-0e504f6d）——但它只是**前端预选默认值，不是限制**：用户在前端确认
+  任何项目任何场次都能选线上或线下。Skill 规则：付费场次由用户选择后传入，
+  用户没选就返回 PAY_TYPE_REQUIRED 让模型去问；免费场次不问。
+  （2026-08-29 曾把数字码误判为强制限制：硬传 PAY_OFFLINE 被 06:00 场拒单
+  "当前开始时间不支持线下支付"，当时以为是时段限制，实为该场默认线上。）
 - `formParam`：`formId` = 场地 `formRuleVo.formUuid`；**`deployUuid` 必须再查
   `GET /workflow/process/brief/{formUuid}` 拿**（前端 onChangReserve 就是这么做的），
   只填 formId 不填 deployUuid 会被拒："表单信息不能为空"（2026-08-29 实测）。

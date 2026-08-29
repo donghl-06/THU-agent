@@ -7,9 +7,11 @@
  * 模型不需要也不应该传 uuid——输入全是人能读懂的语义参数
  * （场馆关键词/日期/时段/场地名），Skill 内部解析成 sessionUuid 等标识符。
  *
- * 支付说明：支付方式由场次自身的 userFeeDetails.payType 决定（有些时段
- * 只支持线上支付）。PAY_OFFLINE 不产生线上扣款；PAY_ONLINE 会生成待支付
- * 订单，结果里如实告知用户去"我的预约"完成支付，超时自动取消。
+ * 支付说明：任何场次都可由用户选线上/线下支付（2026-08-29 用户在前端确认；
+ * 场次 userFeeDetails.payType 数字码只是前端预选默认值，不是限制）。
+ * 规则：付费场次必须由用户明确选择——模型调用时传 payType；用户没说过
+ * 就不传，skill 返回 PAY_TYPE_REQUIRED 提醒模型去问，问完再调。
+ * 免费场次不问，直接下单。
  */
 import type {BookResult, SportsClient} from "../../client/sports/SportsClient";
 import {ThuError} from "../../client/errors";
@@ -54,9 +56,11 @@ export function createBookSportsFieldSkill(client: SportsBooker, opts: {captchaS
     return {
         name: "book_sports_field",
         description:
-            "预约体育场馆的一个场次（写操作，会真实下单，付费场次会生成待支付订单）。" +
+            "预约体育场馆的一个场次（写操作，会真实下单）。" +
             "调用前必须先用 get_sports_resources 确认该时段有空场，并向用户复述" +
-            "场馆/日期/时段/场地/费用，得到明确同意后才调用。",
+            "场馆/日期/时段/场地/费用，得到明确同意后才调用。" +
+            "付费场次还需用户明确选择支付方式（线上/线下）：用户说过就传 payType；" +
+            "没说过不要传也不要猜，skill 会返回 PAY_TYPE_REQUIRED，这时先问用户再重新调用。",
         requiresConfirmation: true,
         inputSchema: {
             type: "object",
@@ -73,6 +77,14 @@ export function createBookSportsFieldSkill(client: SportsBooker, opts: {captchaS
                 fieldName: {
                     type: "string",
                     description: "场地名，如“羽03”；省略时自动选该时段第一块空场",
+                },
+                payType: {
+                    type: "string",
+                    enum: ["PAY_ONLINE", "PAY_OFFLINE"],
+                    description:
+                        "支付方式：PAY_ONLINE=线上支付（生成待支付订单，需线上付款），" +
+                        "PAY_OFFLINE=线下支付（到场馆付，不动线上资金）。" +
+                        "仅在用户明确说过支付方式时填写；没说过就省略",
                 },
             },
             required: ["resourceName", "sessionStart"],
@@ -91,6 +103,9 @@ export function createBookSportsFieldSkill(client: SportsBooker, opts: {captchaS
             }
             if (raw.fieldName !== undefined && typeof raw.fieldName !== "string") {
                 return fail("INVALID_INPUT", "fieldName 必须是字符串");
+            }
+            if (raw.payType !== undefined && raw.payType !== "PAY_ONLINE" && raw.payType !== "PAY_OFFLINE") {
+                return fail("INVALID_INPUT", "payType 只能是 PAY_ONLINE（线上）或 PAY_OFFLINE（线下）");
             }
             const target = raw.date === undefined ? new Date() : parseDate(raw.date as string);
             if (target === null) {
@@ -147,6 +162,24 @@ export function createBookSportsFieldSkill(client: SportsBooker, opts: {captchaS
                     chosen = named;
                 }
 
+                // 付费场次必须由用户明确选择支付方式（用户在前端确认任何场次
+                // 都能选线上/线下）。没选就不下单，让模型先回去问用户。
+                // 免费场次（费用 0）不涉及支付，直接放行。
+                const fee0 = chosen.session.feeYuan;
+                const needsPay = fee0 === null || fee0 > 0;
+                if (needsPay && raw.payType === undefined) {
+                    return fail(
+                        "PAY_TYPE_REQUIRED",
+                        `该场次费用 ${fee0 === null ? "未知" : `${fee0} 元`}。请先询问用户选择` +
+                        `线上支付（PAY_ONLINE，生成订单后线上付款）还是线下支付（PAY_OFFLINE，到场馆付），` +
+                        `得到答复后带上 payType 重新调用。尚未下单。`,
+                    );
+                }
+                // 用户选择 > 场次默认标注 > PAY_OFFLINE
+                const payType = (raw.payType as "PAY_ONLINE" | "PAY_OFFLINE" | undefined)
+                    ?? chosen.session.payType
+                    ?? "PAY_OFFLINE";
+
                 // 验证码：系统开启滑块验证时，先过码再下单。
                 // 没有过码器的环境直接报错，不静默失败。
                 let captcha: string | undefined;
@@ -191,15 +224,14 @@ export function createBookSportsFieldSkill(client: SportsBooker, opts: {captchaS
                     date: dateStr,
                     startTime: chosen.session.start,
                     endTime: chosen.session.end,
-                    payType: chosen.session.payType,
+                    payType,
                     ...(captcha ? {captcha} : {}),
                 });
 
                 const time = `${chosen.session.start}-${chosen.session.end}`;
                 const fee = chosen.session.feeYuan;
-                // 支付方式由场次决定：PAY_ONLINE 会生成待支付订单（需线上付款，
+                // 支付方式由用户选择：PAY_ONLINE 会生成待支付订单（需线上付款，
                 // 超时自动取消）；PAY_OFFLINE 不产生线上扣款，到场付。
-                const payType = chosen.session.payType ?? "PAY_OFFLINE";
                 const message = result.orderGenerated && !result.freeOrder
                     ? `已下单，生成了待支付订单${fee !== null ? `（${fee} 元）` : ""}，请尽快到体育场馆预约系统的"我的预约"里完成支付，超时订单会自动取消。`
                     : `预约成功（${payType === "PAY_OFFLINE" ? `线下支付${fee !== null && fee > 0 ? `，${fee} 元请到场馆支付` : "，本场次免费"}` : "无需线上支付"}）。`;
