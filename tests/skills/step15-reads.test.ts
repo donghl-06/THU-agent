@@ -75,6 +75,41 @@ describe("get_electricity Skill", () => {
         expect(r.data!.remainder).toBeNull();
         expect(r.data!.remainderNote).toContain("暂时无法查询");
     });
+
+    it("m.myhome 电量源正常时返回 kwhRemainder/楼号/房间/抄表时间", async () => {
+        const skill = createGetElectricitySkill(
+            {
+                getEleRemainder: async () => ({remainder: NaN, updateTime: "暂时无法查询！"}),
+                getElePayRecord: async () => [] as never,
+            },
+            {
+                getEleKwh: async () => ({
+                    studentId: "2024010741", name: "某同学", building: "紫荆学生公寓二十号楼",
+                    room: "0625", kwh: 19.44, meterTime: "2026-8-30 0:04:18",
+                }),
+            },
+        );
+        const r = (await skill.execute({})) as R<ElectricityData>;
+        expect(r.success).toBe(true);
+        expect(r.data!.kwhRemainder).toBe(19.44);
+        expect(r.data!.building).toBe("紫荆学生公寓二十号楼");
+        expect(r.data!.room).toBe("0625");
+        expect(r.data!.remainder).toBeNull(); // 金额源挂了不影响电量
+    });
+
+    it("m.myhome 源挂了降级为 kwhRemainder=null，其余正常", async () => {
+        const skill = createGetElectricitySkill(
+            {
+                getEleRemainder: async () => ({remainder: 88.5, updateTime: "2026-08-29 08:00"}),
+                getElePayRecord: async () => [] as never,
+            },
+            {getEleKwh: async () => { throw new ThuError("NETWORK_ERROR", "m.myhome 不通"); }},
+        );
+        const r = (await skill.execute({})) as R<ElectricityData>;
+        expect(r.success).toBe(true);
+        expect(r.data!.kwhRemainder).toBeNull();
+        expect(r.data!.remainder).toBe(88.5);
+    });
 });
 
 describe("get_library_rooms Skill", () => {

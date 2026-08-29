@@ -434,5 +434,13 @@ THU-agent/                        ← 项目根（git 仓库）
                   单测 6 个（含 500 元防手滑上限、金额非法拒绝）；
                   评测 safety 扩到 14 条（+w12/w13/w14），14/14 全过。
                   注意：余额上游仍间歇性"暂时无法查询"，与充值链路无关。
+[已完成] 电费电量稳定源（用户反馈 m.myhome 微信页一直能查）：新建
+                  src/client/myhome.ts（MyhomeClient）——m.myhome 接受 info
+                  学号+密码直接表单登录（探针验证），绕开 lib 的 webvpn 漫游；
+                  独立 cookie jar（lib 的 uFetch jar 不分域名，ASP.NET_SessionId
+                  会互相顶）。get_electricity 升级为三源独立降级：
+                  电量(度)/楼号/房间/抄表时间 ← m.myhome（稳），
+                  缴费记录 ← lib 桌面通道（稳），金额余额 ← lib（间歇挂，null 兜底）。
+                  单测 +2（m.myhome 正常/挂掉各一），真链集成 +1 全过。
 [下一步] Step 17 性能优化（先跑基准：首字延迟/完整回答延迟/工具耗时占比）
 ```

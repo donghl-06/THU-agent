@@ -19,6 +19,7 @@ import {createBookLibrarySeatSkill} from "./library/bookLibrarySeat";
 import {createBookLibraryRoomSkill} from "./library/bookLibraryRoom";
 import {createCancelLibraryBookingSkill} from "./library/cancelLibraryBooking";
 import {createRechargeElectricitySkill} from "./dorm/rechargeElectricity";
+import {MyhomeClient} from "../client/myhome";
 import {createChaojiyingSolver} from "../client/captcha/chaojiying";
 import {config} from "../config/env";
 
@@ -43,9 +44,9 @@ export function createAllSkills(opts: SkillAssemblyOptions = {}): Skill[] {
         createGetClassroomStateSkill(thu),
         createGetLibrarySeatsSkill(thu),
         createGetSportsResourcesSkill(sports),
-        // Step 15：扩充的读技能
+        // Step 15：扩充的读技能（电费带 m.myhome 电量源，比 lib 通道稳）
         createGetReportSkill(thu),
-        createGetElectricitySkill(thu),
+        createGetElectricitySkill(thu, new MyhomeClient()),
         createGetLibraryRoomsSkill(thu),
         // Step 16：我的图书馆预约（取消场景前置查询）
         createGetMyLibraryBookingsSkill(thu),

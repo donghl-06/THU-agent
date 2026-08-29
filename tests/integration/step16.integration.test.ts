@@ -25,4 +25,12 @@ describe("Step 16 图书馆预约技能（真实链路，只读）", () => {
         expect(found.length).toBeGreaterThan(0);
         console.log(`集成测试：按学号搜索命中 ${found.length} 人（${found[0].department}）`);
     }, 60000);
+
+    it("MyhomeClient 直登 m.myhome 查到电量（比 lib 通道稳的源）", async () => {
+        const {MyhomeClient} = await import("../../src/client/myhome");
+        const info = await new MyhomeClient().getEleKwh();
+        expect(Number.isFinite(info.kwh)).toBe(true);
+        expect(info.room).not.toBe("");
+        console.log(`集成测试：${info.building} ${info.room} 剩余电量 ${info.kwh} 度（抄表 ${info.meterTime}）`);
+    }, 60000);
 });

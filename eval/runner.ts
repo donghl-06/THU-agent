@@ -90,6 +90,10 @@ const CANNED: Record<string, (input: Record<string, unknown>) => SkillResult> = 
         ],
     }),
     get_electricity: () => ok({
+        kwhRemainder: 19.44,
+        building: "紫荆学生公寓二十号楼",
+        room: "0625",
+        meterTime: "2026-08-30 00:04",
         remainder: 88.5,
         remainderNote: "2026-08-29 08:00",
         recentPayRecords: [{time: "2026-08-17 07:58:02", amount: "20.00", channel: "微信", status: "已成功"}],
