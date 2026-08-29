@@ -11,6 +11,7 @@
 import * as readline from "node:readline";
 import {Agent} from "../src/harness/agentLoop";
 import {createAllSkills} from "../src/skills";
+import {config} from "../src/config/env";
 
 const today = new Date().toLocaleDateString("zh-CN", {
     year: "numeric",
@@ -68,7 +69,8 @@ const confirmWrite = async (call: {function: {name: string; arguments: string}})
 // 验证码求解器不在这里传：createAllSkills 会在 .env 配了超级鹰（CJY_*）时自动接上
 const agent = new Agent(createAllSkills(), SYSTEM_PROMPT, undefined, confirmWrite);
 
-console.log("清华小助手已就绪（输入 exit 退出）\n");
+console.log("清华小助手已就绪（输入 exit 退出）");
+console.log(`（超级鹰打码：${config.chaojiying.configured ? "已配置 ✅ 预约可自动过验证码" : "未配置 ⚠️ 预约会被滑块验证码挡住"}）\n`);
 
 // eslint-disable-next-line no-constant-condition
 while (true) {
