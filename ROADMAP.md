@@ -330,12 +330,17 @@ THU-agent/                        ← 项目根（git 仓库）
                   Skill 加 requiresConfirmation 标记，Harness 确认流
                   （模型提议→终端展示参数→用户输入 y→才执行；无确认回调时
                   失败关闭，拒绝结果回喂模型）；book_sports_field 预约 Skill 落地
-                  （语义参数→uuid 解析、场景必须唯一匹配、PAY_OFFLINE 不动线上资金）。
+                  （语义参数→uuid 解析、场景必须唯一匹配、按场次 payType 支付）。
                   验证码链路接超级鹰打码平台（单次约 0.01 元，自动过滑块）。
-                  实测修掉两个真问题：drag/check 通过后必须用服务端新 token 下单、
-                  formParam 需先查 brief 换 deployUuid。
-[待验收] 真实下单端到端：链路已推进到 addReserve 最后一环
-                  （验证码✅ 表单✅），实测时恰逢未支付订单阻断 + 目标场次被订走，
-                  等有合适场次时在 pnpm agent 里完成最后一单验收
+                  真实下单端到端验收通过 🎉（2026-08-30 06:00 气膜馆羽02，
+                  生成待支付订单）。实测排掉四个只有真下单才暴露的问题：
+                  ① drag/check 通过后须用服务端新 token 下单
+                  ② formParam 须先查 brief 换 deployUuid
+                  ③ 账号有未支付订单时一切新预约被拒（顺带发现用户旧抢场脚本
+                     的计划任务还在跑）
+                  ④ payType 须按场次 userFeeDetails.payType 数字码映射
+                     {1:线上,2:线下,3:线上}，硬编码 PAY_OFFLINE 会被部分时段拒单
+                  另：超级鹰识别有约半数误差率，靠"候选逐个试（6111 可续试）+
+                  整链换 3 张图（6110 失效换新）"消化，实测 3 次内必过
 [下一步] Step 14 Evaluation（eval/cases.json + eval/runner.ts 批量跑分）
 ```

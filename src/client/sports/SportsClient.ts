@@ -538,8 +538,11 @@ interface RawSession {
     beginTime?: string;
     endTime?: string;
     reserveStatus?: {reserveStatus?: string; reserveStatusReason?: string};
-    userFeeDetails?: {chargingUnitPrice?: number; payType?: string};
+    userFeeDetails?: {chargingUnitPrice?: number; payType?: number};
 }
+
+/** 场次数据里 payType 是数字码，前端映射表（chunk-0e504f6d）：1→线上 2→线下 3→线上 */
+const PAY_TYPE_MAP: Record<number, string> = {1: "PAY_ONLINE", 2: "PAY_OFFLINE", 3: "PAY_ONLINE"};
 
 /** 从 sessionVo 解析场次表，按开始时间排序 */
 function parseSessions(f: SportsField): SportsSession[] {
@@ -560,7 +563,9 @@ function parseSessions(f: SportsField): SportsSession[] {
                 feeYuan: typeof s.userFeeDetails?.chargingUnitPrice === "number"
                     ? s.userFeeDetails.chargingUnitPrice / 100
                     : null,
-                ...(s.userFeeDetails?.payType ? {payType: s.userFeeDetails.payType} : {}),
+                ...(typeof s.userFeeDetails?.payType === "number" && PAY_TYPE_MAP[s.userFeeDetails.payType]
+                    ? {payType: PAY_TYPE_MAP[s.userFeeDetails.payType]}
+                    : {}),
             };
         })
         .sort((a, b) => a.start.localeCompare(b.start));
