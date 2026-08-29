@@ -27,6 +27,8 @@ export interface SkillAssemblyOptions {
     /** 滑块验证码求解器。不提供且 .env 配了超级鹰（CJY_*）时自动用超级鹰；
      *  两者都没有时预约遇验证码会报 CAPTCHA_REQUIRED */
     captchaSolver?: CaptchaSolver;
+    /** true 时装配后立刻后台预热登录态（首次提问不用再等登录） */
+    prewarm?: boolean;
 }
 
 /** 求解器决策：显式传入优先，其次 .env 里的超级鹰配置（导出以便单测） */
@@ -38,6 +40,10 @@ export function createAllSkills(opts: SkillAssemblyOptions = {}): Skill[] {
     const thu = new ThuClient();
     const sports = new SportsClient();
     const captchaSolver = resolveCaptchaSolver(opts.captchaSolver);
+    if (opts.prewarm) {
+        // 后台预热登录态，失败不影响启动（首个工具调用会重试登录）
+        void thu.login().catch(() => {});
+    }
     return [
         createGetScheduleSkill(thu),
         createGetCampusCardInfoSkill(thu),

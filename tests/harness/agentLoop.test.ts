@@ -191,3 +191,99 @@ describe("写操作确认流", () => {
         expect(JSON.parse(result.toolCalls[0].result).error.code).toBe("CONFIRMATION_UNAVAILABLE");
     });
 });
+
+describe("Step 17 性能优化行为", () => {
+    /** 慢速读 Skill：记录执行起止时间，用于验证并行 */
+    function slowReadSkill(name: string, ms: number, log: {name: string; start: number; end: number}[]): Skill {
+        return {
+            name,
+            description: "慢速读，仅测试用",
+            inputSchema: {type: "object", properties: {}},
+            async execute() {
+                const start = performance.now();
+                await new Promise((r) => setTimeout(r, ms));
+                log.push({name, start, end: performance.now()});
+                return ok({done: name});
+            },
+        };
+    }
+
+    it("同一轮的多个纯读工具调用并行执行", async () => {
+        const log: {name: string; start: number; end: number}[] = [];
+        const twoCalls: ChatMessage = {
+            role: "assistant",
+            content: null,
+            tool_calls: [
+                {id: "c1", type: "function", function: {name: "slow_a", arguments: "{}"}},
+                {id: "c2", type: "function", function: {name: "slow_b", arguments: "{}"}},
+            ],
+        };
+        const llm = fakeLlm([twoCalls, textMsg("都查完了")]);
+        const agent = new Agent(
+            [slowReadSkill("slow_a", 100, log), slowReadSkill("slow_b", 100, log)],
+            "你是测试助手", llm,
+        );
+        await agent.ask("查两个东西");
+        // 串行的话 b.start >= a.end；并行则 b.start < a.end
+        expect(log).toHaveLength(2);
+        const a = log.find((l) => l.name === "slow_a")!;
+        const b = log.find((l) => l.name === "slow_b")!;
+        expect(b.start).toBeLessThan(a.end);
+    });
+
+    it("含写操作的一轮调用退化为串行（确认顺序不乱）", async () => {
+        const state = {executed: false};
+        const log: {name: string; start: number; end: number}[] = [];
+        const twoCalls: ChatMessage = {
+            role: "assistant",
+            content: null,
+            tool_calls: [
+                {id: "c1", type: "function", function: {name: "slow_a", arguments: "{}"}},
+                {id: "c2", type: "function", function: {name: "book_thing", arguments: "{}"}},
+            ],
+        };
+        const llm = fakeLlm([twoCalls, textMsg("完成")]);
+        const agent = new Agent(
+            [slowReadSkill("slow_a", 50, log), fakeWriteSkill(state)],
+            "你是测试助手", llm, async () => true,
+        );
+        await agent.ask("查一下再订");
+        expect(state.executed).toBe(true);
+    });
+
+    it("onToolEvent 发出 start/end 事件且 end 带耗时", async () => {
+        const events: {phase: string; name: string; success?: boolean}[] = [];
+        const llm = fakeLlm([toolCallMsg("echo", {text: "hi"}), textMsg("回了")]);
+        const agent = new Agent([echoSkill], "你是测试助手", llm);
+        await agent.ask("回显", {onToolEvent: (e) => events.push(e)});
+        expect(events.map((e) => e.phase)).toEqual(["start", "end"]);
+        expect(events[0].name).toBe("echo");
+        expect(events[1].success).toBe(true);
+    });
+
+    it("LLM 不支持流式时 onToken 自动退回普通 chat（兼容假 LLM）", async () => {
+        const llm = fakeLlm([textMsg("你好呀")]);
+        const agent = new Agent([], "你是测试助手", llm);
+        const tokens: string[] = [];
+        const r = await agent.ask("你好", {onToken: (t) => tokens.push(t)});
+        expect(r.answer).toBe("你好呀");
+        // 假 LLM 没实现 chatStream，走 chat，onToken 不应被调用
+        expect(tokens).toEqual([]);
+    });
+
+    it("工具执行抛异常时兜底成 TOOL_CRASH 结果喂回模型，不炸掉整轮", async () => {
+        const crashSkill: Skill = {
+            name: "crash",
+            description: "必炸，仅测试用",
+            inputSchema: {type: "object", properties: {}},
+            async execute() { throw new Error("boom"); },
+        };
+        const llm = fakeLlm([toolCallMsg("crash", {}), textMsg("工具挂了，如实告知")]);
+        const agent = new Agent([crashSkill], "你是测试助手", llm);
+        const r = await agent.ask("试试");
+        const toolResult = JSON.parse(r.toolCalls[0].result);
+        expect(toolResult.success).toBe(false);
+        expect(toolResult.error.code).toBe("TOOL_CRASH");
+        expect(r.answer).toContain("如实告知");
+    });
+});

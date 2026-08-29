@@ -21,10 +21,17 @@ import {normalizeError, ThuError} from "./errors";
 
 /** login() 遇到网络类错误时的最大尝试次数（含首次） */
 const LOGIN_MAX_ATTEMPTS = 3;
+/** 元数据缓存 TTL：馆/楼层结构几乎不变，缓存 24 小时（Step 17 基准：
+ *  get_library_seats 的级联里这两个往返占了可省的大头） */
+const META_CACHE_TTL_MS = 24 * 3600 * 1000;
 
 export class ThuClient {
     private readonly helper: InfoHelper;
     private loggedIn = false;
+    /** 进行中的 login Promise：并发调用共享同一次登录，不重复打认证接口 */
+    private loginInflight?: Promise<void>;
+    /** 元数据缓存（key → {value, expireAt}），进程内有效 */
+    private readonly metaCache = new Map<string, {value: unknown; expireAt: number}>();
 
     constructor(hooks: TwoFactorHooks = {}) {
         this.helper = new InfoHelper();
@@ -32,10 +39,17 @@ export class ThuClient {
     }
 
     /**
-     * 登录（幂等）。网络类错误自动重试，认证类错误直接抛出。
+     * 登录（幂等且并发安全：并发调用共享同一次登录）。网络类错误自动重试，认证类错误直接抛出。
      */
     async login(): Promise<void> {
         if (this.loggedIn) return;
+        this.loginInflight ??= this.doLogin().finally(() => {
+            this.loginInflight = undefined;
+        });
+        return this.loginInflight;
+    }
+
+    private async doLogin(): Promise<void> {
         let lastError: ThuError | undefined;
         for (let attempt = 1; attempt <= LOGIN_MAX_ATTEMPTS; attempt++) {
             try {
@@ -53,6 +67,19 @@ export class ThuClient {
             }
         }
         throw lastError;
+    }
+
+    /** 读元数据缓存（命中且未过期才返回） */
+    private cacheGet<T>(key: string): T | undefined {
+        const hit = this.metaCache.get(key);
+        if (hit && hit.expireAt > Date.now()) return hit.value as T;
+        if (hit) this.metaCache.delete(key);
+        return undefined;
+    }
+
+    /** 写元数据缓存 */
+    private cacheSet(key: string, value: unknown): void {
+        this.metaCache.set(key, {value, expireAt: Date.now() + META_CACHE_TTL_MS});
     }
 
     /** 内部统一调用入口：确保已登录 + 错误归一化 */
@@ -99,17 +126,26 @@ export class ThuClient {
         return this.call(() => this.helper.getClassroomState(building, week));
     }
 
-    /** 获取图书馆馆区列表（总馆、文科馆等） */
+    /** 获取图书馆馆区列表（总馆、文科馆等）。结构几乎不变，走 24h 缓存 */
     async getLibraryList(): ReturnType<InfoHelper["getLibraryList"]> {
-        return this.call(() => this.helper.getLibraryList());
+        const cached = this.cacheGet<Awaited<ReturnType<InfoHelper["getLibraryList"]>>>("libList");
+        if (cached) return cached;
+        const fresh = await this.call(() => this.helper.getLibraryList());
+        this.cacheSet("libList", fresh);
+        return fresh;
     }
 
-    /** 获取某馆的楼层列表。dateChoice：0 今天 / 1 明天 */
+    /** 获取某馆的楼层列表。dateChoice：0 今天 / 1 明天。结构几乎不变，走 24h 缓存 */
     async getLibraryFloorList(
         library: Parameters<InfoHelper["getLibraryFloorList"]>[0],
         dateChoice: 0 | 1,
     ): ReturnType<InfoHelper["getLibraryFloorList"]> {
-        return this.call(() => this.helper.getLibraryFloorList(library, dateChoice));
+        const key = `libFloors:${library.id}:${dateChoice}`;
+        const cached = this.cacheGet<Awaited<ReturnType<InfoHelper["getLibraryFloorList"]>>>(key);
+        if (cached) return cached;
+        const fresh = await this.call(() => this.helper.getLibraryFloorList(library, dateChoice));
+        this.cacheSet(key, fresh);
+        return fresh;
     }
 
     /** 获取某楼层的区域列表（含座位总数/空位数）。dateChoice：0 今天 / 1 明天 */

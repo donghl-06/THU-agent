@@ -442,5 +442,21 @@ THU-agent/                        ← 项目根（git 仓库）
                   电量(度)/楼号/房间/抄表时间 ← m.myhome（稳），
                   缴费记录 ← lib 桌面通道（稳），金额余额 ← lib（间歇挂，null 兜底）。
                   单测 +2（m.myhome 正常/挂掉各一），真链集成 +1 全过。
-[下一步] Step 17 性能优化（先跑基准：首字延迟/完整回答延迟/工具耗时占比）
+[已完成] Step 17 性能优化（基准先行，eval/benchmark.ts）：
+                  baseline 显示 LLM 占延迟 64~100%（无工具 4.5s / 单工具 19.1s /
+                  串联 19.7s / 重查询 22.2s），据此落地四项：
+                  ① LLM 流式输出（llmClient.chatStream 解析 SSE，agentLoop
+                    带 onToken 走流式，假 LLM 自动回退 chat）——首字延迟可测，
+                    回答逐 token 出现，不再盯空白
+                  ② 单轮多 tool_call 纯读并行执行（含写操作的一轮仍串行，
+                    确认顺序不乱）；串联用例工具墙钟从 7.1s → 6.3s
+                  ③ ThuClient 元数据缓存（馆列表/楼层列表 24h TTL，位置级联
+                    省往返；availability 不缓存）+ login 并发去重（inflight 共享）
+                  ④ 启动预热登录（createAllSkills prewarm）+ 工具 start/end
+                    事件暴露给调用方（CLI 显示进度与耗时，为 Web UI 铺路）
+                  教训：LLM API 延迟波动极大（同问题 16.7s↔48.5s），总延迟
+                  对比基本是噪声；结构性收益靠单测验证（并行/事件/回退各 1 个），
+                  benchmark 的 timedLlm 包装一开始没转发 chatStream 导致 TTFB
+                  测了个寂寞——包装器必须完整转发接口
+[下一步] Step 18 单用户 Web UI（HTTP+SSE，写操作确认弹窗，工具进度提示）
 ```

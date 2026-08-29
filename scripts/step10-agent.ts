@@ -66,7 +66,8 @@ const confirmWrite = async (call: {function: {name: string; arguments: string}})
 };
 
 // 验证码求解器不在这里传：createAllSkills 会在 .env 配了超级鹰（CJY_*）时自动接上
-const agent = new Agent(createAllSkills(), SYSTEM_PROMPT, undefined, confirmWrite);
+// prewarm：启动时后台登录，首个问题不用再等登录
+const agent = new Agent(createAllSkills({prewarm: true}), SYSTEM_PROMPT, undefined, confirmWrite);
 
 console.log("清华小助手已就绪（输入 exit 退出）\n");
 
@@ -77,16 +78,32 @@ while (true) {
     if (!q) continue;
     if (["exit", "quit", "退出"].includes(q.toLowerCase())) break;
     try {
-        const {answer, toolCalls} = await agent.ask(q);
+        let streamed = false;
+        const {answer, toolCalls} = await agent.ask(q, {
+            // 流式输出：token 到达即打印，首字延迟从整段生成降到首 token
+            onToken: (t) => {
+                if (!streamed) process.stdout.write("助手：");
+                streamed = true;
+                process.stdout.write(t);
+            },
+            // 工具进度：开始时提示，结束时报耗时（并行时多个提示会交错，可接受）
+            onToolEvent: (e) => {
+                if (e.phase === "start") {
+                    console.log(`  [调工具] ${e.name}…`);
+                } else {
+                    console.log(`  [工具${e.success ? "完成" : "失败"}] ${e.name} 耗时 ${((e.ms ?? 0) / 1000).toFixed(1)}s`);
+                }
+            },
+        });
         for (const t of toolCalls) {
-            // 打印工具调用轨迹，方便观察模型行为
-            console.log(`  [调工具] ${t.name}(${t.input})`);
             // 失败的工具调用把原因直接摆出来，免得模型转述时丢信息
             if (t.result.includes('"success":false')) {
-                console.log(`  [工具报错] ${t.result}`);
+                console.log(`  [工具报错] ${t.name}: ${t.result}`);
             }
         }
-        console.log(`助手：${answer}\n`);
+        // 非流式路径（理论上不会走到，兜底）：一次性打印完整回答
+        if (!streamed) console.log(`助手：${answer}`);
+        console.log();
     } catch (e) {
         console.log(`出错了：${(e as Error).message}\n`);
     }
