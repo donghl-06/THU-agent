@@ -20,10 +20,15 @@ export interface SkillAssemblyOptions {
     captchaSolver?: CaptchaSolver;
 }
 
+/** 求解器决策：显式传入优先，其次 .env 里的超级鹰配置（导出以便单测） */
+export function resolveCaptchaSolver(override?: CaptchaSolver): CaptchaSolver | undefined {
+    return override ?? (config.chaojiying.configured ? createChaojiyingSolver() : undefined);
+}
+
 export function createAllSkills(opts: SkillAssemblyOptions = {}): Skill[] {
     const thu = new ThuClient();
     const sports = new SportsClient();
-    const captchaSolver = opts.captchaSolver ?? (config.chaojiying.configured ? createChaojiyingSolver() : undefined);
+    const captchaSolver = resolveCaptchaSolver(opts.captchaSolver);
     return [
         createGetScheduleSkill(thu),
         createGetCampusCardInfoSkill(thu),
@@ -31,6 +36,6 @@ export function createAllSkills(opts: SkillAssemblyOptions = {}): Skill[] {
         createGetLibrarySeatsSkill(thu),
         createGetSportsResourcesSkill(sports),
         // 写操作：Harness 会在执行前向用户确认（requiresConfirmation）
-        createBookSportsFieldSkill(sports, {captchaSolver: opts.captchaSolver}),
+        createBookSportsFieldSkill(sports, {captchaSolver}),
     ];
 }
