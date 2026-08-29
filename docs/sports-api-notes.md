@@ -92,10 +92,16 @@ Iso10126 填充，base64。当前用到的端点都是明文 JSON，先保留兜
 ```
 
 - 成功返回 `data.resvIds`（数组）；多场地用 `addMultiReserve` + `multiSiteSessionReserve`（未实装）。
+- **账号存在未支付订单时（orderStatus=1），一切新预约都会被拒**：
+  "您有未支付的订单，请支付完成后，再进行预约。"（2026-08-29 实测）。
+  排查入口：`POST /api/reserve/reserveRecord` 翻页找 orderStatus=1 的记录。
 - 下单后必须 `orderCheck`：`orderGenerated && !freeOrder` = 生成了待支付订单，
   需到官方网页/App 完成支付，超时订单取消；`freeOrder` = 免费场次直接成功。
 - `payType` 枚举：`PAY_ONLINE`（线上）/ `PAY_OFFLINE`（线下，不产生线上扣款）/ `PAY_CARD`（次卡，需 purchaseUuid）。
-- `formParam`：`{formId: 场地 formRuleVo.formUuid（无则""), deployUuid:"", variables:{}, chooseCandidates:{}}`。
+- `formParam`：`formId` = 场地 `formRuleVo.formUuid`；**`deployUuid` 必须再查
+  `GET /workflow/process/brief/{formUuid}` 拿**（前端 onChangReserve 就是这么做的），
+  只填 formId 不填 deployUuid 会被拒："表单信息不能为空"（2026-08-29 实测）。
+  场地无表单时两者都传 ""。
 - **验证码**：提交阶段需要滑块拼图验证码（AJ-Captcha blockPuzzle；
   `GET /api/reserve/enableValidCode` 实测返回配置项 `sysKey=RESV_CODE, sysValue="1"` = 开启）。
   链：`POST /system/captcha/drag/get`（body: `{captchaType:"blockPuzzle", clientUid, ts}`，

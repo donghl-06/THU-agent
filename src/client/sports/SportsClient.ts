@@ -412,6 +412,16 @@ export class SportsClient {
         captcha?: string;
     }): Promise<BookResult> {
         const user = await this.getLoginUser();
+        // 前端流程：场地有申请表单（formRuleVo.formUuid）时，先查
+        // /workflow/process/brief/{formUuid} 拿 deployUuid，两个 id 一起进
+        // formParam，否则服务端报"表单信息不能为空"（2026-08-29 实测）
+        let deployUuid = "";
+        if (req.formUuid) {
+            const brief = await this.api<{deployUuid?: string}>(
+                `/workflow/process/brief/${req.formUuid}`,
+            );
+            deployUuid = brief?.deployUuid ?? "";
+        }
         const timeRange = {
             startTime: `${req.date} ${req.startTime}:00`,
             endTime: `${req.date} ${req.endTime}:00`,
@@ -432,7 +442,7 @@ export class SportsClient {
                 purchaseUuid: "",
                 formParam: {
                     formId: req.formUuid,
-                    deployUuid: "",
+                    deployUuid,
                     variables: {},
                     chooseCandidates: {},
                 },
