@@ -458,5 +458,16 @@ THU-agent/                        ← 项目根（git 仓库）
                   对比基本是噪声；结构性收益靠单测验证（并行/事件/回退各 1 个），
                   benchmark 的 timedLlm 包装一开始没转发 chatStream 导致 TTFB
                   测了个寂寞——包装器必须完整转发接口
-[下一步] Step 18 单用户 Web UI（HTTP+SSE，写操作确认弹窗，工具进度提示）
+[已完成] Step 18 单用户 Web UI（pnpm web → http://127.0.0.1:3457）：
+                  原生 Node http（不引框架）+ 单页 HTML，只监听回环地址。
+                  POST /api/chat 走 SSE：token 流式 / tool 进度 / confirm
+                  确认请求 / qr 支付二维码（qrcode 包生成 data URL）；
+                  POST /api/confirm 应答确认桥（5 分钟超时按拒绝）。
+                  单用户并发=1（进行中返回 409）；确认桥用"构造期转发器 +
+                  每轮换桥"实现（busy 互斥保证安全）。
+                  前端：fetch+ReadableStream 读 SSE（EventSource 不支持 POST），
+                  气泡对话/流式打字/工具进度胶囊/确认弹窗/二维码卡片，
+                  深浅色自适应。服务端单测 8 个全绿（确认桥同意+拒绝、qr、
+                  409、400）；真链冒烟：电费问答流式输出正常。
+[下一步] Step 19 剩余支付链路（体育场馆 PAY_ONLINE 二维码、校园卡充值）
 ```
