@@ -58,6 +58,9 @@ export interface SportsSession {
     reason?: string;
     /** 当前用户该场次价格（元，由分的 userFeeDetails 换算），未知为 null */
     feeYuan: number | null;
+    /** 该场次要求的支付方式（userFeeDetails.payType，如 PAY_ONLINE/PAY_OFFLINE）。
+     *  下单必须按它传，否则被拒（"当前开始时间不支持线下支付"，2026-08-29 实测） */
+    payType?: string;
 }
 
 export interface SportsField {
@@ -372,8 +375,12 @@ export class SportsClient {
         const resp = (await this.rawRequest("/system/captcha/drag/check", {
             method: "POST",
             body: {captchaType: "blockPuzzle", pointJson, token: cap.token},
-        })) as {success?: boolean; repData?: {result?: boolean; token?: string}};
+        })) as {success?: boolean; repCode?: string; repMsg?: string; repData?: {result?: boolean; token?: string}};
         const passed = resp.success === true && resp.repData?.result === true;
+        if (!passed) {
+            // 失败时保留服务端原因，便于区分"位置不对"和"token 失效"
+            console.error(`  [drag/check 失败] X=${x} repCode=${resp.repCode ?? "?"} repMsg=${resp.repMsg ?? "?"}`);
+        }
         if (passed && resp.repData?.token) {
             cap.token = resp.repData.token;
         }
@@ -410,6 +417,9 @@ export class SportsClient {
         endTime: string;
         /** 滑块验证码 token（enableValidCode 开启时必须）；默认空 */
         captcha?: string;
+        /** 支付方式：必须传场次的 session.payType（有些时段只支持线上支付）。
+         *  场次没标时回退 PAY_OFFLINE（不动线上资金） */
+        payType?: string;
     }): Promise<BookResult> {
         const user = await this.getLoginUser();
         // 前端流程：场地有申请表单（formRuleVo.formUuid）时，先查
@@ -438,7 +448,7 @@ export class SportsClient {
                 siteSessionReserve: [sessionItem],
                 resvMember: [user.id],
                 resvKind: "CURRENT_RESERVE",
-                payType: "PAY_OFFLINE",
+                payType: req.payType ?? "PAY_OFFLINE",
                 purchaseUuid: "",
                 formParam: {
                     formId: req.formUuid,
@@ -528,7 +538,7 @@ interface RawSession {
     beginTime?: string;
     endTime?: string;
     reserveStatus?: {reserveStatus?: string; reserveStatusReason?: string};
-    userFeeDetails?: {chargingUnitPrice?: number};
+    userFeeDetails?: {chargingUnitPrice?: number; payType?: string};
 }
 
 /** 从 sessionVo 解析场次表，按开始时间排序 */
@@ -550,6 +560,7 @@ function parseSessions(f: SportsField): SportsSession[] {
                 feeYuan: typeof s.userFeeDetails?.chargingUnitPrice === "number"
                     ? s.userFeeDetails.chargingUnitPrice / 100
                     : null,
+                ...(s.userFeeDetails?.payType ? {payType: s.userFeeDetails.payType} : {}),
             };
         })
         .sort((a, b) => a.start.localeCompare(b.start));

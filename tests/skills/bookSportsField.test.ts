@@ -10,7 +10,7 @@ const SCENES = [
     {uuid: "u2", sceneName: "综体羽毛球", relatedType: "DEV"},
 ];
 
-function field(uuid: string, siteName: string, sessions: {uuid: string; start: string; end: string; available: boolean; feeYuan?: number | null}[]): SportsField {
+function field(uuid: string, siteName: string, sessions: {uuid: string; start: string; end: string; available: boolean; feeYuan?: number | null; payType?: string}[]): SportsField {
     return {
         uuid, siteName, siteType: "DEV", kindName: "羽毛球", location: "", sceneUuid: "u1",
         reserveStatus: {reserveStatus: "Y", availableRange: []},
@@ -26,10 +26,11 @@ const FIELDS: SportsField[] = [
     field("f1", "羽01", [{uuid: "s1", start: "06:00", end: "08:00", available: true, feeYuan: 40}]),
     field("f2", "羽02", [{uuid: "s2", start: "06:00", end: "08:00", available: true, feeYuan: 40}]),
     field("f3", "羽03", [{uuid: "s3", start: "06:00", end: "08:00", available: false}]),
+    field("f4", "羽04", [{uuid: "s4", start: "20:00", end: "22:00", available: true, feeYuan: 40, payType: "PAY_ONLINE"}]),
 ];
 
 function fakeClient(opts: {bookImpl?: () => Promise<BookResult>; captcha?: boolean} = {}) {
-    const calls: {sceneUuid: string; sessionUuid: string; siteUuid: string; captcha?: string}[] = [];
+    const calls: {sceneUuid: string; sessionUuid: string; siteUuid: string; captcha?: string; payType?: string}[] = [];
     return {
         calls,
         listScenes: async () => SCENES,
@@ -38,7 +39,7 @@ function fakeClient(opts: {bookImpl?: () => Promise<BookResult>; captcha?: boole
         getDragCaptcha: async () => ({token: "t", secretKey: "k", backgroundBase64: "bg", jigsawBase64: "jg"}),
         checkDragCaptcha: async (_cap: unknown, _x: number) => true,
         buildCaptchaValue: (_cap: unknown, x: number) => `captcha-x${x}`,
-        bookSession: async (req: {sceneUuid: string; sessionUuid: string; siteUuid: string; captcha?: string}): Promise<BookResult> => {
+        bookSession: async (req: {sceneUuid: string; sessionUuid: string; siteUuid: string; captcha?: string; payType?: string}): Promise<BookResult> => {
             calls.push(req);
             return opts.bookImpl ? opts.bookImpl() : {resvIds: ["r1"], orderGenerated: false, freeOrder: true};
         },
@@ -139,6 +140,22 @@ describe("book_sports_field Skill（假数据，不真实下单）", () => {
         expect(r.success).toBe(false);
         expect(r.error!.code).toBe("CAPTCHA_FAILED");
         expect(client.calls).toHaveLength(0);
+    });
+
+    it("场次标注了支付方式时按场次传（有些时段只支持线上支付，2026-08-29 实测）", async () => {
+        const client = fakeClient();
+        const r = await exec(client, {resourceName: "气膜馆", date: "2026-08-30", sessionStart: "20:00"});
+        expect(r.success).toBe(true);
+        expect(client.calls[0].payType).toBe("PAY_ONLINE");
+        expect(r.data!.payType).toBe("PAY_ONLINE");
+    });
+
+    it("场次没标支付方式时回退 PAY_OFFLINE（不动线上资金）", async () => {
+        const client = fakeClient();
+        const r = await exec(client, {resourceName: "气膜馆", date: "2026-08-30", sessionStart: "06:00"});
+        expect(r.success).toBe(true);
+        expect(client.calls[0].payType).toBeUndefined(); // skill 不传，client 层回退
+        expect(r.data!.payType).toBe("PAY_OFFLINE");
     });
 
     it("参数校验：缺 resourceName / 非法 sessionStart / 非法日期", async () => {

@@ -98,6 +98,9 @@ Iso10126 填充，base64。当前用到的端点都是明文 JSON，先保留兜
 - 下单后必须 `orderCheck`：`orderGenerated && !freeOrder` = 生成了待支付订单，
   需到官方网页/App 完成支付，超时订单取消；`freeOrder` = 免费场次直接成功。
 - `payType` 枚举：`PAY_ONLINE`（线上）/ `PAY_OFFLINE`（线下，不产生线上扣款）/ `PAY_CARD`（次卡，需 purchaseUuid）。
+  **必须按场次 `sessionVo[].userFeeDetails.payType` 传**——有的时段只支持线上支付，
+  硬传 PAY_OFFLINE 会被拒："当前开始时间不支持线下支付"（2026-08-29 实测）。
+  场次没标注时回退 PAY_OFFLINE。
 - `formParam`：`formId` = 场地 `formRuleVo.formUuid`；**`deployUuid` 必须再查
   `GET /workflow/process/brief/{formUuid}` 拿**（前端 onChangReserve 就是这么做的），
   只填 formId 不填 deployUuid 会被拒："表单信息不能为空"（2026-08-29 实测）。
@@ -112,6 +115,9 @@ Iso10126 填充，base64。当前用到的端点都是明文 JSON，先保留兜
   **check 通过时 repData.token 会下发新 token**（真实抓包确认，旧项目 captcha.py
   Step 4），addReserve 的 `captcha` 字段 = 同法加密 `新token + "---" + {"x":X,"y":5}`。
   SportsClient 的 checkDragCaptcha 通过时会直接更新 cap.token。
+  drag/check 失败码实测（2026-08-29）：`6111` = 位置不对，token 仍有效可继续试下一候选；
+  `6110` = 验证码已失效（试错次数限制约 2-3 次/张），必须重新 drag/get 换新图。
+  识别策略因此是"候选逐个试 + 整链最多换 3 张图"（bookSportsField CAPTCHA_MAX_ATTEMPTS）。
   SportsClient 已实现 getDragCaptcha/checkDragCaptcha/buildCaptchaValue；
   X 的求解走超级鹰打码平台（src/client/captcha/chaojiying.ts，移植自旧项目的
   ChaojiyingSolver：codetype 9900 返回候选缺口矩形，按"矩形高度≈拼图块高度"排序，

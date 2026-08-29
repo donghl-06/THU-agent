@@ -7,9 +7,9 @@
  * 模型不需要也不应该传 uuid——输入全是人能读懂的语义参数
  * （场馆关键词/日期/时段/场地名），Skill 内部解析成 sessionUuid 等标识符。
  *
- * 支付说明：下单固定走 PAY_OFFLINE（线下支付），不产生线上扣款；
- * 付费场次的费用到场馆线下支付。若 orderCheck 仍返回待支付订单
- * （orderGenerated && !freeOrder），结果里如实告知用户去官方渠道处理。
+ * 支付说明：支付方式由场次自身的 userFeeDetails.payType 决定（有些时段
+ * 只支持线上支付）。PAY_OFFLINE 不产生线上扣款；PAY_ONLINE 会生成待支付
+ * 订单，结果里如实告知用户去"我的预约"完成支付，超时自动取消。
  */
 import type {BookResult, SportsClient} from "../../client/sports/SportsClient";
 import {ThuError} from "../../client/errors";
@@ -37,6 +37,8 @@ export interface BookSportsFieldData {
     resvIds: string[];
     /** 给用户看的下一步提示 */
     message: string;
+    /** 实际使用的支付方式（场次决定，如 PAY_ONLINE/PAY_OFFLINE） */
+    payType: string;
 }
 
 type SportsBooker = Pick<
@@ -189,16 +191,18 @@ export function createBookSportsFieldSkill(client: SportsBooker, opts: {captchaS
                     date: dateStr,
                     startTime: chosen.session.start,
                     endTime: chosen.session.end,
+                    payType: chosen.session.payType,
                     ...(captcha ? {captcha} : {}),
                 });
 
                 const time = `${chosen.session.start}-${chosen.session.end}`;
                 const fee = chosen.session.feeYuan;
-                // 下单走 PAY_OFFLINE（线下支付）：不产生线上扣款。
-                // orderCheck 返回 orderGenerated && !freeOrder 时说明仍需走支付流程，如实告知。
+                // 支付方式由场次决定：PAY_ONLINE 会生成待支付订单（需线上付款，
+                // 超时自动取消）；PAY_OFFLINE 不产生线上扣款，到场付。
+                const payType = chosen.session.payType ?? "PAY_OFFLINE";
                 const message = result.orderGenerated && !result.freeOrder
-                    ? `已下单，生成了待支付订单${fee !== null ? `（${fee} 元）` : ""}，请到体育场馆预约系统的"我的预约"里完成支付/确认，超时订单会取消。`
-                    : `预约成功（线下支付${fee !== null && fee > 0 ? `，${fee} 元请到场馆支付` : "，本场次免费"}）。`;
+                    ? `已下单，生成了待支付订单${fee !== null ? `（${fee} 元）` : ""}，请尽快到体育场馆预约系统的"我的预约"里完成支付，超时订单会自动取消。`
+                    : `预约成功（${payType === "PAY_OFFLINE" ? `线下支付${fee !== null && fee > 0 ? `，${fee} 元请到场馆支付` : "，本场次免费"}` : "无需线上支付"}）。`;
                 return ok({
                     venue: scene.sceneName,
                     field: chosen.field.siteName,
@@ -209,6 +213,7 @@ export function createBookSportsFieldSkill(client: SportsBooker, opts: {captchaS
                     freeOrder: result.freeOrder,
                     resvIds: result.resvIds,
                     message,
+                    payType,
                 });
             } catch (e) {
                 if (e instanceof ThuError) {
