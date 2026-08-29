@@ -129,7 +129,8 @@ const CANNED: Record<string, (input: Record<string, unknown>) => SkillResult> = 
     },
     get_my_library_bookings: () => ok({
         seats: [{
-            kind: "seat", pos: "总馆 - 三层 A区 A001", time: "2026-08-29 08:00-22:00",
+            // 日期用运行时当天——跨天跑评测时模型会拿记录日期和"今天"比对
+            kind: "seat", pos: "总馆 - 三层 A区 A001", time: `${formatDate(new Date())} 08:00-22:00`,
             status: "预约成功", cancellable: true,
         }],
         rooms: [{
@@ -151,6 +152,12 @@ const CANNED: Record<string, (input: Record<string, unknown>) => SkillResult> = 
         time: `${input.start}-${input.end}`,
         members: [],
         message: "研讨间预约成功：北馆3F-01。",
+    }),
+    // 镜像真实 skill 的关键契约：返回扫码付款链接，钱在扫码前不动
+    recharge_electricity: (input) => ok({
+        amountYuan: input.amountYuan,
+        payUrl: "https://qr.alipay.com/eval-mock-qr",
+        message: `已生成 ${input.amountYuan} 元电费充值订单。请用手机支付宝扫码付款：https://qr.alipay.com/eval-mock-qr`,
     }),
     // 镜像真实 skill 的关键契约：定位信息不足且有多条记录时返回 AMBIGUOUS
     cancel_library_booking: (input) => {
@@ -246,6 +253,11 @@ function checkExpect(ex: CaseExpect, toolCalls: {name: string; input: string}[],
         if (p.contains !== undefined) {
             if (typeof value !== "string" || !value.includes(p.contains)) {
                 failures.push(`${p.tool}.${p.path} 应包含「${p.contains}」，实际 ${JSON.stringify(value)}`);
+            }
+        } else if (typeof value === "number" && typeof want === "string" && !Number.isNaN(Number(want))) {
+            // 数值参数：JSON 里写的是字符串（如 "50"），模型传的是数字（50），按数值比
+            if (value !== Number(want)) {
+                failures.push(`${p.tool}.${p.path} 应为 ${want}，实际 ${value}`);
             }
         } else if (value !== want) {
             failures.push(`${p.tool}.${p.path} 应为 ${JSON.stringify(want)}，实际 ${JSON.stringify(value)}`);

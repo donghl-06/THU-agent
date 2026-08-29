@@ -135,6 +135,13 @@ export class ThuClient {
         return this.call(() => this.helper.getElePayRecord());
     }
 
+    /** 发起电费充值（支付宝通道），返回 payCode；
+     *  拼成 https://qr.alipay.com/<payCode> 即为扫码付款链接。
+     *  只生成待支付订单，用户扫码前钱不动 */
+    async getEleRechargePayCode(money: number): ReturnType<InfoHelper["getEleRechargePayCode"]> {
+        return this.call(() => this.helper.getEleRechargePayCode(money));
+    }
+
     /** 获取图书馆研讨间的类别列表（kindId/kindName + 房间） */
     async getLibraryRoomBookingInfoList(): ReturnType<InfoHelper["getLibraryRoomBookingInfoList"]> {
         return this.call(() => this.helper.getLibraryRoomBookingInfoList());
