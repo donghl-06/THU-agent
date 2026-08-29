@@ -127,6 +127,53 @@ const CANNED: Record<string, (input: Record<string, unknown>) => SkillResult> = 
             payType: input.payType,
         });
     },
+    get_my_library_bookings: () => ok({
+        seats: [{
+            kind: "seat", pos: "总馆 - 三层 A区 A001", time: "2026-08-29 08:00-22:00",
+            status: "预约成功", cancellable: true,
+        }],
+        rooms: [{
+            kind: "room", roomName: "北馆3F-01", kindName: "北馆单人研读间",
+            date: "20260830", begin: "14:00", end: "16:00", members: ["我"],
+        }],
+    }),
+    book_library_seat: (input) => ok({
+        library: "总馆",
+        section: "三层A区",
+        seatName: input.seatName ?? "A001",
+        day: input.day ?? "today",
+        message: "预约成功：总馆 三层A区 A001。记得按时到馆签到。",
+    }),
+    book_library_room: (input) => ok({
+        roomName: "北馆3F-01",
+        kindName: "北馆单人研读间",
+        date: input.date ?? "2026-08-29",
+        time: `${input.start}-${input.end}`,
+        members: [],
+        message: "研讨间预约成功：北馆3F-01。",
+    }),
+    // 镜像真实 skill 的关键契约：定位信息不足且有多条记录时返回 AMBIGUOUS
+    cancel_library_booking: (input) => {
+        if (input.kind === "seat" && typeof input.keyword === "string" && input.keyword) {
+            return ok({
+                kind: "seat",
+                description: "座位 总馆 - 三层 A区 A001 2026-08-29 08:00-22:00",
+                message: "已取消：座位 总馆 - 三层 A区 A001",
+            });
+        }
+        if (input.kind === "room") {
+            return ok({
+                kind: "room",
+                description: "研讨间 北馆3F-01 20260830 14:00-16:00",
+                message: "已取消：研讨间 北馆3F-01",
+            });
+        }
+        return fail(
+            "AMBIGUOUS",
+            "匹配到 2 条可取消的记录：座位 总馆 - 三层 A区 A001 2026-08-29 08:00-22:00；" +
+            "研讨间 北馆3F-01 20260830 14:00-16:00。请向用户确认是哪一条（补充 kind/date/keyword 后重新调用）。未取消任何记录。",
+        );
+    },
 };
 
 /** 用真实 skill 的元数据（name/description/schema 与线上完全一致），换成罐头 execute */

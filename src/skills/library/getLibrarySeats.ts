@@ -9,7 +9,7 @@ import {ThuError} from "../../client/errors";
 import {fail, ok, type Skill, type SkillResult} from "../base/types";
 
 export interface LibrarySectionAvailability {
-    /** 馆名（如"总馆"） */
+    /** 馆名（如"北馆"） */
     library: string;
     /** 楼层名 */
     floor: string;
@@ -33,7 +33,7 @@ export function createGetLibrarySeatsSkill(client: LibrarySource): Skill {
         name: "get_library_seats",
         description:
             "查询图书馆各区域今天或明天的座位空余情况（馆/楼层/区域、总座位数、空位数）。" +
-            "可以用 library 参数只看某个馆（如“总馆”“文科馆”）。",
+            "可以用 library 参数只看某个馆（如“北馆”“文科”）。",
         inputSchema: {
             type: "object",
             properties: {
@@ -44,7 +44,7 @@ export function createGetLibrarySeatsSkill(client: LibrarySource): Skill {
                 },
                 library: {
                     type: "string",
-                    description: "可选，馆名关键词过滤（如“总馆”）",
+                    description: "可选，馆名关键词过滤（如“北馆”）",
                 },
             },
             required: [],

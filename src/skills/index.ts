@@ -14,6 +14,10 @@ import {createGetReportSkill} from "./academic/getReport";
 import {createGetElectricitySkill} from "./dorm/getElectricity";
 import {createGetLibraryRoomsSkill} from "./library/getLibraryRooms";
 import {createBookSportsFieldSkill, type CaptchaSolver} from "./sports/bookSportsField";
+import {createGetMyLibraryBookingsSkill} from "./library/getMyLibraryBookings";
+import {createBookLibrarySeatSkill} from "./library/bookLibrarySeat";
+import {createBookLibraryRoomSkill} from "./library/bookLibraryRoom";
+import {createCancelLibraryBookingSkill} from "./library/cancelLibraryBooking";
 import {createChaojiyingSolver} from "../client/captcha/chaojiying";
 import {config} from "../config/env";
 
@@ -42,7 +46,12 @@ export function createAllSkills(opts: SkillAssemblyOptions = {}): Skill[] {
         createGetReportSkill(thu),
         createGetElectricitySkill(thu),
         createGetLibraryRoomsSkill(thu),
+        // Step 16：我的图书馆预约（取消场景前置查询）
+        createGetMyLibraryBookingsSkill(thu),
         // 写操作：Harness 会在执行前向用户确认（requiresConfirmation）
         createBookSportsFieldSkill(sports, {captchaSolver}),
+        createBookLibrarySeatSkill(thu),
+        createBookLibraryRoomSkill(thu),
+        createCancelLibraryBookingSkill(thu),
     ];
 }

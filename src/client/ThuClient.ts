@@ -147,4 +147,56 @@ export class ThuClient {
     ): ReturnType<InfoHelper["getLibraryRoomBookingResourceList"]> {
         return this.call(() => this.helper.getLibraryRoomBookingResourceList(date, kindId));
     }
+
+    /** 获取某区域的座位明细（id/zhName/status: available|unavailable|unknown）。dateChoice：0 今天 / 1 明天 */
+    async getLibrarySeatList(
+        section: Parameters<InfoHelper["getLibrarySeatList"]>[0],
+        dateChoice: 0 | 1,
+    ): ReturnType<InfoHelper["getLibrarySeatList"]> {
+        return this.call(() => this.helper.getLibrarySeatList(section, dateChoice));
+    }
+
+    /** 预约图书馆座位。返回 {status, msg}，status===1 成功，0 失败（msg 带原因） */
+    async bookLibrarySeat(
+        seat: Parameters<InfoHelper["bookLibrarySeat"]>[0],
+        section: Parameters<InfoHelper["bookLibrarySeat"]>[1],
+        dateChoice: 0 | 1,
+    ): ReturnType<InfoHelper["bookLibrarySeat"]> {
+        return this.call(() => this.helper.bookLibrarySeat(seat, section, dateChoice));
+    }
+
+    /** 我的座位预约记录（id/pos/time/status/delId——delId 存在才可取消） */
+    async getBookingRecords(): ReturnType<InfoHelper["getBookingRecords"]> {
+        return this.call(() => this.helper.getBookingRecords());
+    }
+
+    /** 取消座位预约。id 用记录里的 delId */
+    async cancelBooking(id: string): ReturnType<InfoHelper["cancelBooking"]> {
+        return this.call(() => this.helper.cancelBooking(id));
+    }
+
+    /** 我的研讨间预约记录（uuid 用于取消；仅查今天起 7 天内） */
+    async getLibraryRoomBookingRecord(): ReturnType<InfoHelper["getLibraryRoomBookingRecord"]> {
+        return this.call(() => this.helper.getLibraryRoomBookingRecord());
+    }
+
+    /** 取消研讨间预约 */
+    async cancelLibraryRoomBooking(uuid: string): ReturnType<InfoHelper["cancelLibraryRoomBooking"]> {
+        return this.call(() => this.helper.cancelLibraryRoomBooking(uuid));
+    }
+
+    /** 按姓名/学号模糊查用户（研讨间加成员用）：返回 {id, label, department} */
+    async fuzzySearchLibraryId(keyword: string): ReturnType<InfoHelper["fuzzySearchLibraryId"]> {
+        return this.call(() => this.helper.fuzzySearchLibraryId(keyword));
+    }
+
+    /** 预约研讨间。start/end 形如 "yyyy-MM-dd HH:mm"；memberList 是其他成员的用户 id（不含自己） */
+    async bookLibraryRoom(
+        roomRes: Parameters<InfoHelper["bookLibraryRoom"]>[0],
+        start: string,
+        end: string,
+        memberList: number[],
+    ): ReturnType<InfoHelper["bookLibraryRoom"]> {
+        return this.call(() => this.helper.bookLibraryRoom(roomRes, start, end, memberList));
+    }
 }
