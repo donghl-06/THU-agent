@@ -15,6 +15,7 @@
  * 新系统由 src/client/sports/SportsClient.ts 单独封装（见 docs/sports-api-notes.md）。
  */
 import {InfoHelper} from "@thu-info/lib";
+import {CardRechargeType} from "@thu-info/lib/dist/models/card/recharge";
 import {config} from "../config/env";
 import {setupAuth, type TwoFactorHooks} from "./auth";
 import {normalizeError, ThuError} from "./errors";
@@ -176,6 +177,21 @@ export class ThuClient {
      *  只生成待支付订单，用户扫码前钱不动 */
     async getEleRechargePayCode(money: number): ReturnType<InfoHelper["getEleRechargePayCode"]> {
         return this.call(() => this.helper.getEleRechargePayCode(money));
+    }
+
+    /** 校园卡充值（微信/支付宝扫码）。Alipay 返回 alipayqr:// 深链
+     *  （内嵌 https://qr.alipay.com/<payCode>）；Wechat 返回微信扫码链接。
+     *  交易密码只对银行卡通道有用，扫码通道传空串（库实现如此，见 index.js）。
+     *  只生成二维码，用户扫码确认前钱不动 */
+    async rechargeCampusCardQr(amount: number, alipay: boolean): Promise<string> {
+        const result = await this.call(() =>
+            this.helper.rechargeCampusCard(
+                amount, "", alipay ? CardRechargeType.Alipay : CardRechargeType.Wechat,
+            ));
+        if (typeof result !== "string" || !result) {
+            throw new ThuError("UPSTREAM_ERROR", "校园卡充值未返回支付链接");
+        }
+        return result;
     }
 
     /** 获取图书馆研讨间的类别列表（kindId/kindName + 房间） */

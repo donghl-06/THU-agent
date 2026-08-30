@@ -207,6 +207,26 @@ describe("Web 服务端", () => {
         expect(String(qr?.data.dataUrl ?? "")).toMatch(/^data:image\/png/);
     });
 
+    it("工具结果带 payFormHtml 时发 payform 事件", async () => {
+        const formSkill: Skill = {
+            name: "pay_order",
+            description: "假支付单，仅测试用",
+            inputSchema: {type: "object", properties: {}},
+            async execute() {
+                return ok({displayMode: "form", payFormHtml: "<form action='https://fa-online.tsinghua.edu.cn/x'></form>"});
+            },
+        };
+        await start([toolCallMsg("pay_order", {}), textMsg("去支付")], [formSkill]);
+        const resp = await fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question: "付订单"}),
+        });
+        const events = await readSse(resp);
+        const pf = events.find((e) => e.event === "payform");
+        expect(String(pf?.data.html ?? "")).toContain("fa-online.tsinghua.edu.cn");
+    });
+
     it("进行中再来一问返回 409", async () => {
         // 用一个会等确认的写操作把第一轮卡住
         await start([toolCallMsg("recharge", {amountYuan: 10}), textMsg("充好了")], [paySkill]);

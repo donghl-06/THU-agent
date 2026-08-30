@@ -46,6 +46,9 @@
   .qr-card { align-self: flex-start; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; text-align: center; }
   .qr-card img { width: 220px; height: 220px; }
   .qr-card .url { font-size: 12px; color: var(--muted); word-break: break-all; margin-top: 8px; max-width: 260px; }
+  .pay-card { align-self: flex-start; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; text-align: center; max-width: 320px; }
+  .pay-card button { padding: 10px 24px; border: none; border-radius: 9px; background: var(--primary); color: #fff; font-size: 14px; cursor: pointer; }
+  .pay-card .tip { font-size: 12px; color: var(--muted); margin-top: 8px; }
   #inputbar { display: flex; gap: 10px; padding: 14px 20px; background: var(--card); border-top: 1px solid var(--border); }
   #q {
     flex: 1; padding: 11px 14px; border: 1px solid var(--border); border-radius: 10px;
@@ -141,6 +144,28 @@ function showQr(data) {
   scrollDown();
 }
 
+/* 学校支付平台的自动提交表单：新窗口打开并提交，用户在那里选微信/支付宝付款 */
+function showPayForm(data) {
+  const div = document.createElement("div");
+  div.className = "pay-card";
+  const btn = document.createElement("button");
+  btn.textContent = "前往学校支付平台付款";
+  btn.onclick = () => {
+    const w = window.open("", "_blank");
+    if (!w) { tip.textContent = "浏览器拦截了弹窗，请允许本页弹窗后重试"; return; }
+    w.document.write(data.html);
+    w.document.close();
+    tip.textContent = "已在新窗口打开支付页，付款后回到这里继续";
+  };
+  const tip = document.createElement("div");
+  tip.className = "tip";
+  tip.textContent = "点击后跳转到清华大学在线支付平台（fa-online.tsinghua.edu.cn）";
+  div.appendChild(btn);
+  div.appendChild(tip);
+  chat.appendChild(div);
+  scrollDown();
+}
+
 /* ---- 确认弹窗 ---- */
 let confirmResolver = null;
 function showConfirm(data) {
@@ -230,6 +255,8 @@ async function ask(question) {
         showConfirm(data);
       } else if (ev === "qr") {
         showQr(data);
+      } else if (ev === "payform") {
+        showPayForm(data);
       } else if (ev === "answer") {
         // 最终回答校对：以完整 answer 为准
         botText = data.text;

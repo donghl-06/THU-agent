@@ -14,6 +14,7 @@
  *       tool    {phase,name,ms?,success?} 工具进度（start/end）
  *       confirm {id,name,args}            写操作待确认（前端弹窗）
  *       qr      {url, dataUrl?}           支付二维码（data URL 图片）
+ *       payform {html}                    自动提交的支付表单（前端渲染"前往支付"按钮，新窗口提交到学校支付平台）
  *       answer  {text}                    最终完整回答（前端校对用）
  *       done    {}                        本轮结束
  *       error   {message}                 出错
@@ -53,6 +54,15 @@ function extractPayUrl(toolResultJson: string): string | undefined {
         const parsed = JSON.parse(toolResultJson) as {success?: boolean; data?: {payUrl?: string}};
         if (parsed.success && typeof parsed.data?.payUrl === "string") return parsed.data.payUrl;
     } catch { /* 不是 JSON 或没有 payUrl */ }
+    return undefined;
+}
+
+/** 从工具结果 JSON 里找自动提交的支付表单 HTML（体育订单 form 模式） */
+function extractPayFormHtml(toolResultJson: string): string | undefined {
+    try {
+        const parsed = JSON.parse(toolResultJson) as {success?: boolean; data?: {payFormHtml?: string}};
+        if (parsed.success && typeof parsed.data?.payFormHtml === "string") return parsed.data.payFormHtml;
+    } catch { /* 同上 */ }
     return undefined;
 }
 
@@ -138,12 +148,16 @@ export function createWebServer(
                 onToken: (text) => sseSend(res, "token", {text}),
                 onToolEvent: (e) => sseSend(res, "tool", e),
             });
-            // 工具结果里有支付链接的，生成二维码推给前端
+            // 工具结果里有支付链接的，生成二维码推给前端；有支付表单的，推原始 HTML 让前端出"前往支付"按钮
             for (const t of result.toolCalls) {
                 const payUrl = extractPayUrl(t.result);
                 if (payUrl) {
                     const dataUrl = await makeQrDataUrl(payUrl);
                     sseSend(res, "qr", {url: payUrl, ...(dataUrl ? {dataUrl} : {})});
+                }
+                const payFormHtml = extractPayFormHtml(t.result);
+                if (payFormHtml) {
+                    sseSend(res, "payform", {html: payFormHtml});
                 }
             }
             sseSend(res, "answer", {text: result.answer});

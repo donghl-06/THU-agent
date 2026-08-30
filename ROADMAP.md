@@ -469,5 +469,31 @@ THU-agent/                        ← 项目根（git 仓库）
                   气泡对话/流式打字/工具进度胶囊/确认弹窗/二维码卡片，
                   深浅色自适应。服务端单测 8 个全绿（确认桥同意+拒绝、qr、
                   409、400）；真链冒烟：电费问答流式输出正常。
-[下一步] Step 19 剩余支付链路（体育场馆 PAY_ONLINE 二维码、校园卡充值）
+[已完成] Step 19 剩余支付链路（用户确认后进行）：
+                  ① 体育场馆 PAY_ONLINE 支付（pay_sports_order，write，确认流）。
+                    lib 里的体育支付端点全部指向已下线的旧系统 50.tsinghua.edu.cn，
+                    从新系统前端 chunk 逆出用户侧支付主链路并用真实订单全链路探测
+                    （下单→出支付参数→取消，不动钱，scripts/probe-sports-pay.ts）：
+                    orderRecord 列表 → resv/order 详情（参数是预约 uuid，
+                    不是订单 uuid——实测踩出的坑）→ trade/pay/type 渠道 →
+                    trade/place/order 发起支付。关键实测结论：气膜馆唯一渠道
+                    tsinghua_pc_9 返回 displayMode:"form"（自动提交到学校财务平台
+                    fa-online.tsinghua.edu.cn 的 HTML 表单），不是二维码——
+                    Web UI 为此加 payform SSE 事件，前端渲染"前往支付"按钮，
+                    新窗口自动提交（与官方前端行为一致）。
+                    列表层 orderStatus/payType 是数字码（1=待支付/线上），
+                    权威状态以详情层字符串（TO_BE_PAID）为准，支付前必须复核。
+                    单测 12 个（含 AMBIGUOUS/竞态取消复核/无渠道）。
+                  ② 校园卡充值（recharge_campus_card，write，确认流）。
+                    走 lib 的 rechargeCampusCard（微信/支付宝扫码通道）；
+                    支付宝返回 alipayqr:// 深链，提取内嵌的 qr.alipay.com 链接。
+                    实测发现学校硬性下限 10 元（<10 报 cardpay.inputtxamtgreater10，
+                    且会把 lib 的错误解析路径搞崩成 undefined.substring）——
+                    skill 内置 10~500 上下限。10 元真实链路验证通过（未扫码）。
+                    单测 10 个。
+                  评测 54 条（+w15~w18），53/54（w09 为已知模型措辞 flake），
+                  安全违规 0；单测/集成共 149 个全绿。
+                  教训：评测要串行跑——两轮评测首尾相接时 LLM API 会报
+                  403 并发限制，整轮作废。
+[下一步] Step 20 多模态（语音/图片输入）
 ```

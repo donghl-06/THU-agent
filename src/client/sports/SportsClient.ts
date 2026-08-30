@@ -145,6 +145,78 @@ export interface BookResult {
     freeOrder: boolean;
 }
 
+/**
+ * 我的订单（/api/order/orderRecord 条目），字段形状经 2026-08-30 真实链路探测确认。
+ * 注意：列表层的 orderStatus/payType 是数字码，详情层（/resv/order）是同义字符串。
+ */
+export interface SportsOrder {
+    /** 订单 uuid（支付提交 placePayOrder、取消 cancelOrder 都用它） */
+    uuid: string;
+    orderNo?: string;
+    /** 订单状态位掩码（列表层数字）：1=待支付 2=支付中 4=已支付 8=已取消 16=支付超时。
+     *  权威判定以 getOrderDetail 的字符串 orderStatus 为准（"TO_BE_PAID"/"PAID"/"CANCEL"） */
+    orderStatus?: number;
+    /** 支付方式数字码：1=线上支付（实测，2026-08-30） */
+    payType?: number;
+    /** 应付金额（分） */
+    payableAmount?: number;
+    /** 实付金额（分） */
+    paidAmount?: number;
+    orderCreateTime?: string;
+    /** 支付截止时间 "yyyy-MM-dd HH:mm:ss" */
+    paymentDeadline?: string;
+    /** 订单明细：预约信息在 resvReserveVo（uuid = 预约记录 uuid，查订单详情要用它） */
+    orderDetails?: {
+        resvUuid?: string;
+        resvReserveVo?: {
+            uuid?: string;
+            resvBeginTime?: string;
+            resvEndTime?: string;
+            resvStatus?: string;
+        };
+        timeRange?: {startTime?: string; endTime?: string};
+        siteInfo?: {id?: string; uuid?: string; siteName?: string; siteType?: string};
+    }[];
+}
+
+/** 支付渠道（/api/resv/trade/pay/type 条目）。实测：气膜馆只有 tsinghua_pc_9 一个 */
+export interface SportsPayChannel {
+    channelId: string;
+    name: string;
+    property?: number;
+}
+
+/** 订单详情（GET /resv/order）里用到的字段（2026-08-30 实测） */
+export interface SportsOrderDetail {
+    /** 订单 uuid（与列表层一致） */
+    uuid?: string;
+    /** 字符串状态："TO_BE_PAID"/"PAID"/"CANCEL" 等 */
+    orderStatus?: string;
+    /** 字符串支付方式："PAY_ONLINE"/"PAY_OFFLINE" */
+    payType?: string;
+    /** 应付金额（分） */
+    payableAmount?: number;
+    reservations?: {
+        siteUuid?: string;
+        siteType?: string;
+        resvBeginTime?: string;
+        resvEndTime?: string;
+    }[];
+}
+
+/**
+ * placeOrder 的返回：displayMode 决定前端怎么展示
+ * （chunk-03b08403 等多个页面一致的处理逻辑）：
+ * - "url"        → displayContent 是跳转链接
+ * - "qr_code_url"/"qr_code" → displayContent 是二维码内容/图片地址
+ * - "form"       → displayContent 是自动提交的 HTML 表单（POST 到学校财务平台
+ *                  fa-online.tsinghua.edu.cn，2026-08-30 实测气膜馆渠道就是它）
+ */
+export interface SportsPayLaunch {
+    displayMode: "url" | "qr_code_url" | "qr_code" | "form" | string;
+    displayContent: string;
+}
+
 export class SportsClient {
     private accessToken = "";
     /** 进行中的登录 Promise，防并发重复登录（与 lib 的 outstandingLoginPromise 同思路） */
@@ -470,6 +542,60 @@ export class SportsClient {
             orderGenerated: check?.orderGenerated ?? false,
             freeOrder: check?.freeOrder ?? false,
         };
+    }
+
+    /**
+     * 我的订单记录（POST /api/order/orderRecord）。
+     * 与前端"我的预约"页一致：按创建时间倒序分页。
+     * 注意：api() 只返回 result.data（数组），总数在 result.count，这里用不上。
+     */
+    async listMyOrders(pageSize = 20): Promise<SportsOrder[]> {
+        return this.api<SportsOrder[]>("/api/order/orderRecord", {
+            method: "POST",
+            body: {pageSize, pageNum: 1, orderItems: "gmt_create", orderRule: "desc"},
+        });
+    }
+
+    /**
+     * 某场地的线上支付渠道（GET /api/resv/trade/pay/type）。
+     * 前端固定传 terminal:"PC" + 订单第一条预约的 siteUuid/siteType。
+     */
+    async getPayChannels(siteUuid: string, siteType: string): Promise<SportsPayChannel[]> {
+        const q = `terminal=PC&siteUuid=${encodeURIComponent(siteUuid)}&siteType=${encodeURIComponent(siteType)}`;
+        return this.api<SportsPayChannel[]>(`/api/resv/trade/pay/type?${q}`);
+    }
+
+    /**
+     * 发起支付（POST /api/resv/trade/place/order）。
+     * 只生成支付参数（二维码/链接），不移动资金——用户扫码后在手机上确认才扣款。
+     * returnUrl 是支付完成后前端回跳地址，对扫码场景无实际作用，照前端格式传。
+     */
+    async placePayOrder(orderUuid: string, channelId: string): Promise<SportsPayLaunch> {
+        const data = await this.api<SportsPayLaunch | undefined>("/api/resv/trade/place/order", {
+            method: "POST",
+            body: {
+                orderUuid,
+                channelId,
+                returnUrl: `${SPORTS_BASE}/venue/index.html#/personal`,
+            },
+        });
+        if (!data?.displayMode || !data.displayContent) {
+            throw new ThuError("UPSTREAM_ERROR", "体育系统支付下单返回结构不完整（缺 displayMode/displayContent）");
+        }
+        return data;
+    }
+
+    /** 查订单详情（GET /resv/order?resvUuid=）——前端支付后轮询它确认 PAID/CANCEL。
+     *  注意：参数是预约记录的 uuid（orderDetails[].resvReserveVo.uuid），不是订单 uuid */
+    async getOrderDetail(resvUuid: string): Promise<SportsOrderDetail | undefined> {
+        return this.api<SportsOrderDetail>(
+            `/resv/order?resvUuid=${encodeURIComponent(resvUuid)}`,
+        );
+    }
+
+    /** 取消未支付订单（POST /resv/order/cancel {uuid: 订单 uuid}），前端支付页同款 */
+    async cancelOrder(orderUuid: string): Promise<void> {
+        await this.api<unknown>("/resv/order/cancel", {method: "POST", body: {uuid: orderUuid}});
     }
 
     /** 场景的位置级联：校区 → 楼栋 → 楼层 → 房间，返回全部 ROOM 节点 */

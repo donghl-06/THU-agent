@@ -163,6 +163,31 @@ const CANNED: Record<string, (input: Record<string, unknown>) => SkillResult> = 
         payUrl: "https://qr.alipay.com/eval-mock-qr",
         message: `已生成 ${input.amountYuan} 元电费充值订单。请用手机支付宝扫码付款：https://qr.alipay.com/eval-mock-qr`,
     }),
+    // 镜像真实 skill 的关键契约：学校下限 10 元、防手滑上限 500，越界 INVALID_INPUT；
+    // 正常返回 https 扫码链接（真实链路 2026-08-30 探测确认）
+    recharge_campus_card: (input) => {
+        const amount = Number(input.amountYuan);
+        if (!Number.isFinite(amount) || amount < 10 || amount > 500) {
+            return fail("INVALID_INPUT", "校园卡单次充值 10~500 元。");
+        }
+        return ok({
+            amountYuan: amount,
+            method: input.method ?? "alipay",
+            payUrl: "https://qr.alipay.com/eval-mock-card",
+            message: `已生成校园卡充值二维码（${amount} 元），手机扫码付款。`,
+        });
+    },
+    // 镜像真实 skill 的关键契约：单笔待支付订单 → form 模式支付单（气膜馆实测形态）
+    pay_sports_order: () => ok({
+        orderNo: "eval-mock",
+        field: "羽01",
+        time: "06:00-08:00",
+        amountYuan: 40,
+        paymentDeadline: `${formatDate(new Date())} 23:00:00`,
+        displayMode: "form",
+        payFormHtml: "<form action='https://fa-online.tsinghua.edu.cn/zjjsfw/zjjs/v3/api.do'></form>",
+        message: "已生成支付单（40 元），请到学校支付平台完成付款。",
+    }),
     // 镜像真实 skill 的关键契约：定位信息不足且有多条记录时返回 AMBIGUOUS
     cancel_library_booking: (input) => {
         if (input.kind === "seat" && typeof input.keyword === "string" && input.keyword) {

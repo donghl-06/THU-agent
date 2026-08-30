@@ -19,6 +19,8 @@ import {createBookLibrarySeatSkill} from "./library/bookLibrarySeat";
 import {createBookLibraryRoomSkill} from "./library/bookLibraryRoom";
 import {createCancelLibraryBookingSkill} from "./library/cancelLibraryBooking";
 import {createRechargeElectricitySkill} from "./dorm/rechargeElectricity";
+import {createPaySportsOrderSkill} from "./sports/paySportsOrder";
+import {createRechargeCampusCardSkill} from "./card/rechargeCampusCard";
 import {MyhomeClient} from "../client/myhome";
 import {createChaojiyingSolver} from "../client/captcha/chaojiying";
 import {config} from "../config/env";
@@ -63,5 +65,9 @@ export function createAllSkills(opts: SkillAssemblyOptions = {}): Skill[] {
         createCancelLibraryBookingSkill(thu),
         // 电费充值：生成支付宝扫码付款链接（扫码半自动，扫码前钱不动）
         createRechargeElectricitySkill(thu),
+        // 体育场待支付订单 → 支付方式（二维码/链接/学校支付平台表单，同样不动钱）
+        createPaySportsOrderSkill(sports),
+        // 校园卡充值：微信/支付宝扫码二维码（扫码前钱不动）
+        createRechargeCampusCardSkill(thu),
     ];
 }
