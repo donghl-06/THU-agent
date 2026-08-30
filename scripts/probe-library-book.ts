@@ -52,10 +52,8 @@ if (existing) {
     process.exit(0);
 }
 
-// 订
-const bookResp = await client.bookLibrarySeat(
-    {id: chosen.seat.id, type: chosen.seat.type}, chosen.section, dateChoice,
-);
+// 订（bookLibrarySeat 只需要 id+type，但类型要求完整 LibrarySeat，直接传原对象）
+const bookResp = await client.bookLibrarySeat(chosen.seat, chosen.section, dateChoice);
 console.log("预约响应：status=", bookResp.status, "msg=", bookResp.msg);
 if (bookResp.status !== 1) throw new Error(`预约失败：${bookResp.msg}`);
 
