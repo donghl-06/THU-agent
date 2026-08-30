@@ -279,4 +279,55 @@ describe("Web 服务端", () => {
         });
         expect(resp.status).toBe(400);
     });
+
+    it("GET /api/capabilities 返回能力声明", async () => {
+        await start([textMsg("x")]);
+        const resp = await fetch(`${base}/api/capabilities`);
+        expect(resp.status).toBe(200);
+        const caps = (await resp.json()) as {vision?: unknown};
+        expect(typeof caps.vision).toBe("boolean");
+    });
+
+    it("只发图片不带文字也能提问", async () => {
+        await start([textMsg("图上是一只猫")]);
+        const resp = await fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question: "", images: ["data:image/png;base64,iVBORw0KGgo="]}),
+        });
+        expect(resp.status).toBe(200);
+        const events = await readSse(resp);
+        expect(events.find((e) => e.event === "answer")?.data.text).toBe("图上是一只猫");
+    });
+
+    it("非图片 data URL 返回 400", async () => {
+        await start([textMsg("x")]);
+        const resp = await fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question: "看图", images: ["data:text/html;base64,PHNjcmlwdD4="]}),
+        });
+        expect(resp.status).toBe(400);
+    });
+
+    it("图片超过 4 张返回 400", async () => {
+        await start([textMsg("x")]);
+        const img = "data:image/png;base64,iVBORw0KGgo=";
+        const resp = await fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question: "看图", images: [img, img, img, img, img]}),
+        });
+        expect(resp.status).toBe(400);
+    });
+
+    it("images 不是数组返回 400", async () => {
+        await start([textMsg("x")]);
+        const resp = await fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question: "看图", images: "data:image/png;base64,xx"}),
+        });
+        expect(resp.status).toBe(400);
+    });
 });

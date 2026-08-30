@@ -39,6 +39,13 @@ export const config = {
         get model() {
             return process.env.LLM_MODEL ?? "k3-256k";
         },
+        /**
+         * 端点是否支持图片输入（vision）。k3-256k 已实测支持（Step 20 探测），
+         * 默认开；换不支持 vision 的模型时设 LLM_VISION=0 关掉前端图片入口。
+         */
+        get vision() {
+            return process.env.LLM_VISION !== "0";
+        },
     },
     /** 超级鹰打码平台（预约滑块验证码用，单次约 0.01 元）。不预约可不填 */
     chaojiying: {

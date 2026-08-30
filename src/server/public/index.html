@@ -50,6 +50,32 @@
   .pay-card button { padding: 10px 24px; border: none; border-radius: 9px; background: var(--primary); color: #fff; font-size: 14px; cursor: pointer; }
   .pay-card .tip { font-size: 12px; color: var(--muted); margin-top: 8px; }
   #inputbar { display: flex; gap: 10px; padding: 14px 20px; background: var(--card); border-top: 1px solid var(--border); }
+  .iconbtn {
+    padding: 0 13px; border: 1px solid var(--border); border-radius: 10px;
+    background: var(--bg); color: var(--text); font-size: 16px; cursor: pointer;
+  }
+  .iconbtn.off { opacity: 0.35; }
+  #mic.recording {
+    background: var(--err); color: #fff; border-color: var(--err);
+    animation: pulse 1.2s infinite;
+  }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--err) 22%, transparent); } }
+  /* 待发送图片缩略图条 */
+  #thumbs { display: flex; gap: 8px; padding: 10px 20px 0; background: var(--card); }
+  #thumbs[hidden] { display: none; }
+  #thumbs .thumb { position: relative; }
+  #thumbs img { height: 56px; border-radius: 8px; border: 1px solid var(--border); display: block; }
+  #thumbs .rm {
+    position: absolute; top: -6px; right: -6px; width: 18px; height: 18px;
+    border-radius: 50%; border: none; background: var(--err); color: #fff;
+    font-size: 11px; cursor: pointer; line-height: 1;
+  }
+  /* 用户气泡里的图片 */
+  .msg.user img.att { max-width: 220px; border-radius: 8px; display: block; margin-bottom: 6px; }
+  /* 顶栏右侧开关 */
+  header { display: flex; align-items: center; }
+  header .ctl { margin-left: auto; display: flex; gap: 8px; }
+  header .iconbtn { padding: 5px 10px; font-size: 14px; }
   #q {
     flex: 1; padding: 11px 14px; border: 1px solid var(--border); border-radius: 10px;
     font-size: 15px; background: var(--bg); color: var(--text); outline: none;
@@ -82,11 +108,20 @@
 </style>
 </head>
 <body>
-<header>清华小助手<span class="sub">单用户本地模式 · 写操作会弹窗确认</span></header>
+<header>清华小助手<span class="sub">单用户本地模式 · 写操作会弹窗确认 · 支持语音/图片输入</span>
+  <span class="ctl">
+    <button id="tts-toggle" class="iconbtn" title="朗读回复开关">🔊</button>
+    <button id="snd-toggle" class="iconbtn" title="提示音效开关">🔔</button>
+  </span>
+</header>
 <div id="chat"></div>
+<div id="thumbs" hidden></div>
 <div id="inputbar">
+  <button id="attach" class="iconbtn" title="发送图片">📎</button>
+  <button id="mic" class="iconbtn" title="语音输入">🎤</button>
   <input id="q" placeholder="问点什么，如：我今天有什么课？" autocomplete="off">
   <button id="send">发送</button>
+  <input id="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
 </div>
 
 <div id="modal-mask">
@@ -117,6 +152,142 @@ function addMsg(role, text) {
   chat.appendChild(div);
   scrollDown();
   return div;
+}
+
+/* 用户消息（可带图片附件） */
+function addUserMsg(text, images) {
+  const div = document.createElement("div");
+  div.className = "msg user";
+  for (const url of images ?? []) {
+    const img = document.createElement("img");
+    img.className = "att";
+    img.src = url;
+    div.appendChild(img);
+  }
+  div.appendChild(document.createTextNode(text));
+  chat.appendChild(div);
+  scrollDown();
+}
+
+/* ---- 声音：提示音效（WebAudio 合成，无音频文件） + TTS 朗读 ---- */
+const store = {
+  get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+let soundOn = store.get("snd", "1") === "1";
+let ttsOn = store.get("tts", "0") === "1";
+const sndToggle = document.getElementById("snd-toggle");
+const ttsToggle = document.getElementById("tts-toggle");
+function renderToggles() {
+  sndToggle.classList.toggle("off", !soundOn);
+  ttsToggle.classList.toggle("off", !ttsOn);
+}
+sndToggle.onclick = () => { soundOn = !soundOn; store.set("snd", soundOn ? "1" : "0"); renderToggles(); };
+ttsToggle.onclick = () => {
+  ttsOn = !ttsOn; store.set("tts", ttsOn ? "1" : "0"); renderToggles();
+  if (!ttsOn) try { speechSynthesis.cancel(); } catch {}
+};
+renderToggles();
+
+let audioCtx = null;
+function beep(freq, dur = 0.07, type = "sine") {
+  if (!soundOn) return;
+  try {
+    audioCtx ??= new (window.AudioContext || window.webkitAudioContext)();
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = type;
+    o.frequency.value = freq;
+    g.gain.value = 0.045;
+    o.connect(g).connect(audioCtx.destination);
+    o.start();
+    g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
+    o.stop(audioCtx.currentTime + dur);
+  } catch { /* 无音频设备/被浏览器限制时静默 */ }
+}
+const sfx = {
+  send: () => beep(660),
+  toolOk: () => beep(880, 0.05),
+  toolFail: () => beep(220, 0.14, "square"),
+  confirm: () => { beep(520, 0.08); setTimeout(() => beep(780, 0.1), 110); },
+  error: () => beep(180, 0.2, "square"),
+};
+
+/* TTS：朗读最终回答（用系统中文语音，没有就用默认） */
+function speak(text) {
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "zh-CN";
+    const v = speechSynthesis.getVoices().find((x) => x.lang && x.lang.startsWith("zh"));
+    if (v) u.voice = v;
+    speechSynthesis.speak(u);
+  } catch { /* 浏览器不支持时静默 */ }
+}
+
+/* ---- 语音输入（WebSpeech，浏览器不支持则隐藏按钮） ---- */
+const micBtn = document.getElementById("mic");
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null;
+if (!SR) {
+  micBtn.style.display = "none";
+} else {
+  micBtn.onclick = () => {
+    if (rec) { rec.stop(); return; }
+    const base = q.value.trim();
+    rec = new SR();
+    rec.lang = "zh-CN";
+    rec.interimResults = true;
+    rec.onresult = (e) => {
+      let text = "";
+      for (const r of e.results) text += r[0].transcript;
+      q.value = (base ? base + " " : "") + text;
+    };
+    rec.onend = () => { rec = null; micBtn.classList.remove("recording"); };
+    rec.onerror = () => { rec = null; micBtn.classList.remove("recording"); };
+    try {
+      rec.start();
+      micBtn.classList.add("recording");
+    } catch { rec = null; }
+  };
+}
+
+/* ---- 图片附件（端点不支持 vision 时隐藏入口，由 /api/capabilities 决定） ---- */
+const attachBtn = document.getElementById("attach");
+const fileInput = document.getElementById("file");
+const thumbs = document.getElementById("thumbs");
+const MAX_IMGS = 4, MAX_IMG_BYTES = 4.5 * 1024 * 1024;
+let pendingImages = []; // data URL
+fetch("/api/capabilities").then((r) => r.json()).then((c) => {
+  if (!c.vision) attachBtn.style.display = "none";
+}).catch(() => {});
+attachBtn.onclick = () => fileInput.click();
+fileInput.onchange = () => {
+  for (const f of fileInput.files) {
+    if (pendingImages.length >= MAX_IMGS) { addMsg("bot", `最多一次发 ${MAX_IMGS} 张图。`); break; }
+    if (f.size > MAX_IMG_BYTES) { addMsg("bot", `「${f.name}」超过 4.5MB，请先压缩。`); continue; }
+    const rd = new FileReader();
+    rd.onload = () => { pendingImages.push(rd.result); renderThumbs(); };
+    rd.readAsDataURL(f);
+  }
+  fileInput.value = "";
+};
+function renderThumbs() {
+  thumbs.innerHTML = "";
+  thumbs.hidden = pendingImages.length === 0;
+  pendingImages.forEach((url, i) => {
+    const wrap = document.createElement("div");
+    wrap.className = "thumb";
+    const img = document.createElement("img");
+    img.src = url;
+    const rm = document.createElement("button");
+    rm.className = "rm";
+    rm.textContent = "×";
+    rm.onclick = () => { pendingImages.splice(i, 1); renderThumbs(); };
+    wrap.appendChild(img);
+    wrap.appendChild(rm);
+    thumbs.appendChild(wrap);
+  });
 }
 
 function addToolChip(name) {
@@ -187,16 +358,17 @@ document.getElementById("btn-ok").onclick = () => confirmResolver?.(true);
 document.getElementById("btn-no").onclick = () => confirmResolver?.(false);
 
 /* ---- SSE 解析（fetch 流，EventSource 不支持 POST） ---- */
-async function ask(question) {
+async function ask(question, images) {
   busy = true;
   sendBtn.disabled = true;
   const resp = await fetch("/api/chat", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({question}),
+    body: JSON.stringify({question, ...(images?.length ? {images} : {})}),
   });
   if (!resp.ok) {
     addMsg("bot", "出错了：" + (await resp.text()));
+    sfx.error();
     busy = false; sendBtn.disabled = false;
     return;
   }
@@ -250,8 +422,10 @@ async function ask(question) {
         } else {
           const chip = chips.get(data.name);
           if (chip) { finishToolChip(chip, data); chips.delete(data.name); }
+          if (data.success === false) sfx.toolFail(); else sfx.toolOk();
         }
       } else if (ev === "confirm") {
+        sfx.confirm();
         showConfirm(data);
       } else if (ev === "qr") {
         showQr(data);
@@ -263,8 +437,10 @@ async function ask(question) {
         ensureBot();
         botDiv.textContent = botText;
         scrollDown();
+        if (ttsOn && botText) speak(botText);
       } else if (ev === "error") {
         addMsg("bot", "出错了：" + data.message);
+        sfx.error();
       }
     }
   }
@@ -277,10 +453,16 @@ async function ask(question) {
 
 sendBtn.onclick = () => {
   const text = q.value.trim();
-  if (!text || busy) return;
+  const imgs = pendingImages;
+  if ((!text && imgs.length === 0) || busy) return;
+  if (rec) rec.stop(); // 发送时停止语音输入
+  try { speechSynthesis.cancel(); } catch {} // 新一轮开始时停止朗读
   q.value = "";
-  addMsg("user", text);
-  ask(text).catch((e) => addMsg("bot", "网络错误：" + e.message));
+  pendingImages = [];
+  renderThumbs();
+  addUserMsg(text, imgs);
+  sfx.send();
+  ask(text, imgs).catch((e) => { addMsg("bot", "网络错误：" + e.message); sfx.error(); });
 };
 q.addEventListener("keydown", (e) => { if (e.key === "Enter") sendBtn.click(); });
 q.focus();

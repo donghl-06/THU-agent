@@ -43,6 +43,8 @@ export interface AskOptions {
     onToken?: (token: string) => void;
     /** 工具开始/结束事件 */
     onToolEvent?: (e: ToolEvent) => void;
+    /** 随问题附带的图片（data URL，如 data:image/png;base64,...）。需模型端点支持 vision */
+    images?: string[];
 }
 
 export class Agent {
@@ -66,7 +68,14 @@ export class Agent {
 
     /** 问一个问题，拿到最终回答。多轮对话通过 messages 数组自然延续 */
     async ask(question: string, opts: AskOptions = {}): Promise<AgentRunResult> {
-        this.messages.push({role: "user", content: question});
+        // 带图片时构造多模态 parts（OpenAI vision 协议）；纯文本保持字符串不变
+        const content: ChatMessage["content"] = opts.images?.length
+            ? [
+                {type: "text", text: question || "请看这张图。"},
+                ...opts.images.map((url) => ({type: "image_url" as const, image_url: {url}})),
+            ]
+            : question;
+        this.messages.push({role: "user", content});
         const toolCalls: AgentRunResult["toolCalls"] = [];
 
         for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
@@ -77,7 +86,9 @@ export class Agent {
             this.messages.push(message);
 
             if (!message.tool_calls?.length) {
-                return {answer: message.content ?? "", toolCalls};
+                // 模型的 assistant 消息永远是纯文本（parts 只出现在用户消息里）
+                const answer = typeof message.content === "string" ? message.content : "";
+                return {answer, toolCalls};
             }
 
             // 并行只用于纯读调用：写操作（requiresConfirmation）必须串行，

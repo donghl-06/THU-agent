@@ -9,7 +9,10 @@
  *
  * 接口：
  *   GET  /              → 单页前端
- *   POST /api/chat      → {question} → SSE 流，事件：
+ *   GET  /api/capabilities → {vision}  前端据此显隐图片上传入口
+ *   POST /api/chat      → {question, images?} → SSE 流，事件：
+ *       （images 为 data URL 数组，最多 4 张、每张 base64 不超过 6MB 字符；
+ *         仅当端点支持 vision 时可用，见 config.llm.vision）
  *       token   {text}                    回答的流式片段
  *       tool    {phase,name,ms?,success?} 工具进度（start/end）
  *       confirm {id,name,args}            写操作待确认（前端弹窗）
@@ -29,9 +32,32 @@ import {readFileSync} from "node:fs";
 import {join} from "node:path";
 import type {Agent} from "../harness/agentLoop";
 import type {ConfirmFn} from "../harness/toolRegistry";
+import {config} from "../config/env";
 
 /** 确认请求 5 分钟不应答按拒绝处理（防 Promise 悬挂） */
 const CONFIRM_TIMEOUT_MS = 5 * 60 * 1000;
+/** 图片上传限制：最多 4 张，每张 base64 字符数 ≤ 6M（≈4.5MB 原图），总 body ≤ 25MB */
+const MAX_IMAGES = 4;
+const MAX_IMAGE_CHARS = 6_000_000;
+const MAX_BODY_CHARS = 25_000_000;
+const IMAGE_DATA_URL_RE = /^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/;
+
+/** 校验图片数组，返回错误消息（合法返回 undefined） */
+function validateImages(images: unknown): string | undefined {
+    if (images === undefined) return undefined;
+    if (!Array.isArray(images) || images.length === 0 || images.length > MAX_IMAGES) {
+        return `images 需为 1~${MAX_IMAGES} 个元素的数组`;
+    }
+    for (const img of images) {
+        if (typeof img !== "string" || !IMAGE_DATA_URL_RE.test(img)) {
+            return "图片必须是 data:image/(png|jpeg|webp|gif);base64 格式";
+        }
+        if (img.length > MAX_IMAGE_CHARS) {
+            return "单张图片过大（base64 超过 6MB），请压缩后再发";
+        }
+    }
+    return undefined;
+}
 
 interface PendingConfirm {
     resolve: (approved: boolean) => void;
@@ -72,7 +98,10 @@ function sseSend(res: ServerResponse, event: string, data: unknown): void {
 
 async function readBody(req: IncomingMessage): Promise<string> {
     let body = "";
-    for await (const chunk of req) body += chunk;
+    for await (const chunk of req) {
+        body += chunk;
+        if (body.length > MAX_BODY_CHARS) throw new Error("body too large");
+    }
     return body;
 }
 
@@ -110,10 +139,29 @@ export function createWebServer(
             return;
         }
         let question: string;
+        let images: string[] | undefined;
+        let rawBody: string;
         try {
-            const parsed = JSON.parse(await readBody(req)) as {question?: unknown};
-            if (typeof parsed.question !== "string" || !parsed.question.trim()) throw new Error();
+            rawBody = await readBody(req);
+        } catch {
+            res.writeHead(413).end("request body too large");
+            return;
+        }
+        try {
+            const parsed = JSON.parse(rawBody) as {question?: unknown; images?: unknown};
+            const imgErr = validateImages(parsed.images);
+            if (imgErr) {
+                res.writeHead(400).end(imgErr);
+                return;
+            }
+            if (parsed.images && !config.llm.vision) {
+                res.writeHead(400).end("当前模型端点不支持图片输入（LLM_VISION=0）");
+                return;
+            }
+            images = parsed.images as string[] | undefined;
+            if (typeof parsed.question !== "string") throw new Error();
             question = parsed.question.trim();
+            if (!question && !images) throw new Error();
         } catch {
             res.writeHead(400).end("question required");
             return;
@@ -147,6 +195,7 @@ export function createWebServer(
             const result = await agent.ask(question, {
                 onToken: (text) => sseSend(res, "token", {text}),
                 onToolEvent: (e) => sseSend(res, "tool", e),
+                ...(images ? {images} : {}),
             });
             // 工具结果里有支付链接的，生成二维码推给前端；有支付表单的，推原始 HTML 让前端出"前往支付"按钮
             for (const t of result.toolCalls) {
@@ -196,6 +245,11 @@ export function createWebServer(
             if (req.method === "GET" && url.pathname === "/") {
                 res.writeHead(200, {"Content-Type": "text/html; charset=utf-8"});
                 res.end(indexHtml);
+                return;
+            }
+            if (req.method === "GET" && url.pathname === "/api/capabilities") {
+                res.writeHead(200, {"Content-Type": "application/json"});
+                res.end(JSON.stringify({vision: config.llm.vision}));
                 return;
             }
             if (req.method === "POST" && url.pathname === "/api/chat") return handleChat(req, res);

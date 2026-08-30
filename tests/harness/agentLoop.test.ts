@@ -95,6 +95,30 @@ describe("ToolRegistry", () => {
 });
 
 describe("Agent Loop", () => {
+    it("带图片的问题构造多模态 parts 消息", async () => {
+        const llm = fakeLlm([textMsg("图上是一只猫")]);
+        const agent = new Agent([echoSkill], "你是测试助手", llm);
+        const img = "data:image/png;base64,iVBORw0KGgo=";
+        const result = await agent.ask("图里有什么？", {images: [img]});
+        expect(result.answer).toBe("图上是一只猫");
+
+        // 发给 LLM 的用户消息应是 [text, image_url] parts 结构
+        const userMsg = llm.seen[0].at(-1)!;
+        expect(userMsg.role).toBe("user");
+        expect(userMsg.content).toEqual([
+            {type: "text", text: "图里有什么？"},
+            {type: "image_url", image_url: {url: img}},
+        ]);
+    });
+
+    it("只发图不带文字时用默认提示语", async () => {
+        const llm = fakeLlm([textMsg("一张截图")]);
+        const agent = new Agent([echoSkill], "你是测试助手", llm);
+        await agent.ask("", {images: ["data:image/png;base64,iVBORw0KGgo="]});
+        const userMsg = llm.seen[0].at(-1)!;
+        expect((userMsg.content as {text?: string}[])[0].text).toBe("请看这张图。");
+    });
+
     it("模型直接回答时不调工具，一轮结束", async () => {
         const llm = fakeLlm([textMsg("你好！")]);
         const agent = new Agent([echoSkill], "你是测试助手", llm);
@@ -117,7 +141,7 @@ describe("Agent Loop", () => {
         expect(secondCall.map((m) => m.role)).toEqual(["system", "user", "assistant", "tool"]);
         const toolMessage = secondCall[3];
         expect(toolMessage.tool_call_id).toBe("call_1");
-        expect(JSON.parse(toolMessage.content!)).toEqual({success: true, data: {echo: {text: "hello"}}});
+        expect(JSON.parse(toolMessage.content as string)).toEqual({success: true, data: {echo: {text: "hello"}}});
     });
 
     it("支持连续多轮工具调用", async () => {

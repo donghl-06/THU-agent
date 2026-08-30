@@ -495,5 +495,22 @@ THU-agent/                        ← 项目根（git 仓库）
                   安全违规 0；单测/集成共 149 个全绿。
                   教训：评测要串行跑——两轮评测首尾相接时 LLM API 会报
                   403 并发限制，整轮作废。
-[下一步] Step 20 多模态（语音/图片输入）
-```
+[已完成] Step 20 多模态（语音/图片/TTS/音效）：
+                  ① 图片输入：harness 消息类型放宽为 OpenAI 多模态 parts
+                    （ContentPart: text/image_url），agentLoop.ask 支持
+                    opts.images（data URL）；webServer /api/chat 收 images
+                    字段（≤4 张、每张 base64 ≤6M 字符、data URL 格式白名单
+                    校验、总 body 25MB 上限），新增 GET /api/capabilities
+                    供前端显隐入口；LLM_VISION=0 可关。
+                    实测：k3-256k（Kimi for Coding）支持 vision——先发
+                    1×1 PNG 探测返回 200 且正确识别颜色，再经 Web UI 全链路
+                    验证（capabilities → 带图提问 → SSE answer 正确）。
+                  ② 语音输入：浏览器 WebSpeech（zh-CN、interimResults），
+                    识别结果进输入框由用户确认后发；不支持则隐藏按钮。
+                  ③ TTS：顶栏 🔊 开关（localStorage 记忆），answer 事件
+                    触发 speechSynthesis 朗读（优先中文语音）。
+                  ④ 音效：WebAudio 振荡器合成（无音频文件），发送/工具完成/
+                    工具失败/确认弹窗/错误各有提示音，顶栏 🔔 可关。
+                  单测 156 个全绿（+7：多模态 parts 构造、默认提示语、
+                  capabilities、图片校验四条）。
+[下一步] 待规划（远期：多用户 App·本机凭证模式，见上文）

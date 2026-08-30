@@ -10,9 +10,17 @@ export interface ToolCall {
     function: {name: string; arguments: string};
 }
 
+/**
+ * 多模态内容块（OpenAI 兼容）。用户消息可携带图片（data URL）；
+ * 仅用户消息用得上，assistant/tool 消息始终用纯字符串。
+ */
+export type ContentPart =
+    | {type: "text"; text: string}
+    | {type: "image_url"; image_url: {url: string}};
+
 export interface ChatMessage {
     role: "system" | "user" | "assistant" | "tool";
-    content: string | null;
+    content: string | ContentPart[] | null;
     tool_calls?: ToolCall[];
     tool_call_id?: string;
 }
