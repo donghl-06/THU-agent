@@ -311,9 +311,11 @@
   @media (max-width: 640px) { .composer-hint { display: none; } }
   #composer .iconbtn { background: transparent; }
   .iconbtn {
-    padding: 6px 12px; border: 1px solid var(--border); border-radius: var(--r-md);
-    background: transparent; color: var(--text); font-size: 16px; cursor: pointer;
+    padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--r-md);
+    background: transparent; color: var(--text); cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
   }
+  .iconbtn svg { display: block; }
   .iconbtn.off { opacity: 0.35; }
   #mic.recording {
     background: var(--err); color: #fff; border-color: var(--err);
@@ -335,7 +337,8 @@
   /* 顶栏右侧开关 */
   header { display: flex; align-items: center; }
   header .ctl { margin-left: auto; display: flex; gap: 8px; }
-  header .iconbtn { padding: 5px 10px; font-size: 14px; }
+  header .iconbtn { padding: 7px; border: none; color: var(--muted); }
+  header .iconbtn:hover { color: var(--text); background: var(--card-hover); }
   #login-btn { padding: 7px 14px; border: 0; border-radius: 9px; background: var(--primary); color: #fff; font-size: 13px; cursor: pointer; }
   #login-btn.logged-in { background: var(--primary-light); color: var(--primary); border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent); }
   #send {
@@ -514,9 +517,9 @@ if(__exports != exports)module.exports = exports;return module.exports}));
   <span class="ctl">
     <span id="conn-status" class="conn" hidden><span class="conn-dot"></span>清华 Info 已连接</span>
     <button id="login-btn" type="button">登录</button>
-    <button id="theme-toggle" class="iconbtn" type="button" title="切换到浅色模式">🌞</button>
-    <button id="tts-toggle" class="iconbtn" title="朗读回复开关">🔊</button>
-    <button id="snd-toggle" class="iconbtn" title="提示音效开关">🔔</button>
+    <button id="theme-toggle" class="iconbtn" type="button" title="切换到浅色模式"></button>
+    <button id="tts-toggle" class="iconbtn" title="朗读回复开关"></button>
+    <button id="snd-toggle" class="iconbtn" title="提示音效开关"></button>
   </span>
 </header>
 <div id="chat">
@@ -539,8 +542,8 @@ if(__exports != exports)module.exports = exports;return module.exports}));
   <div id="composer">
     <textarea id="q" rows="1" placeholder="问点什么，如：今晚哪里可以打羽毛球？" autocomplete="off"></textarea>
     <div class="composer-row">
-      <button id="attach" class="iconbtn" title="发送图片">📎</button>
-      <button id="mic" class="iconbtn" title="语音输入">🎤</button>
+      <button id="attach" class="iconbtn" title="发送图片"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+      <button id="mic" class="iconbtn" title="语音输入"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg></button>
       <span class="composer-hint">Enter 发送 · Shift+Enter 换行</span>
       <button id="send" disabled>发送</button>
       <input id="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
@@ -679,11 +682,23 @@ const CHAT_HISTORY_KEY = "thu-assistant-chat-v1";
 const MAX_SAVED_MESSAGES = 100;
 const MAX_SAVED_TEXT_LENGTH = 20000;
 
+/* ---- 统一功能图标（Lucide 风格内联 SVG，避免 emoji/unicode 混用） ---- */
+const ICON_PATHS = {
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>',
+  moon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
+  volOn: '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>',
+  volOff: '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="22" x2="16" y1="9" y2="15"/><line x1="16" x2="22" y1="9" y2="15"/>',
+  bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
+  bellOff: '<path d="M13.73 21a2 2 0 0 1-3.46 0"/><path d="M18.63 13A17.89 17.89 0 0 1 18 8"/><path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"/><path d="M18 8a6 6 0 0 0-9.33-5"/><line x1="1" x2="23" y1="1" y2="23"/>',
+};
+const icon = (name) =>
+  `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON_PATHS[name]}</svg>`;
+
 /* ---- 主题切换（默认深色，localStorage 持久化） ---- */
 const themeBtn = document.getElementById("theme-toggle");
 function applyTheme(t) {
   document.documentElement.dataset.theme = t;
-  themeBtn.textContent = t === "dark" ? "🌞" : "🌙";
+  themeBtn.innerHTML = icon(t === "dark" ? "sun" : "moon");
   themeBtn.title = t === "dark" ? "切换到浅色模式" : "切换到深色模式";
 }
 let theme = store.get("theme", "dark");
@@ -760,6 +775,8 @@ let ttsOn = store.get("tts", "0") === "1";
 const sndToggle = document.getElementById("snd-toggle");
 const ttsToggle = document.getElementById("tts-toggle");
 function renderToggles() {
+  sndToggle.innerHTML = icon(soundOn ? "bell" : "bellOff");
+  ttsToggle.innerHTML = icon(ttsOn ? "volOn" : "volOff");
   sndToggle.classList.toggle("off", !soundOn);
   ttsToggle.classList.toggle("off", !ttsOn);
 }
