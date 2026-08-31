@@ -87,6 +87,24 @@ Web UI 启动脚本会自动配置旧版 TLS 所需的 `OPENSSL_CONF`，PowerShe
 它们仍可用于 `pnpm step2`、`pnpm step3` 等命令行验证脚本。每次 Web UI 进程重启后需
 重新登录，除非你自行在 `.env` 配置固定指纹并由清华认证系统信任该设备。
 
+### Windows 便携版
+
+开发者可在 Windows 且已安装 Node.js 和 pnpm 的电脑上运行：
+
+```bash
+pnpm package:win
+```
+
+命令会在 `release/清华小助手/` 生成发布目录，内置 Node.js 和生产依赖，用户无需安装
+Node.js、pnpm 或 Git。将 `.env.example` 复制为同目录下的 `.env` 并填写 `LLM_API_KEY`
+等模型配置后，双击 `清华小助手.exe` 即可自动启动本地服务并打开浏览器。程序退出入口
+使用 .NET 8 SDK 打包时，程序退出入口位于 Windows 任务栏托盘图标的右键菜单中。
+
+如果打包机额外安装了 .NET 8 SDK，脚本会优先生成带托盘菜单的启动器；没有 SDK 时会
+自动使用 Node.js SEA 生成启动 EXE；该备用启动器不提供托盘菜单，退出时可在任务管理器
+中结束“清华小助手”目录下的 Node.js 进程。无论采用哪条路径，普通用户都不需要安装
+.NET 或 Node.js。
+
 其他命令：
 
 ```bash

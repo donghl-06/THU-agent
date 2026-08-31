@@ -168,7 +168,7 @@ export function createWebServer(
 ): Server {
     const port = opts.port ?? 3457;
     const requireLogin = opts.requireLogin ?? true;
-    const indexPath = opts.indexHtmlPath ?? join(import.meta.dirname, "public", "index.html");
+    const indexPath = opts.indexHtmlPath ?? join(process.cwd(), "src", "server", "public", "index.html");
     const indexHtml = readFileSync(indexPath, "utf8");
 
     // 单用户会话：整个服务共享一个 Agent（多轮对话靠它的 messages 延续）

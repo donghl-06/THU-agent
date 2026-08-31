@@ -3,6 +3,9 @@ node_modules/
 
 # 构建产物
 dist/
+release/
+packaging/**/bin/
+packaging/**/obj/
 
 # 参考仓库（只读，不进 git）
 reference/

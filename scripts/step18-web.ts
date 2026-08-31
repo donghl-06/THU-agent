@@ -10,12 +10,13 @@ import {createWebServer} from "../src/server/webServer";
 import type {ConfirmFn} from "../src/harness/toolRegistry";
 import {ThuClient} from "../src/client/ThuClient";
 import type {LoginCredentials} from "../src/client/auth";
-import {fileURLToPath} from "node:url";
 import {dirname, join} from "node:path";
 
-process.env.OPENSSL_CONF ??= join(dirname(fileURLToPath(import.meta.url)), "..", "openssl.cnf");
+const scriptDirectory = dirname(process.argv[1] ?? process.cwd());
+process.env.OPENSSL_CONF ??= join(scriptDirectory, "..", "openssl.cnf");
 
 const PORT = Number(process.env.PORT ?? 3457);
+const indexHtmlPath = join(scriptDirectory, "..", "src", "server", "public", "index.html");
 
 const today = new Date().toLocaleDateString("zh-CN", {
     year: "numeric",
@@ -45,7 +46,7 @@ const server = createWebServer(
             () => thuClient.login(),
         );
     },
-    {port: PORT},
+    {port: PORT, indexHtmlPath},
 );
 
 server.listen(PORT, "127.0.0.1", () => {

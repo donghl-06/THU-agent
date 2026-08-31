@@ -32,6 +32,7 @@
   .msg { max-width: 78%; padding: 10px 14px; border-radius: 12px; line-height: 1.65; white-space: pre-wrap; word-break: break-word; }
   .msg.user { align-self: flex-end; background: var(--primary); color: #fff; }
   .msg.bot { align-self: flex-start; background: var(--card); border: 1px solid var(--border); }
+  .msg .saved-att { display: block; margin-bottom: 6px; font-size: 12px; opacity: 0.8; }
   .msg .cursor { display: inline-block; width: 8px; height: 15px; background: var(--primary); vertical-align: -2px; animation: blink 0.8s infinite; }
   @keyframes blink { 50% { opacity: 0; } }
   .tool-chip {
@@ -182,8 +183,8 @@
 
 <div id="modal-mask">
   <div id="modal">
-    <h3>⚠️ 写操作确认</h3>
-    <div class="warn">助手要执行下面的操作，确认后才会真正执行：</div>
+    <h3 id="modal-title">⚠️ 写操作确认</h3>
+    <div id="modal-warn" class="warn">助手要执行下面的操作，确认后才会真正执行：</div>
     <table id="modal-args"></table>
     <div class="btns">
       <button id="btn-no">取消</button>
@@ -233,6 +234,11 @@ const authCodeWrap = document.getElementById("auth-code-wrap");
 const authCode = document.getElementById("auth-code");
 const authSubmit = document.getElementById("auth-submit");
 const authCancel = document.getElementById("auth-cancel");
+const modalTitle = document.getElementById("modal-title");
+const modalWarn = document.getElementById("modal-warn");
+const modalArgs = document.getElementById("modal-args");
+const modalOk = document.getElementById("btn-ok");
+const modalNo = document.getElementById("btn-no");
 let busy = false;
 let authRequestId = null;
 let authPhase = null;
@@ -255,6 +261,7 @@ function addMsg(role, text) {
   div.className = "msg " + role;
   div.textContent = text;
   chat.appendChild(div);
+  saveChatHistory();
   scrollDown();
   return div;
 }
@@ -271,6 +278,7 @@ function addUserMsg(text, images) {
   }
   div.appendChild(document.createTextNode(text));
   chat.appendChild(div);
+  saveChatHistory();
   scrollDown();
 }
 
@@ -279,6 +287,51 @@ const store = {
   get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch {} },
 };
+const CHAT_HISTORY_KEY = "thu-assistant-chat-v1";
+const MAX_SAVED_MESSAGES = 100;
+const MAX_SAVED_TEXT_LENGTH = 20000;
+
+function saveChatHistory() {
+  const records = [...chat.children]
+    .filter((node) => node.classList.contains("msg"))
+    .map((node) => ({
+      role: node.classList.contains("user") ? "user" : "bot",
+      text: [...node.childNodes]
+        .filter((child) => child.nodeType === Node.TEXT_NODE)
+        .map((child) => child.textContent ?? "")
+        .join("")
+        .slice(0, MAX_SAVED_TEXT_LENGTH),
+      imageCount: node.querySelectorAll("img.att").length,
+    }))
+    .slice(-MAX_SAVED_MESSAGES);
+  store.set(CHAT_HISTORY_KEY, JSON.stringify(records));
+}
+
+function restoreChatHistory() {
+  let records;
+  try { records = JSON.parse(store.get(CHAT_HISTORY_KEY, "[]")); } catch { records = []; }
+  if (!Array.isArray(records)) return;
+  for (const record of records) {
+    if (!record || (record.role !== "user" && record.role !== "bot") || typeof record.text !== "string") continue;
+    const div = document.createElement("div");
+    div.className = "msg " + record.role;
+    if (record.role === "user" && Number.isInteger(record.imageCount) && record.imageCount > 0) {
+      const attachment = document.createElement("span");
+      attachment.className = "saved-att";
+      attachment.textContent = `🖼️ ${record.imageCount} 张图片附件（刷新后不保留预览）`;
+      div.appendChild(attachment);
+    }
+    div.appendChild(document.createTextNode(record.text));
+    chat.appendChild(div);
+  }
+  scrollDown();
+}
+
+function clearChatHistory() {
+  chat.replaceChildren();
+  store.set(CHAT_HISTORY_KEY, "[]");
+}
+
 let soundOn = store.get("snd", "1") === "1";
 let ttsOn = store.get("tts", "0") === "1";
 const sndToggle = document.getElementById("snd-toggle");
@@ -445,13 +498,18 @@ function showPayForm(data) {
 /* ---- 确认弹窗 ---- */
 let confirmResolver = null;
 function showConfirm(data) {
-  document.getElementById("modal-args").innerHTML =
+  modalTitle.textContent = "⚠️ 写操作确认";
+  modalWarn.textContent = "助手要执行下面的操作，确认后才会真正执行：";
+  modalOk.textContent = "确认执行";
+  modalNo.textContent = "取消";
+  modalArgs.innerHTML =
     `<tr><td>操作</td><td><b>${data.name}</b></td></tr>` +
     Object.entries(data.args).map(([k, v]) =>
       `<tr><td>${k}</td><td>${typeof v === "object" ? JSON.stringify(v) : String(v)}</td></tr>`).join("");
   mask.classList.add("show");
   confirmResolver = (approved) => {
     mask.classList.remove("show");
+    confirmResolver = null;
     fetch("/api/confirm", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
@@ -459,8 +517,21 @@ function showConfirm(data) {
     }).catch(() => {});
   };
 }
-document.getElementById("btn-ok").onclick = () => confirmResolver?.(true);
-document.getElementById("btn-no").onclick = () => confirmResolver?.(false);
+function showLogoutConfirm() {
+  modalTitle.textContent = "🚪 退出登录";
+  modalWarn.textContent = "退出后需要重新登录，才能继续查询校园服务。确定要退出吗？";
+  modalArgs.replaceChildren();
+  modalOk.textContent = "确认退出";
+  modalNo.textContent = "继续使用";
+  mask.classList.add("show");
+  confirmResolver = (approved) => {
+    mask.classList.remove("show");
+    confirmResolver = null;
+    if (approved) void logout();
+  };
+}
+modalOk.onclick = () => confirmResolver?.(true);
+modalNo.onclick = () => confirmResolver?.(false);
 
 function setAuthMessage(message, error = false) {
   authStatus.textContent = message;
@@ -491,7 +562,7 @@ function updateLoginButton() {
   loginBtn.textContent = authenticated ? "已登录" : "登录";
   loginBtn.classList.toggle("logged-in", authenticated);
   loginBtn.title = authenticated ? "点击退出登录" : "使用清华 Info 账号登录";
-  sendBtn.disabled = !authenticated || busy || loginInFlight;
+  sendBtn.disabled = busy || loginInFlight;
 }
 
 function openLoginModal() {
@@ -520,7 +591,7 @@ async function logout() {
   if (resp?.ok) {
     authenticated = false;
     updateLoginButton();
-    chat.replaceChildren();
+    clearChatHistory();
     pendingImages = [];
     renderThumbs();
     addMsg("bot", "已退出登录。本次会话的校园服务已关闭。");
@@ -737,7 +808,7 @@ async function startLogin() {
   }
 }
 
-loginBtn.onclick = () => { if (authenticated) void logout(); else openLoginModal(); };
+loginBtn.onclick = () => { if (authenticated) showLogoutConfirm(); else openLoginModal(); };
 authCancel.onclick = () => { void cancelAuth(); };
 authSubmit.onclick = () => { if (authPhase === "code") void submitAuthCode(); else void startLogin(); };
 authCode.addEventListener("keydown", (e) => {
@@ -759,7 +830,14 @@ async function ask(question, images) {
     body: JSON.stringify({question, ...(images?.length ? {images} : {})}),
   });
   if (!resp.ok) {
-    addMsg("bot", "出错了：" + (await resp.text()));
+    const message = await resp.text();
+    if (resp.status === 401) {
+      authenticated = false;
+      updateLoginButton();
+      addMsg("bot", message || "请先点击右上角“登录”并完成清华账号认证。");
+    } else {
+      addMsg("bot", "出错了：" + message);
+    }
     sfx.error();
     busy = false;
     updateLoginButton();
@@ -831,6 +909,7 @@ async function ask(question, images) {
         botText = data.text;
         ensureBot();
         botDiv.textContent = botText;
+        saveChatHistory();
         scrollDown();
         if (ttsOn && botText) speak(botText);
       } else if (ev === "error") {
@@ -840,7 +919,10 @@ async function ask(question, images) {
     }
   }
   // 流结束：去掉光标
-  if (botDiv) botDiv.textContent = botText;
+  if (botDiv) {
+    botDiv.textContent = botText;
+    saveChatHistory();
+  }
   busy = false;
   sendBtn.disabled = false;
   q.focus();
@@ -860,6 +942,7 @@ sendBtn.onclick = () => {
   ask(text, imgs).catch((e) => { addMsg("bot", "网络错误：" + e.message); sfx.error(); });
 };
 q.addEventListener("keydown", (e) => { if (e.key === "Enter") sendBtn.click(); });
+restoreChatHistory();
 q.focus();
 </script>
 </body>
