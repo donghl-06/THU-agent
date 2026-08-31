@@ -158,6 +158,31 @@
     padding: 6px 14px; border-radius: 999px; cursor: pointer;
   }
   .err-retry:hover { background: color-mix(in srgb, var(--err) 10%, transparent); }
+  /* Toast：系统通知与 AI 回复分离（文档十五） */
+  #toasts {
+    position: fixed; top: 64px; right: 20px; z-index: 50;
+    display: flex; flex-direction: column; gap: 10px; pointer-events: none;
+  }
+  .toast {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--card); color: var(--text);
+    border: 1px solid var(--border); border-left: 3px solid var(--primary);
+    border-radius: var(--r-md); padding: 10px 16px; font-size: var(--fs-sm);
+    box-shadow: var(--shadow-2); animation: toast-in 0.25s ease;
+  }
+  .toast.ok { border-left-color: var(--ok); }
+  .toast.err { border-left-color: var(--err); }
+  .toast.out { opacity: 0; transform: translateX(12px); transition: opacity 0.3s, transform 0.3s; }
+  @keyframes toast-in { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
+  /* 回到底部按钮（文档二十八） */
+  #scroll-btn {
+    position: fixed; right: 24px; bottom: 130px; z-index: 5;
+    width: 36px; height: 36px; border-radius: 50%;
+    border: 1px solid var(--border); background: var(--card); color: var(--text-2);
+    cursor: pointer; box-shadow: var(--shadow-1); font-size: 16px; line-height: 1;
+  }
+  #scroll-btn:hover { color: var(--text); background: var(--card-hover); }
+  #scroll-btn[hidden] { display: none; }
   .qr-card { align-self: flex-start; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; text-align: center; }
   .qr-card img { width: 220px; height: 220px; }
   .qr-card .url { font-size: 12px; color: var(--muted); word-break: break-all; margin-top: 8px; max-width: 260px; }
@@ -287,6 +312,8 @@
   </span>
 </header>
 <div id="chat"></div>
+<div id="toasts"></div>
+<button id="scroll-btn" type="button" title="回到底部" hidden>↓</button>
 <div id="thumbs" hidden></div>
 <div id="inputbar">
   <button id="attach" class="iconbtn" title="发送图片">📎</button>
@@ -369,7 +396,26 @@ const authMethodLabels = {
   wechat: {icon: "💬", label: "微信验证", hint: "使用清华身份认证关联的微信"},
 };
 
-function scrollDown() { chat.scrollTop = chat.scrollHeight; }
+/* 智能滚动：贴底时自动跟随；用户上翻则停止强滚并显示"回到底部" */
+let followScroll = true;
+const scrollBtn = document.getElementById("scroll-btn");
+chat.addEventListener("scroll", () => {
+  followScroll = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 80;
+  scrollBtn.hidden = followScroll;
+});
+function scrollDown(force = false) {
+  if (!force && !followScroll) return;
+  chat.scrollTop = chat.scrollHeight;
+}
+scrollBtn.onclick = () => scrollDown(true);
+
+function toast(message, type = "") {
+  const el = document.createElement("div");
+  el.className = "toast " + type;
+  el.textContent = message;
+  document.getElementById("toasts").appendChild(el);
+  setTimeout(() => { el.classList.add("out"); setTimeout(() => el.remove(), 320); }, 2600);
+}
 
 function addMsg(role, text) {
   const div = document.createElement("div");
@@ -394,7 +440,7 @@ function addUserMsg(text, images) {
   div.appendChild(document.createTextNode(text));
   chat.appendChild(div);
   saveChatHistory();
-  scrollDown();
+  scrollDown(true);
 }
 
 /* ---- 声音：提示音效（WebAudio 合成，无音频文件） + TTS 朗读 ---- */
@@ -832,7 +878,8 @@ async function logout() {
     clearChatHistory();
     pendingImages = [];
     renderThumbs();
-    addMsg("bot", "已退出登录。本次会话的校园服务已关闭。");
+    toast("已退出登录，校园服务已关闭", "ok");
+    showStartupGuide();
   }
 }
 
@@ -961,7 +1008,7 @@ function handleAuthEvent(data) {
       authenticated = true;
       updateLoginButton();
       if (newlyAuthenticated) {
-        addMsg("bot", "登录成功！你现在可以开始使用清华小助手了。直接告诉我你的需求即可，例如查询课表、寻找空闲时间或了解校园服务。");
+        toast("✓ 登录成功，已连接清华 Info", "ok");
       }
     }
     setAuthMessage("认证成功，正在继续查询…");
@@ -1084,7 +1131,7 @@ async function ask(question, images) {
     if (resp.status === 401) {
       authenticated = false;
       updateLoginButton();
-      addMsg("bot", message || "请先点击右上角“登录”并完成清华账号认证。");
+      toast("请先登录清华账号后再使用校园功能", "err");
     } else {
       showErrorCard(message);
     }
