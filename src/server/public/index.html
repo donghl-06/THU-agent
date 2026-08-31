@@ -134,6 +134,30 @@
   .think-step.fail { color: var(--err); }
   .think-step.fail .dot { border-color: var(--err); background: var(--err); }
   .think-step .ms { margin-left: auto; font-size: var(--fs-xs); color: var(--muted); font-variant-numeric: tabular-nums; }
+  /* 错误卡片：人话文案 + 可折叠技术详情 + 重新生成（文档十六/十七） */
+  .error-card {
+    align-self: flex-start; width: min(480px, 88%);
+    background: color-mix(in srgb, var(--err) 6%, var(--card));
+    border: 1px solid color-mix(in srgb, var(--err) 30%, transparent);
+    border-radius: var(--r-lg) var(--r-lg) var(--r-lg) 4px;
+    padding: 14px 16px; box-shadow: var(--shadow-1); animation: msg-in 0.22s ease;
+  }
+  .err-head { font-weight: 600; font-size: 14px; color: var(--err); }
+  .err-body { font-size: var(--fs-sm); color: var(--text-2); margin-top: 6px; line-height: 1.6; }
+  .err-detail { margin-top: 10px; font-size: var(--fs-xs); }
+  .err-detail summary { color: var(--muted); cursor: pointer; width: fit-content; }
+  .err-detail pre {
+    margin-top: 6px; padding: 8px 10px; background: var(--inset); border-radius: var(--r-sm);
+    white-space: pre-wrap; word-break: break-all; color: var(--muted);
+    max-height: 160px; overflow: auto;
+  }
+  .err-actions { margin-top: 12px; }
+  .err-retry {
+    border: 1px solid color-mix(in srgb, var(--err) 40%, transparent);
+    background: transparent; color: var(--text); font-size: var(--fs-sm);
+    padding: 6px 14px; border-radius: 999px; cursor: pointer;
+  }
+  .err-retry:hover { background: color-mix(in srgb, var(--err) 10%, transparent); }
   .qr-card { align-self: flex-start; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; text-align: center; }
   .qr-card img { width: 220px; height: 220px; }
   .qr-card .url { font-size: 12px; color: var(--muted); word-break: break-all; margin-top: 8px; max-width: 260px; }
@@ -640,6 +664,43 @@ function createThinkingCard() {
   return {el: card, addTool, finishTool, dismiss};
 }
 
+/* ---- 错误卡片：技术错误转人话 + 可折叠详情 + 重新生成 ---- */
+const ERROR_HINTS = [
+  {re: /concurrent request limit|HTTP 429/i, title: "AI 服务暂时繁忙", body: "当前请求较多，请稍等片刻再试。"},
+  {re: /HTTP 40[13]/, title: "AI 服务拒绝请求", body: "可能是额度或配置问题，请稍后再试。"},
+  {re: /timeout|ETIMEDOUT|aborted/i, title: "请求超时", body: "服务响应太慢或网络不稳定，请重试。"},
+  {re: /fetch failed|network|ECONN/i, title: "网络连接失败", body: "请检查网络连接后重试。"},
+];
+function humanizeError(raw) {
+  for (const h of ERROR_HINTS) if (h.re.test(raw)) return h;
+  return {title: "出了点问题", body: "刚才的操作没有成功，请重试。"};
+}
+
+let lastQuestion = null;   // 供"重新生成"使用
+let lastImages = null;
+function showErrorCard(raw) {
+  const hint = humanizeError(raw);
+  const card = document.createElement("div");
+  card.className = "error-card";
+  card.innerHTML =
+    `<div class="err-head">⚠️ ${hint.title}</div>` +
+    `<div class="err-body">${hint.body}</div>` +
+    '<details class="err-detail"><summary>技术详情</summary><pre></pre></details>' +
+    '<div class="err-actions"><button class="err-retry" type="button">↻ 重新生成</button></div>';
+  card.querySelector("pre").textContent = raw;
+  card.querySelector(".err-retry").onclick = () => {
+    card.remove();
+    if (lastQuestion == null && !(lastImages ?? []).length) return;
+    const text = lastQuestion, imgs = lastImages;
+    lastQuestion = null; lastImages = null;
+    addUserMsg(text, imgs);
+    sfx.send();
+    ask(text, imgs).catch((e) => { showErrorCard("网络错误：" + e.message); sfx.error(); });
+  };
+  chat.appendChild(card);
+  scrollDown();
+}
+
 function showQr(data) {
   const div = document.createElement("div");
   div.className = "qr-card";
@@ -1009,6 +1070,8 @@ fetch("/api/auth/status").then((resp) => resp.json()).then((data) => {
 async function ask(question, images) {
   busy = true;
   sendBtn.disabled = true;
+  lastQuestion = question;  // 供失败后"重新生成"
+  lastImages = images;
   const thinking = createThinkingCard(); // 立即出现，不等 API
   const resp = await fetch("/api/chat", {
     method: "POST",
@@ -1023,7 +1086,7 @@ async function ask(question, images) {
       updateLoginButton();
       addMsg("bot", message || "请先点击右上角“登录”并完成清华账号认证。");
     } else {
-      addMsg("bot", "出错了：" + message);
+      showErrorCard(message);
     }
     sfx.error();
     busy = false;
@@ -1102,7 +1165,7 @@ async function ask(question, images) {
         if (ttsOn && botText) speak(botText);
       } else if (ev === "error") {
         thinking.dismiss();
-        addMsg("bot", "出错了：" + data.message);
+        showErrorCard(data.message);
         sfx.error();
       }
     }
@@ -1118,18 +1181,23 @@ async function ask(question, images) {
   q.focus();
 }
 
-sendBtn.onclick = () => {
-  const text = q.value.trim();
-  const imgs = pendingImages;
+/* 统一发送入口：发送按钮与"重新生成"共用 */
+function submit(text, imgs) {
   if ((!text && imgs.length === 0) || busy) return;
   if (rec) rec.stop(); // 发送时停止语音输入
   try { speechSynthesis.cancel(); } catch {} // 新一轮开始时停止朗读
+  addUserMsg(text, imgs);
+  sfx.send();
+  ask(text, imgs).catch((e) => { showErrorCard("网络错误：" + e.message); sfx.error(); });
+}
+sendBtn.onclick = () => {
+  const text = q.value.trim();
+  const imgs = pendingImages;
+  if (!text && imgs.length === 0) return;
   q.value = "";
   pendingImages = [];
   renderThumbs();
-  addUserMsg(text, imgs);
-  sfx.send();
-  ask(text, imgs).catch((e) => { addMsg("bot", "网络错误：" + e.message); sfx.error(); });
+  submit(text, imgs);
 };
 q.addEventListener("keydown", (e) => { if (e.key === "Enter") sendBtn.click(); });
 restoreChatHistory();
