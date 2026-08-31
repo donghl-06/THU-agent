@@ -248,6 +248,20 @@
   }
   .md a { color: var(--tool); }
   .md hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+  /* Message Actions：AI 回复 hover 时显示（文档十八） */
+  .msg-actions {
+    display: flex; gap: 4px; margin-top: 10px; padding-top: 8px;
+    border-top: 1px solid var(--border-soft);
+    opacity: 0; transition: opacity 0.15s;
+  }
+  .msg.bot:hover .msg-actions { opacity: 1; }
+  @media (hover: none) { .msg-actions { opacity: 1; } }
+  .msg-actions button {
+    border: none; background: transparent; color: var(--muted);
+    font-size: 14px; padding: 3px 8px; border-radius: 7px; cursor: pointer;
+  }
+  .msg-actions button:hover { background: var(--card-hover); color: var(--text); }
+  .msg-actions button.sel { color: var(--primary-bright); }
   .qr-card { align-self: flex-start; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; text-align: center; }
   .qr-card img { width: 220px; height: 220px; }
   .qr-card .url { font-size: 12px; color: var(--muted); word-break: break-all; margin-top: 8px; max-width: 260px; }
@@ -925,6 +939,53 @@ function renderMd(el, raw) {
     }
   });
   el.querySelectorAll("a").forEach((a) => { a.target = "_blank"; a.rel = "noopener noreferrer"; });
+  if (el.classList.contains("bot")) attachMsgActions(el);
+}
+
+/* ---- Message Actions：复制 / 重新生成 / 赞踩 ---- */
+function attachMsgActions(el) {
+  const bar = document.createElement("div");
+  bar.className = "msg-actions";
+  const mkBtn = (icon, title, fn) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = icon;
+    b.title = title;
+    b.onclick = () => fn(b);
+    return b;
+  };
+  bar.appendChild(mkBtn("📋", "复制", () => {
+    navigator.clipboard.writeText(el.dataset.raw ?? el.textContent ?? "")
+      .then(() => toast("已复制到剪贴板", "ok"))
+      .catch(() => toast("复制失败", "err"));
+  }));
+  bar.appendChild(mkBtn("↻", "重新生成", () => {
+    if (busy) return;
+    const latest = [...chat.querySelectorAll(".msg.bot")].pop();
+    if (el !== latest) { toast("只能重新生成最新的回答", "err"); return; }
+    let prev = el.previousElementSibling;
+    while (prev && !prev.classList.contains("user")) prev = prev.previousElementSibling;
+    if (!prev) { toast("找不到对应的提问", "err"); return; }
+    const question = prev.dataset.raw ?? prev.textContent ?? "";
+    let next;
+    while ((next = el.nextElementSibling)) next.remove();
+    el.remove();
+    saveChatHistory();
+    updateWelcome();
+    scrollDown(true);
+    ask(question, []).catch((e) => { showErrorCard("网络错误：" + e.message); sfx.error(); });
+  }));
+  const fb = () => (b) => {
+    const wasSel = b.classList.contains("sel");
+    bar.querySelectorAll("button").forEach((x) => x.classList.remove("sel"));
+    if (!wasSel) {
+      b.classList.add("sel");
+      toast("感谢反馈");
+    }
+  };
+  bar.appendChild(mkBtn("👍", "有帮助", fb()));
+  bar.appendChild(mkBtn("👎", "没帮助", fb()));
+  el.appendChild(bar);
 }
 
 /* ---- 错误卡片：技术错误转人话 + 可折叠详情 + 重新生成 ---- */
