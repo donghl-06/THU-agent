@@ -95,9 +95,12 @@ Web UI 启动脚本会自动配置旧版 TLS 所需的 `OPENSSL_CONF`，PowerShe
 pnpm package:win
 ```
 
-命令会在 `release/清华小助手/` 生成发布目录，内置 Node.js 和生产依赖，用户无需安装
-Node.js、pnpm 或 Git。将 `.env.example` 复制为同目录下的 `.env` 并填写 `LLM_API_KEY`
-等模型配置后，双击 `清华小助手.exe` 即可自动启动本地服务并打开浏览器。程序退出入口
+命令会生成版本化的最小发布目录、可直接上传 GitHub Release 的 ZIP，以及对应的 SHA-256
+校验文件。发布包只包含构建产物、内置 Node.js、启动器、配置示例和第三方许可证，不包含
+源码、测试或 `node_modules`，用户无需安装 Node.js、pnpm 或 Git。将 `.env.example` 复制为
+同目录下的 `.env` 并填写 `LLM_API_KEY` 等模型配置后，双击 `清华小助手.exe` 即可自动启动
+本地服务并打开浏览器。不要把填写过真实密钥的 `.env` 放进公开发布包。
+
 使用 .NET 8 SDK 打包时，程序退出入口位于 Windows 任务栏托盘图标的右键菜单中。
 
 如果打包机额外安装了 .NET 8 SDK，脚本会优先生成带托盘菜单的启动器；没有 SDK 时会

@@ -15,6 +15,7 @@ await build({
     format: "cjs",
     target: "node22",
     keepNames: true,
+    legalComments: "eof",
     sourcemap: false,
     logLevel: "warning",
 });
