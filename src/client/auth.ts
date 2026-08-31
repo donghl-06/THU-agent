@@ -5,22 +5,34 @@
  * Skill 和上层永远不需要接触这些细节。
  */
 import type {InfoHelper} from "@thu-info/lib";
-import {config} from "../config/env";
+import {randomUUID} from "node:crypto";
 
 /**
  * 二次认证回调。账号触发 2FA 时库会调用它们向用户提问。
- * 交互式场景（CLI 脚本）传入 readline 实现；
- * 非交互场景（未来的 Harness）不传，库会抛出可识别的错误。
+ * 交互式场景（CLI 或 Web UI）传入回调实现；
+ * 未传回调时，库会抛出可识别的认证错误。
  */
 export interface TwoFactorHooks {
     twoFactorMethodHook?: InfoHelper["twoFactorMethodHook"];
     twoFactorAuthHook?: InfoHelper["twoFactorAuthHook"];
+    /** 登录成功通知（Web UI 用于关闭认证窗口）。 */
+    onLoginSuccess?: () => void;
 }
 
-export function setupAuth(helper: InfoHelper, hooks: TwoFactorHooks = {}): void {
+export interface LoginCredentials {
+    username: string;
+    password: string;
+    fingerprint?: string;
+}
+
+export function setupAuth(
+    helper: InfoHelper,
+    hooks: TwoFactorHooks = {},
+    fingerprint = process.env.THU_FINGERPRINT || randomUUID().replace(/-/g, ""),
+): void {
     // 固定设备指纹 + 信任此设备：首次信任后同指纹登录跳过 2FA。
     // 会在账号「多因子认证」里登记名为 thu-assistant-dev 的信任设备。
-    helper.fingerprint = config.thu.fingerprint;
+    helper.fingerprint = fingerprint;
     helper.trustFingerprintHook = async () => true;
     helper.trustFingerprintNameHook = async () => "thu-assistant-dev";
     helper.twoFactorAuthLimitHook = async () => {

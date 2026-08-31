@@ -18,6 +18,7 @@ import {createHash, createDecipheriv, createCipheriv} from "node:crypto";
 import "../../utils/httpProxy"; // 全局 fetch 走 https_proxy（若设置）
 import {config} from "../../config/env";
 import {ThuError} from "../errors";
+import type {LoginCredentials} from "../auth";
 
 const SPORTS_BASE = "https://www.sports.tsinghua.edu.cn";
 const SSO_ENTRY =
@@ -218,9 +219,14 @@ export interface SportsPayLaunch {
 }
 
 export class SportsClient {
+    private readonly credentials?: LoginCredentials;
     private accessToken = "";
     /** 进行中的登录 Promise，防并发重复登录（与 lib 的 outstandingLoginPromise 同思路） */
     private loginPromise: Promise<void> | undefined;
+
+    constructor(credentials?: LoginCredentials) {
+        this.credentials = credentials;
+    }
 
     /** 登录（幂等）。完整链：SSO → 直连 ID 登录 → 回调 → uniToken → accessToken */
     async login(): Promise<void> {
@@ -248,9 +254,9 @@ export class SportsClient {
         }
         // ③ 直连提交凭证（复用指纹信任设备，正常不会触发 2FA）
         const loginResp = await uFetch(ID_LOGIN_CHECK, {
-            i_user: config.thu.username,
-            i_pass: SM2_MAGIC_NUMBER + sm2.doEncrypt(config.thu.password, sm2PublicKey),
-            fingerPrint: config.thu.fingerprint,
+            i_user: this.credentials?.username ?? config.thu.username,
+            i_pass: SM2_MAGIC_NUMBER + sm2.doEncrypt(this.credentials?.password ?? config.thu.password, sm2PublicKey),
+            fingerPrint: this.credentials?.fingerprint ?? config.thu.fingerprint,
             fingerGenPrint: "",
             i_captcha: "",
         });

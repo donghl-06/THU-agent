@@ -8,6 +8,12 @@ import {Agent} from "../src/harness/agentLoop";
 import {createAllSkills} from "../src/skills";
 import {createWebServer} from "../src/server/webServer";
 import type {ConfirmFn} from "../src/harness/toolRegistry";
+import {ThuClient} from "../src/client/ThuClient";
+import type {LoginCredentials} from "../src/client/auth";
+import {fileURLToPath} from "node:url";
+import {dirname, join} from "node:path";
+
+process.env.OPENSSL_CONF ??= join(dirname(fileURLToPath(import.meta.url)), "..", "openssl.cnf");
 
 const PORT = Number(process.env.PORT ?? 3457);
 
@@ -27,9 +33,18 @@ const SYSTEM_PROMPT = `你是"清华小助手"，一个帮清华学生查询校�
 4. 预约/取消/充值等写操作前，先向用户复述一遍关键信息（对象、日期、时段、费用/金额），等用户明确说要执行，再调用工具。付费场次还要确认支付方式（线上/线下）；用户没主动说就先问，不要自己猜。
 5. 回答简洁口语化，像同学之间说话。`;
 
-// prewarm：启动时后台登录，首个问题不用再等登录
+// 认证由 Web UI 按需触发；需要二次认证时通过 SSE 弹窗与后端交互
 const server = createWebServer(
-    (confirm: ConfirmFn) => new Agent(createAllSkills({prewarm: true}), SYSTEM_PROMPT, undefined, confirm),
+    (confirm: ConfirmFn, authHooks, credentials?: LoginCredentials) => {
+        const thuClient = new ThuClient(authHooks, credentials);
+        return new Agent(
+            createAllSkills({prewarm: false, authHooks, credentials, thuClient}),
+            SYSTEM_PROMPT,
+            undefined,
+            confirm,
+            () => thuClient.login(),
+        );
+    },
     {port: PORT},
 );
 

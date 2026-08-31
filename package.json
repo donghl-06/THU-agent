@@ -17,7 +17,7 @@
     "agent": "OPENSSL_CONF=${PWD}/openssl.cnf tsx scripts/step10-agent.ts",
     "eval": "tsx eval/runner.ts",
     "benchmark": "OPENSSL_CONF=${PWD}/openssl.cnf tsx eval/benchmark.ts",
-    "web": "OPENSSL_CONF=${PWD}/openssl.cnf tsx scripts/step18-web.ts"
+    "web": "tsx scripts/step18-web.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

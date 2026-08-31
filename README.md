@@ -74,6 +74,19 @@ pnpm step2   # 真实登录 + 获取用户信息
 pnpm step3   # 获取真实课表
 ```
 
+### Web UI 图形化登录
+
+运行 `pnpm web` 后打开 <http://127.0.0.1:3457>，点击右上角“登录”，
+即可在页面输入清华 Info 学号和密码。需要二次认证时，页面会弹出 TOTP、短信或微信
+认证方式选择，并在同一窗口输入验证码；凭证只通过本机回环地址传给后端，不会写入
+浏览器本地存储。Web UI 登录成功后才会开放校园 Skill 查询。
+
+Web UI 启动脚本会自动配置旧版 TLS 所需的 `OPENSSL_CONF`，PowerShell 下无需手动设置。
+
+使用图形化登录时，`THU_USERNAME`、`THU_PASSWORD` 和 `THU_FINGERPRINT` 可以留空；
+它们仍可用于 `pnpm step2`、`pnpm step3` 等命令行验证脚本。每次 Web UI 进程重启后需
+重新登录，除非你自行在 `.env` 配置固定指纹并由清华认证系统信任该设备。
+
 其他命令：
 
 ```bash

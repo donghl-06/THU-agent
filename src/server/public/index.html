@@ -76,6 +76,8 @@
   header { display: flex; align-items: center; }
   header .ctl { margin-left: auto; display: flex; gap: 8px; }
   header .iconbtn { padding: 5px 10px; font-size: 14px; }
+  #login-btn { padding: 7px 14px; border: 0; border-radius: 9px; background: var(--primary); color: #fff; font-size: 13px; cursor: pointer; }
+  #login-btn.logged-in { background: var(--primary-light); color: var(--primary); border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent); }
   #q {
     flex: 1; padding: 11px 14px; border: 1px solid var(--border); border-radius: 10px;
     font-size: 15px; background: var(--bg); color: var(--text); outline: none;
@@ -105,11 +107,65 @@
   #modal button { padding: 9px 22px; border-radius: 9px; font-size: 14px; cursor: pointer; border: none; }
   #btn-ok { background: var(--ok); color: #fff; }
   #btn-no { background: var(--bg); color: var(--text); border: 1px solid var(--border); }
+  #auth-mask {
+    position: fixed; inset: 0; background: rgba(8, 12, 24, 0.58);
+    display: none; align-items: center; justify-content: center; z-index: 20;
+    padding: 20px;
+  }
+  #auth-mask.show { display: flex; }
+  #auth-modal {
+    width: min(430px, 100%); background: var(--card); color: var(--text);
+    border: 1px solid var(--border); border-radius: 20px; padding: 28px;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.32);
+  }
+  #auth-modal .auth-badge {
+    width: 46px; height: 46px; display: grid; place-items: center;
+    border-radius: 14px; background: var(--primary-light); font-size: 24px;
+    margin-bottom: 16px;
+  }
+  #auth-modal h3 { font-size: 20px; margin-bottom: 8px; }
+  #auth-status { color: var(--muted); font-size: 14px; line-height: 1.6; margin-bottom: 10px; }
+  #auth-status.error { color: var(--err); }
+  #auth-phone { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
+  #auth-login-fields { display: grid; gap: 12px; margin: 18px 0 4px; }
+  #auth-login-fields[hidden] { display: none; }
+  #auth-login-fields label { color: var(--muted); font-size: 13px; }
+  #auth-login-fields input {
+    display: block; width: 100%; margin-top: 6px; padding: 11px 12px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 15px; outline: none;
+  }
+  #auth-login-fields input:focus { border-color: var(--primary); }
+  #auth-login-tip { color: var(--muted); font-size: 12px; line-height: 1.5; }
+  #auth-login-tip[hidden] { display: none; }
+  #auth-methods { display: grid; gap: 10px; margin: 18px 0 8px; }
+  .auth-method {
+    display: flex; align-items: center; gap: 12px; width: 100%; padding: 13px 14px;
+    color: var(--text); background: var(--bg); border: 1px solid var(--border);
+    border-radius: 12px; cursor: pointer; text-align: left; font-size: 14px;
+  }
+  .auth-method:hover { border-color: var(--primary); background: var(--primary-light); }
+  .auth-method .auth-method-icon { font-size: 20px; }
+  #auth-code-wrap { display: block; color: var(--muted); font-size: 13px; margin: 18px 0; }
+  #auth-code-wrap[hidden], #auth-methods[hidden], #auth-submit[hidden], #auth-phone[hidden] { display: none; }
+  #auth-code {
+    display: block; width: 100%; margin-top: 8px; padding: 12px 13px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text);
+    font-size: 20px; letter-spacing: 0.18em; outline: none;
+  }
+  #auth-code:focus { border-color: var(--primary); }
+  #auth-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+  #auth-actions button {
+    border: 0; border-radius: 10px; padding: 10px 18px; font-size: 14px; cursor: pointer;
+  }
+  #auth-cancel { color: var(--text); background: var(--bg); border: 1px solid var(--border) !important; }
+  #auth-submit { color: #fff; background: var(--primary); }
+  #auth-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
 </head>
 <body>
 <header>清华小助手<span class="sub">单用户本地模式 · 写操作会弹窗确认 · 支持语音/图片输入</span>
   <span class="ctl">
+    <button id="login-btn" type="button">登录</button>
     <button id="tts-toggle" class="iconbtn" title="朗读回复开关">🔊</button>
     <button id="snd-toggle" class="iconbtn" title="提示音效开关">🔔</button>
   </span>
@@ -120,7 +176,7 @@
   <button id="attach" class="iconbtn" title="发送图片">📎</button>
   <button id="mic" class="iconbtn" title="语音输入">🎤</button>
   <input id="q" placeholder="问点什么，如：我今天有什么课？" autocomplete="off">
-  <button id="send">发送</button>
+  <button id="send" disabled>发送</button>
   <input id="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
 </div>
 
@@ -136,12 +192,61 @@
   </div>
 </div>
 
+<div id="auth-mask" aria-hidden="true">
+  <div id="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+    <div class="auth-badge">🔐</div>
+    <h3 id="auth-title">登录清华小助手</h3>
+    <p id="auth-status">使用清华 Info 账号登录，凭证只会发送到本机服务。</p>
+    <div id="auth-login-fields">
+      <label>学号<input id="auth-username" type="text" inputmode="numeric" autocomplete="username" maxlength="128" placeholder="输入学号"></label>
+      <label>密码<input id="auth-password" type="password" autocomplete="current-password" maxlength="512" placeholder="输入密码"></label>
+      <span id="auth-login-tip">登录成功后，本机会话可能登记为可信设备；可在清华身份认证页面撤销。</span>
+    </div>
+    <p id="auth-phone" hidden></p>
+    <div id="auth-methods"></div>
+    <label id="auth-code-wrap" hidden>
+      验证码
+      <input id="auth-code" inputmode="numeric" autocomplete="one-time-code" maxlength="128" placeholder="输入验证码">
+    </label>
+    <div id="auth-actions">
+      <button id="auth-cancel" type="button">取消</button>
+      <button id="auth-submit" type="button">开始登录</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const chat = document.getElementById("chat");
 const q = document.getElementById("q");
 const sendBtn = document.getElementById("send");
 const mask = document.getElementById("modal-mask");
+const authMask = document.getElementById("auth-mask");
+const authStatus = document.getElementById("auth-status");
+const loginBtn = document.getElementById("login-btn");
+const authLoginFields = document.getElementById("auth-login-fields");
+const authLoginTip = document.getElementById("auth-login-tip");
+const authUsername = document.getElementById("auth-username");
+const authPassword = document.getElementById("auth-password");
+const authPhone = document.getElementById("auth-phone");
+const authMethods = document.getElementById("auth-methods");
+const authCodeWrap = document.getElementById("auth-code-wrap");
+const authCode = document.getElementById("auth-code");
+const authSubmit = document.getElementById("auth-submit");
+const authCancel = document.getElementById("auth-cancel");
 let busy = false;
+let authRequestId = null;
+let authPhase = null;
+let authOrigin = null;
+let authSubmitting = false;
+let loginInFlight = false;
+let loginAbortController = null;
+let authCancelRequested = false;
+let authenticated = false;
+const authMethodLabels = {
+  totp: {icon: "🔢", label: "验证器动态码", hint: "使用验证器 App 中的当前验证码"},
+  mobile: {icon: "📱", label: "短信验证码", hint: "向已绑定手机号发送验证码"},
+  wechat: {icon: "💬", label: "微信验证", hint: "使用清华身份认证关联的微信"},
+};
 
 function scrollDown() { chat.scrollTop = chat.scrollHeight; }
 
@@ -357,6 +462,293 @@ function showConfirm(data) {
 document.getElementById("btn-ok").onclick = () => confirmResolver?.(true);
 document.getElementById("btn-no").onclick = () => confirmResolver?.(false);
 
+function setAuthMessage(message, error = false) {
+  authStatus.textContent = message;
+  authStatus.classList.toggle("error", error);
+}
+
+function closeAuthModal() {
+  authMask.classList.remove("show");
+  authMask.setAttribute("aria-hidden", "true");
+  authRequestId = null;
+  authPhase = null;
+  authOrigin = null;
+  authSubmitting = false;
+  authCode.value = "";
+  authPassword.value = "";
+  authMethods.replaceChildren();
+  authMethods.hidden = false;
+  authCodeWrap.hidden = true;
+  authSubmit.hidden = true;
+  authPhone.hidden = true;
+  authLoginFields.hidden = false;
+  authLoginTip.hidden = false;
+  authCancel.disabled = false;
+  authSubmit.disabled = false;
+}
+
+function updateLoginButton() {
+  loginBtn.textContent = authenticated ? "已登录" : "登录";
+  loginBtn.classList.toggle("logged-in", authenticated);
+  loginBtn.title = authenticated ? "点击退出登录" : "使用清华 Info 账号登录";
+  sendBtn.disabled = !authenticated || busy || loginInFlight;
+}
+
+function openLoginModal() {
+  if (loginInFlight) return;
+  authCancelRequested = false;
+  authMask.classList.add("show");
+  authMask.setAttribute("aria-hidden", "false");
+  authOrigin = "login";
+  authPhase = "login";
+  authRequestId = null;
+  authLoginFields.hidden = false;
+  authLoginTip.hidden = false;
+  authMethods.hidden = true;
+  authCodeWrap.hidden = true;
+  authSubmit.hidden = false;
+  authSubmit.textContent = "开始登录";
+  authCancel.textContent = "取消";
+  setAuthMessage("使用清华 Info 账号登录，凭证只发送到本机服务。");
+  authPhone.hidden = true;
+  window.setTimeout(() => authUsername.focus(), 0);
+}
+
+async function logout() {
+  if (busy || loginInFlight) return;
+  const resp = await fetch("/api/auth/logout", {method: "POST"}).catch(() => null);
+  if (resp?.ok) {
+    authenticated = false;
+    updateLoginButton();
+    chat.replaceChildren();
+    pendingImages = [];
+    renderThumbs();
+    addMsg("bot", "已退出登录。本次会话的校园服务已关闭。");
+  }
+}
+
+async function cancelAuth() {
+  const id = authRequestId;
+  authCancelRequested = true;
+  if (loginInFlight && authOrigin === "login") loginAbortController?.abort();
+  closeAuthModal();
+  if (!id) return;
+  await fetch("/api/auth/cancel", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({id}),
+  }).catch(() => {});
+}
+
+function showAuthMethod(data) {
+  authRequestId = typeof data.id === "string" ? data.id : null;
+  authPhase = "method";
+  if (!authOrigin) authOrigin = "chat";
+  authMask.classList.add("show");
+  authMask.setAttribute("aria-hidden", "false");
+  authPhone.hidden = !data.phone;
+  authPhone.textContent = data.phone ? `短信将发送至 ${data.phone}` : "";
+  setAuthMessage("请选择一种认证方式继续");
+  authMethods.replaceChildren();
+  authMethods.hidden = false;
+  authLoginFields.hidden = true;
+  authLoginTip.hidden = true;
+  authCodeWrap.hidden = true;
+  authSubmit.hidden = true;
+  authCancel.disabled = false;
+  for (const method of Array.isArray(data.methods) ? data.methods : []) {
+    const info = authMethodLabels[method];
+    if (!info) continue;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "auth-method";
+    const icon = document.createElement("span");
+    icon.className = "auth-method-icon";
+    icon.textContent = info.icon;
+    const text = document.createElement("span");
+    text.innerHTML = `<strong>${info.label}</strong><br><small>${info.hint}</small>`;
+    button.append(icon, text);
+    button.onclick = () => submitAuthMethod(method);
+    authMethods.append(button);
+  }
+}
+
+async function submitAuthMethod(method) {
+  if (!authRequestId || authSubmitting) return;
+  authSubmitting = true;
+  const buttons = authMethods.querySelectorAll("button");
+  buttons.forEach((button) => { button.disabled = true; });
+  setAuthMessage(method === "mobile" ? "正在发送短信验证码…" : "正在切换认证方式…");
+  try {
+    const resp = await fetch("/api/auth/method", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({id: authRequestId, method}),
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+  } catch (e) {
+    setAuthMessage(`认证方式提交失败：${e.message}`, true);
+    buttons.forEach((button) => { button.disabled = false; });
+  } finally {
+    authSubmitting = false;
+  }
+}
+
+function showAuthCode(data) {
+  authRequestId = typeof data.id === "string" ? data.id : authRequestId;
+  authPhase = "code";
+  if (!authOrigin) authOrigin = "chat";
+  authMask.classList.add("show");
+  authMask.setAttribute("aria-hidden", "false");
+  authMethods.hidden = true;
+  authLoginFields.hidden = true;
+  authLoginTip.hidden = true;
+  authPhone.hidden = true;
+  authCodeWrap.hidden = false;
+  authSubmit.hidden = false;
+  authSubmit.textContent = "提交验证码";
+  authSubmit.disabled = false;
+  authCancel.disabled = false;
+  setAuthMessage("验证码已发送，请输入后提交");
+  window.setTimeout(() => authCode.focus(), 0);
+}
+
+async function submitAuthCode() {
+  if (!authRequestId || authSubmitting) return;
+  const code = authCode.value.trim();
+  if (!code) {
+    setAuthMessage("请输入验证码", true);
+    authCode.focus();
+    return;
+  }
+  authSubmitting = true;
+  authSubmit.disabled = true;
+  authCancel.disabled = true;
+  setAuthMessage("正在验证，请稍候…");
+  try {
+    const resp = await fetch("/api/auth/code", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({id: authRequestId, code}),
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+  } catch (e) {
+    setAuthMessage(`验证码提交失败：${e.message}`, true);
+    authSubmit.disabled = false;
+    authCancel.disabled = false;
+  } finally {
+    authSubmitting = false;
+  }
+}
+
+function handleAuthEvent(data) {
+  if (data.phase === "method") {
+    showAuthMethod(data);
+  } else if (data.phase === "code") {
+    showAuthCode(data);
+  } else if (data.phase === "success") {
+    if (authOrigin === "login") {
+      authenticated = true;
+      updateLoginButton();
+    }
+    setAuthMessage("认证成功，正在继续查询…");
+    window.setTimeout(closeAuthModal, 600);
+  } else if (data.phase === "error") {
+    if (authCancelRequested) {
+      authCancelRequested = false;
+      return;
+    }
+    const message = data.message || "二次认证失败，请重试。";
+    if (authOrigin === "login") {
+      setAuthMessage(message, true);
+      authPhase = "login";
+      authRequestId = null;
+      authLoginFields.hidden = false;
+      authLoginTip.hidden = false;
+      authMethods.hidden = true;
+      authCodeWrap.hidden = true;
+      authPhone.hidden = true;
+      authSubmit.hidden = false;
+      authSubmit.textContent = "重新登录";
+      authSubmit.disabled = false;
+      authCancel.disabled = false;
+    } else {
+      openLoginModal();
+      setAuthMessage(`校园登录已过期：${message} 请重新登录。`, true);
+    }
+  }
+}
+
+async function startLogin() {
+  if (loginInFlight) return;
+  const username = authUsername.value.trim();
+  const password = authPassword.value;
+  if (!username || !password) {
+    setAuthMessage("请输入学号和密码", true);
+    return;
+  }
+  loginInFlight = true;
+  authSubmitting = true;
+  authOrigin = "login";
+  authPhase = "login";
+  authRequestId = null;
+  loginAbortController = new AbortController();
+  authSubmit.disabled = true;
+  authCancel.disabled = true;
+  setAuthMessage("正在登录清华账号，请稍候…");
+  try {
+    const resp = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      signal: loginAbortController.signal,
+      body: JSON.stringify({username, password}),
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    authSubmitting = false;
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, {stream: true});
+      let idx;
+      while ((idx = buffer.indexOf("\n\n")) !== -1) {
+        const block = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        const ev = /^event: (.*)$/m.exec(block)?.[1];
+        const dataStr = /^data: (.*)$/m.exec(block)?.[1];
+        if (!ev || !dataStr) continue;
+        let data;
+        try { data = JSON.parse(dataStr); } catch { continue; }
+        if (ev === "auth") handleAuthEvent(data);
+      }
+    }
+  } catch (e) {
+    if (e?.name !== "AbortError") setAuthMessage(`登录请求失败：${e.message}`, true);
+  } finally {
+    loginInFlight = false;
+    loginAbortController = null;
+    authSubmitting = false;
+    authPassword.value = "";
+    authCancel.disabled = false;
+    if (!authenticated) authSubmit.disabled = false;
+    updateLoginButton();
+  }
+}
+
+loginBtn.onclick = () => { if (authenticated) void logout(); else openLoginModal(); };
+authCancel.onclick = () => { void cancelAuth(); };
+authSubmit.onclick = () => { if (authPhase === "code") void submitAuthCode(); else void startLogin(); };
+authCode.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") void submitAuthCode();
+});
+
+fetch("/api/auth/status").then((resp) => resp.json()).then((data) => {
+  authenticated = data.authenticated === true;
+  updateLoginButton();
+}).catch(() => updateLoginButton());
+
 /* ---- SSE 解析（fetch 流，EventSource 不支持 POST） ---- */
 async function ask(question, images) {
   busy = true;
@@ -369,7 +761,8 @@ async function ask(question, images) {
   if (!resp.ok) {
     addMsg("bot", "出错了：" + (await resp.text()));
     sfx.error();
-    busy = false; sendBtn.disabled = false;
+    busy = false;
+    updateLoginButton();
     return;
   }
 
@@ -427,6 +820,8 @@ async function ask(question, images) {
       } else if (ev === "confirm") {
         sfx.confirm();
         showConfirm(data);
+      } else if (ev === "auth") {
+        handleAuthEvent(data);
       } else if (ev === "qr") {
         showQr(data);
       } else if (ev === "payform") {
