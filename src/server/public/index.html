@@ -37,6 +37,7 @@
     --r-sm: 8px; --r-md: 12px; --r-lg: 16px; --r-xl: 20px;
     --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35);
     --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.40);
+    --glow-color: rgba(130, 49, 142, 0.13);
     --fs-body: 15px; --fs-sm: 13px; --fs-xs: 12px;
   }
   :root[data-theme="light"] {
@@ -63,12 +64,35 @@
     --tool: #0369a1;
     --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.06);
     --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.10);
+    --glow-color: rgba(130, 49, 142, 0.06);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
     background: var(--bg); color: var(--text);
     display: flex; flex-direction: column; height: 100vh;
+  }
+  /* 顶部极淡清华紫 glow，让页面不再是一整块死黑（文档二十七） */
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: -1;
+    background: radial-gradient(640px 340px at 78% -8%, var(--glow-color), transparent 70%);
+  }
+  /* 滚动条与深色界面协调 */
+  #chat::-webkit-scrollbar { width: 10px; }
+  #chat::-webkit-scrollbar-thumb { background: var(--border); border-radius: 5px; border: 2px solid var(--bg); }
+  #chat::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+  /* 键盘焦点可见 + 尊重减少动态偏好 */
+  :focus-visible { outline: 2px solid var(--primary-soft); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  }
+  /* 小屏适配（文档三十） */
+  @media (max-width: 768px) {
+    #chat { padding: 20px 16px; gap: 12px; }
+    #composer-wrap { padding: 10px 16px 16px; }
+    .msg { max-width: 88%; }
+    header { padding: 8px 14px; gap: 8px; }
+    .brand-sub, .conn { display: none; }
   }
   header {
     display: flex; align-items: center; gap: 12px;
