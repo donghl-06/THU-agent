@@ -66,12 +66,53 @@
     --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.10);
     --glow-color: rgba(130, 49, 142, 0.06);
   }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+  /* 会话侧栏（多会话管理） */
+  #sidebar {
+    width: 256px; flex: none; display: flex; flex-direction: column; gap: 10px;
+    padding: 12px 10px; background: var(--bg-soft); border-right: 1px solid var(--border-soft);
+  }
+  #new-chat {
+    display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+    border: 1px solid var(--border); border-radius: var(--r-md);
+    background: transparent; color: var(--text); font-size: var(--fs-sm);
+    cursor: pointer; text-align: left; transition: border-color 0.15s, background 0.15s;
+  }
+  #new-chat:hover { border-color: var(--primary); background: var(--primary-light); }
+  #session-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+  .session-item {
+    display: flex; align-items: center; gap: 6px; padding: 9px 10px;
+    border-radius: var(--r-md); cursor: pointer; font-size: var(--fs-sm);
+    color: var(--text-2); background: transparent; width: 100%;
+  }
+  .session-item:hover { background: var(--card-hover); color: var(--text); }
+  .session-item.active { background: var(--primary-light); color: var(--text); }
+  .session-item .s-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .session-item .s-del {
+    flex: none; border: none; background: transparent; color: var(--muted);
+    width: 22px; height: 22px; border-radius: 6px; cursor: pointer; font-size: 12px;
+    display: grid; place-items: center; opacity: 0; transition: opacity 0.15s;
+  }
+  .session-item:hover .s-del { opacity: 1; }
+  .session-item .s-del:hover { background: color-mix(in srgb, var(--err) 15%, transparent); color: var(--err); }
+  .session-empty { padding: 12px 10px; font-size: var(--fs-xs); color: var(--muted); }
+  #sidebar-mask { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); z-index: 25; display: none; }
+  #sidebar-mask.show { display: block; }
+  #menu-btn { display: none; }
+  @media (max-width: 768px) {
+    #sidebar {
+      position: fixed; top: 0; bottom: 0; left: 0; z-index: 30; width: 270px;
+      transform: translateX(-100%); transition: transform 0.2s;
+    }
+    #sidebar.open { transform: none; box-shadow: var(--shadow-2); }
+    #menu-btn { display: inline-flex; }
+  }
+  @media (min-width: 769px) { #sidebar-mask { display: none !important; } }
   body {
     font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
     background: var(--bg); color: var(--text);
-    display: flex; flex-direction: column; height: 100vh;
+    display: flex; flex-direction: row; height: 100vh;
   }
+  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   /* 顶部极淡清华紫 glow，让页面不再是一整块死黑（文档二十七） */
   body::before {
     content: ""; position: fixed; inset: 0; pointer-events: none; z-index: -1;
@@ -506,7 +547,14 @@ if(__exports != exports)module.exports = exports;return module.exports}));
 </script>
 </head>
 <body>
+<aside id="sidebar">
+  <button id="new-chat" type="button"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>新建对话</button>
+  <div id="session-list"></div>
+</aside>
+<div id="sidebar-mask"></div>
+<div id="main">
 <header title="单用户本地模式 · 写操作会弹窗确认 · 支持语音/图片输入">
+  <button id="menu-btn" class="iconbtn" type="button" title="会话列表"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg></button>
   <div class="brand">
     <div class="logo">✦</div>
     <div class="brand-text">
@@ -549,6 +597,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
       <input id="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
     </div>
   </div>
+</div>
 </div>
 
 <div id="modal-mask">
@@ -678,9 +727,17 @@ const store = {
   get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch {} },
 };
-const CHAT_HISTORY_KEY = "thu-assistant-chat-v1";
+const CHAT_HISTORY_KEY = "thu-assistant-chat-v1"; // 旧单会话 key（迁移来源）
+const SESSIONS_KEY = "thu-assistant-sessions-v1";
 const MAX_SAVED_MESSAGES = 100;
 const MAX_SAVED_TEXT_LENGTH = 20000;
+const MAX_SESSIONS = 30;
+const newSessionId = () => "s_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const deriveTitle = (messages) => {
+  const firstUser = (messages ?? []).find((m) => m.role === "user");
+  const text = (firstUser?.text ?? "").trim();
+  return text ? text.slice(0, 18) : "新对话";
+};
 
 /* ---- 统一功能图标（Lucide 风格内联 SVG，避免 emoji/unicode 混用） ---- */
 const ICON_PATHS = {
@@ -709,6 +766,44 @@ themeBtn.onclick = () => {
   applyTheme(theme);
 };
 
+/* ---- 多会话历史：新建 / 切换 / 删除，localStorage 持久化 ---- */
+let sessionsState = (() => {
+  let state = null;
+  try {
+    const raw = store.get(SESSIONS_KEY, "");
+    if (raw) state = JSON.parse(raw);
+  } catch { /* 数据损坏则重建 */ }
+  if (!state || !Array.isArray(state.sessions) || typeof state.activeId !== "string") {
+    state = {sessions: [], activeId: newSessionId()};
+  }
+  // 旧版单会话数据自动迁移为第一个会话
+  if (state.sessions.length === 0) {
+    try {
+      const legacy = JSON.parse(store.get(CHAT_HISTORY_KEY, "[]"));
+      if (Array.isArray(legacy) && legacy.length > 0) {
+        state.sessions.push({id: state.activeId, title: deriveTitle(legacy), createdAt: Date.now(), messages: legacy});
+      }
+    } catch { /* 忽略损坏的旧数据 */ }
+  }
+  if (!state.sessions.some((s) => s.id === state.activeId)) {
+    state.activeId = state.sessions[0]?.id ?? state.activeId;
+  }
+  return state;
+})();
+
+function persistSessions() {
+  // 会话数超限时淘汰最旧的非活跃会话
+  while (sessionsState.sessions.length > MAX_SESSIONS) {
+    const idx = sessionsState.sessions.findIndex((s) => s.id !== sessionsState.activeId);
+    if (idx < 0) break;
+    sessionsState.sessions.splice(idx, 1);
+  }
+  store.set(SESSIONS_KEY, JSON.stringify(sessionsState));
+  store.set(CHAT_HISTORY_KEY, "[]"); // 迁移完成后清掉旧 key
+}
+
+const activeSession = () => sessionsState.sessions.find((s) => s.id === sessionsState.activeId);
+
 function saveChatHistory() {
   const records = [...chat.children]
     .filter((node) => node.classList.contains("msg"))
@@ -722,14 +817,22 @@ function saveChatHistory() {
       imageCount: node.querySelectorAll("img.att").length,
     }))
     .slice(-MAX_SAVED_MESSAGES);
-  store.set(CHAT_HISTORY_KEY, JSON.stringify(records));
+  let session = activeSession();
+  if (!session) {
+    session = {id: sessionsState.activeId, title: deriveTitle(records), createdAt: Date.now(), messages: []};
+    sessionsState.sessions.push(session);
+  }
+  session.messages = records;
+  if (session.title === "新对话") {
+    const derived = deriveTitle(records);
+    if (derived !== "新对话") session.title = derived;
+  }
+  persistSessions();
+  renderSessionList();
 }
 
-function restoreChatHistory() {
-  let records;
-  try { records = JSON.parse(store.get(CHAT_HISTORY_KEY, "[]")); } catch { records = []; }
-  if (!Array.isArray(records)) return;
-  for (const record of records) {
+function renderMessages(records) {
+  for (const record of records ?? []) {
     if (!record || (record.role !== "user" && record.role !== "bot") || typeof record.text !== "string") continue;
     const div = document.createElement("div");
     div.className = "msg " + record.role;
@@ -753,8 +856,112 @@ function restoreChatHistory() {
 
 function clearChatHistory() {
   chat.replaceChildren();
-  store.set(CHAT_HISTORY_KEY, "[]");
+  sessionsState = {sessions: [], activeId: newSessionId()};
+  persistSessions();
+  renderSessionList();
 }
+
+/* ---- 会话栏交互：新建 / 切换 / 删除 ---- */
+const sidebar = document.getElementById("sidebar");
+const sidebarMask = document.getElementById("sidebar-mask");
+function closeSidebarMobile() {
+  sidebar.classList.remove("open");
+  sidebarMask.classList.remove("show");
+}
+document.getElementById("menu-btn").onclick = () => {
+  const open = sidebar.classList.toggle("open");
+  sidebarMask.classList.toggle("show", open);
+};
+sidebarMask.onclick = closeSidebarMobile;
+
+function renderSessionList() {
+  const list = document.getElementById("session-list");
+  list.replaceChildren();
+  const sorted = [...sessionsState.sessions].sort((a, b) => b.createdAt - a.createdAt);
+  for (const s of sorted) {
+    const item = document.createElement("div");
+    item.className = "session-item" + (s.id === sessionsState.activeId ? " active" : "");
+    item.title = s.title;
+    const title = document.createElement("span");
+    title.className = "s-title";
+    title.textContent = s.title;
+    const del = document.createElement("button");
+    del.className = "s-del";
+    del.type = "button";
+    del.textContent = "✕";
+    del.title = "删除对话";
+    del.onclick = (e) => { e.stopPropagation(); requestDeleteSession(s.id); };
+    item.append(title, del);
+    item.onclick = () => switchSession(s.id);
+    list.appendChild(item);
+  }
+  if (sorted.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "session-empty";
+    empty.textContent = "暂无历史对话";
+    list.appendChild(empty);
+  }
+}
+
+function newChat() {
+  if (busy) { toast("请等待当前回答完成", "err"); return; }
+  if (!chat.querySelector(".msg")) { toast("已经是新对话了"); closeSidebarMobile(); return; }
+  saveChatHistory(); // 当前 DOM 归档到当前会话
+  const fresh = {id: newSessionId(), title: "新对话", createdAt: Date.now(), messages: []};
+  sessionsState.sessions.push(fresh);
+  sessionsState.activeId = fresh.id;
+  persistSessions();
+  chat.replaceChildren();
+  renderSessionList();
+  updateWelcome();
+  closeSidebarMobile();
+  q.focus();
+}
+
+function switchSession(id) {
+  closeSidebarMobile();
+  if (id === sessionsState.activeId) return;
+  if (busy) { toast("请等待当前回答完成", "err"); return; }
+  saveChatHistory(); // 当前 DOM 归档
+  sessionsState.activeId = id;
+  persistSessions();
+  chat.replaceChildren();
+  renderMessages(activeSession()?.messages ?? []);
+  renderSessionList();
+}
+
+let deleteTargetId = null;
+function requestDeleteSession(id) {
+  const target = sessionsState.sessions.find((x) => x.id === id);
+  if (!target) return;
+  deleteTargetId = id;
+  modalTitle.textContent = "🗑️ 删除对话";
+  modalWarn.textContent = `确定删除「${target.title}」吗？删除后不可恢复。`;
+  modalArgs.replaceChildren();
+  modalOk.textContent = "删除";
+  modalNo.textContent = "取消";
+  mask.classList.add("show");
+  confirmResolver = (approved) => {
+    mask.classList.remove("show");
+    confirmResolver = null;
+    if (!approved) { deleteTargetId = null; return; }
+    const idx = sessionsState.sessions.findIndex((x) => x.id === deleteTargetId);
+    deleteTargetId = null;
+    if (idx < 0) return;
+    const wasActive = sessionsState.sessions[idx].id === sessionsState.activeId;
+    sessionsState.sessions.splice(idx, 1);
+    if (wasActive) {
+      sessionsState.activeId = sessionsState.sessions[0]?.id ?? newSessionId();
+      chat.replaceChildren();
+      renderMessages(activeSession()?.messages ?? []);
+    }
+    persistSessions();
+    renderSessionList();
+    toast("对话已删除", "ok");
+  };
+}
+
+document.getElementById("new-chat").onclick = newChat;
 
 /* ---- Welcome Screen：仅在空对话时显示，随首条内容出现而隐藏 ---- */
 const welcome = document.getElementById("welcome");
@@ -1595,7 +1802,8 @@ q.addEventListener("keydown", (e) => {
     sendBtn.click();
   }
 });
-restoreChatHistory();
+renderMessages(activeSession()?.messages ?? []);
+renderSessionList();
 q.focus();
 </script>
 </body>
