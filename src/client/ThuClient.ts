@@ -17,7 +17,7 @@
 import {InfoHelper} from "@thu-info/lib";
 import {CardRechargeType} from "@thu-info/lib/dist/models/card/recharge";
 import {config} from "../config/env";
-import {setupAuth, type TwoFactorHooks} from "./auth";
+import {setupAuth, type LoginCredentials, type TwoFactorHooks} from "./auth";
 import {normalizeError, ThuError} from "./errors";
 
 /** login() 遇到网络类错误时的最大尝试次数（含首次） */
@@ -28,15 +28,19 @@ const META_CACHE_TTL_MS = 24 * 3600 * 1000;
 
 export class ThuClient {
     private readonly helper: InfoHelper;
+    private readonly hooks: TwoFactorHooks;
+    private readonly credentials?: LoginCredentials;
     private loggedIn = false;
     /** 进行中的 login Promise：并发调用共享同一次登录，不重复打认证接口 */
     private loginInflight?: Promise<void>;
     /** 元数据缓存（key → {value, expireAt}），进程内有效 */
     private readonly metaCache = new Map<string, {value: unknown; expireAt: number}>();
 
-    constructor(hooks: TwoFactorHooks = {}) {
+    constructor(hooks: TwoFactorHooks = {}, credentials?: LoginCredentials) {
+        this.hooks = hooks;
+        this.credentials = credentials;
         this.helper = new InfoHelper();
-        setupAuth(this.helper, hooks);
+        setupAuth(this.helper, hooks, credentials?.fingerprint);
     }
 
     /**
@@ -55,10 +59,11 @@ export class ThuClient {
         for (let attempt = 1; attempt <= LOGIN_MAX_ATTEMPTS; attempt++) {
             try {
                 await this.helper.login({
-                    userId: config.thu.username,
-                    password: config.thu.password,
+                    userId: this.credentials?.username ?? config.thu.username,
+                    password: this.credentials?.password ?? config.thu.password,
                 });
                 this.loggedIn = true;
+                this.hooks.onLoginSuccess?.();
                 return;
             } catch (e) {
                 lastError = normalizeError(e);

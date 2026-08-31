@@ -74,6 +74,37 @@ pnpm step2   # 真实登录 + 获取用户信息
 pnpm step3   # 获取真实课表
 ```
 
+### Web UI 图形化登录
+
+运行 `pnpm web` 后打开 <http://127.0.0.1:3457>，点击右上角“登录”，
+即可在页面输入清华 Info 学号和密码。需要二次认证时，页面会弹出 TOTP、短信或微信
+认证方式选择，并在同一窗口输入验证码；凭证只通过本机回环地址传给后端，不会写入
+浏览器本地存储。Web UI 登录成功后才会开放校园 Skill 查询。
+
+Web UI 启动脚本会自动配置旧版 TLS 所需的 `OPENSSL_CONF`，PowerShell 下无需手动设置。
+
+使用图形化登录时，`THU_USERNAME`、`THU_PASSWORD` 和 `THU_FINGERPRINT` 可以留空；
+它们仍可用于 `pnpm step2`、`pnpm step3` 等命令行验证脚本。每次 Web UI 进程重启后需
+重新登录，除非你自行在 `.env` 配置固定指纹并由清华认证系统信任该设备。
+
+### Windows 便携版
+
+开发者可在 Windows 且已安装 Node.js 和 pnpm 的电脑上运行：
+
+```bash
+pnpm package:win
+```
+
+命令会在 `release/清华小助手/` 生成发布目录，内置 Node.js 和生产依赖，用户无需安装
+Node.js、pnpm 或 Git。将 `.env.example` 复制为同目录下的 `.env` 并填写 `LLM_API_KEY`
+等模型配置后，双击 `清华小助手.exe` 即可自动启动本地服务并打开浏览器。程序退出入口
+使用 .NET 8 SDK 打包时，程序退出入口位于 Windows 任务栏托盘图标的右键菜单中。
+
+如果打包机额外安装了 .NET 8 SDK，脚本会优先生成带托盘菜单的启动器；没有 SDK 时会
+自动使用 Node.js SEA 生成启动 EXE；该备用启动器不提供托盘菜单，退出时可在任务管理器
+中结束“清华小助手”目录下的 Node.js 进程。无论采用哪条路径，普通用户都不需要安装
+.NET 或 Node.js。
+
 其他命令：
 
 ```bash

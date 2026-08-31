@@ -10,6 +10,7 @@ import {Agent} from "../../src/harness/agentLoop";
 import type {LlmClient} from "../../src/harness/llmClient";
 import type {ChatMessage} from "../../src/harness/types";
 import type {ConfirmFn} from "../../src/harness/toolRegistry";
+import type {TwoFactorHooks} from "../../src/client/auth";
 import {ok, type Skill} from "../../src/skills/base/types";
 import {createWebServer} from "../../src/server/webServer";
 
@@ -85,13 +86,17 @@ describe("Web 服务端", () => {
     });
 
     /** 起服务：脚本化 LLM + 固定 skills，返回 base URL 和确认函数探针 */
-    async function start(script: ChatMessage[], skills: Skill[] = [echoSkill]) {
+    async function start(
+        script: ChatMessage[],
+        skills: Skill[] = [echoSkill],
+        options: {requireLogin?: boolean} = {requireLogin: false},
+    ) {
         const confirmSpy: {called: boolean} = {called: false};
         server = createWebServer((confirm: ConfirmFn) =>
             new Agent(skills, "测试", fakeLlm(script), async (call, skill) => {
                 confirmSpy.called = true;
                 return confirm(call, skill);
-            }));
+            }), options);
         await new Promise<void>((r) => server!.listen(0, "127.0.0.1", r));
         base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
         return {confirmSpy};
@@ -117,6 +122,136 @@ describe("Web 服务端", () => {
         const answer = events.find((e) => e.event === "answer");
         expect(answer?.data.text).toBe("你好呀");
         expect(events.some((e) => e.event === "done")).toBe(true);
+    });
+
+    it("二次认证桥：网页选择方式并提交验证码后继续", async () => {
+        let authHooks: TwoFactorHooks | undefined;
+        let selectedMethod: string | undefined;
+        let receivedCode: string | undefined;
+        const fakeAgent = {
+            async ask() {
+                selectedMethod = await authHooks!.twoFactorMethodHook!(false, "13800138000", true);
+                receivedCode = await authHooks!.twoFactorAuthHook!();
+                authHooks!.onLoginSuccess?.();
+                return {answer: "认证后完成", toolCalls: []};
+            },
+        } as unknown as Agent;
+        server = createWebServer((_confirm, hooks) => {
+            authHooks = hooks;
+            return fakeAgent;
+        }, {requireLogin: false});
+        await new Promise<void>((r) => server!.listen(0, "127.0.0.1", r));
+        base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+        const resp = await fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question: "查课表"}),
+        });
+        const eventsPromise = readSse(resp);
+        for (let i = 0; i < 50; i++) {
+            const ack = await fetch(`${base}/api/auth/method`, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({id: "auth_1", method: "totp"}),
+            });
+            if (ack.status === 200) break;
+            await new Promise((r) => setTimeout(r, 10));
+        }
+        for (let i = 0; i < 50; i++) {
+            const ack = await fetch(`${base}/api/auth/code`, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({id: "auth_2", code: "123456"}),
+            });
+            if (ack.status === 200) break;
+            await new Promise((r) => setTimeout(r, 10));
+        }
+        const events = await eventsPromise;
+        expect(selectedMethod).toBe("totp");
+        expect(receivedCode).toBe("123456");
+        expect(events.some((e) => e.event === "auth" && e.data.phase === "method")).toBe(true);
+        expect(events.some((e) => e.event === "auth" && e.data.phase === "code")).toBe(true);
+        expect(events.some((e) => e.event === "auth" && e.data.phase === "success")).toBe(true);
+        expect(events.find((e) => e.event === "answer")?.data.text).toBe("认证后完成");
+    });
+
+    it("网页登录接口：运行时凭证传给 Agent 并返回成功事件", async () => {
+        let receivedCredentials: {username?: string; password?: string} | undefined;
+        const loginAgent = {
+            async login() { return undefined; },
+            async ask() { return {answer: "ok", toolCalls: []}; },
+        } as unknown as Agent;
+        server = createWebServer((_confirm, _hooks, credentials) => {
+            receivedCredentials = credentials;
+            return loginAgent;
+        });
+        await new Promise<void>((r) => server!.listen(0, "127.0.0.1", r));
+        base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+        const resp = await fetch(`${base}/api/auth/login`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({username: "2024000000", password: "not-logged"}),
+        });
+        const events = await readSse(resp);
+        expect(receivedCredentials?.username).toBe("2024000000");
+        expect(receivedCredentials?.password).toBe("not-logged");
+        expect(events.some((e) => e.event === "auth" && e.data.phase === "success")).toBe(true);
+
+        const status = await fetch(`${base}/api/auth/status`);
+        expect((await status.json()).authenticated).toBe(true);
+    });
+
+    it("网页登录接口：二次认证事件可由页面依次应答", async () => {
+        let authHooks: TwoFactorHooks | undefined;
+        let method: string | undefined;
+        let code: string | undefined;
+        const loginAgent = {
+            async login() {
+                method = await authHooks!.twoFactorMethodHook!(false, "13800138000", true);
+                code = await authHooks!.twoFactorAuthHook!();
+                authHooks!.onLoginSuccess?.();
+            },
+            async ask() { return {answer: "ok", toolCalls: []}; },
+        } as unknown as Agent;
+        server = createWebServer((_confirm, hooks) => {
+            authHooks = hooks;
+            return loginAgent;
+        });
+        await new Promise<void>((r) => server!.listen(0, "127.0.0.1", r));
+        base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+        const resp = await fetch(`${base}/api/auth/login`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({username: "2024000000", password: "not-logged"}),
+        });
+        const eventsPromise = readSse(resp);
+        for (let i = 0; i < 50; i++) {
+            const ack = await fetch(`${base}/api/auth/method`, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({id: "auth_1", method: "totp"}),
+            });
+            if (ack.status === 200) break;
+            await new Promise((r) => setTimeout(r, 10));
+        }
+        for (let i = 0; i < 50; i++) {
+            const ack = await fetch(`${base}/api/auth/code`, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({id: "auth_2", code: "654321"}),
+            });
+            if (ack.status === 200) break;
+            await new Promise((r) => setTimeout(r, 10));
+        }
+        const events = await eventsPromise;
+        expect(method).toBe("totp");
+        expect(code).toBe("654321");
+        expect(events.some((e) => e.event === "auth" && e.data.phase === "method")).toBe(true);
+        expect(events.some((e) => e.event === "auth" && e.data.phase === "code")).toBe(true);
+        expect(events.some((e) => e.event === "auth" && e.data.phase === "success")).toBe(true);
     });
 
     it("工具调用发出 tool start/end 事件", async () => {
@@ -286,6 +421,16 @@ describe("Web 服务端", () => {
         expect(resp.status).toBe(200);
         const caps = (await resp.json()) as {vision?: unknown};
         expect(typeof caps.vision).toBe("boolean");
+    });
+
+    it("生产模式未登录时拒绝聊天请求", async () => {
+        await start([textMsg("不会调用")], [echoSkill], {requireLogin: true});
+        const resp = await fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question: "查课表"}),
+        });
+        expect(resp.status).toBe(401);
     });
 
     it("只发图片不带文字也能提问", async () => {

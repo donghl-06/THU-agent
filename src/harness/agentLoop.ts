@@ -52,6 +52,7 @@ export class Agent {
     private readonly registry: ToolRegistry;
     private readonly skillsByName: Map<string, Skill>;
     private readonly messages: ChatMessage[] = [];
+    private readonly loginHandler?: () => Promise<void>;
 
     /**
      * @param skills 注册的技能清单
@@ -59,11 +60,24 @@ export class Agent {
      * @param llm 可选注入（测试用假 LLM）
      * @param confirm 写操作的用户确认回调；不写则写操作一律拒绝执行
      */
-    constructor(skills: Skill[], systemPrompt: string, llm?: LlmClient, confirm?: ConfirmFn) {
+    constructor(
+        skills: Skill[],
+        systemPrompt: string,
+        llm?: LlmClient,
+        confirm?: ConfirmFn,
+        loginHandler?: () => Promise<void>,
+    ) {
         this.llm = llm ?? createLlmClient();
         this.registry = new ToolRegistry(skills, confirm);
         this.skillsByName = new Map(skills.map((s) => [s.name, s]));
+        this.loginHandler = loginHandler;
         this.messages.push({role: "system", content: systemPrompt});
+    }
+
+    /** 建立校园服务登录态；认证交互由注入的 hooks 转发给 Web UI。 */
+    async login(): Promise<void> {
+        if (!this.loginHandler) throw new Error("当前 Agent 未配置登录处理器。");
+        await this.loginHandler();
     }
 
     /** 问一个问题，拿到最终回答。多轮对话通过 messages 数组自然延续 */
