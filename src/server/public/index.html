@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>清华小助手</title>
+<title>清灵 QingLing - 清华校园智能助手</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%2317131a'/><g fill='%239a44ae'><ellipse cx='16' cy='9' rx='3.4' ry='5.2'/><ellipse cx='16' cy='9' rx='3.4' ry='5.2' transform='rotate(72 16 16)'/><ellipse cx='16' cy='9' rx='3.4' ry='5.2' transform='rotate(144 16 16)'/><ellipse cx='16' cy='9' rx='3.4' ry='5.2' transform='rotate(216 16 16)'/><ellipse cx='16' cy='9' rx='3.4' ry='5.2' transform='rotate(288 16 16)'/></g><circle cx='16' cy='16' r='2.6' fill='%23e9d5ff'/></svg>">
 <style>
   /* ===== Design Tokens · 深色为默认主题（清华紫 #82318E 作强调） ===== */
   :root, :root[data-theme="dark"] {
@@ -142,7 +143,7 @@
     backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
     border-bottom: 1px solid var(--border-soft);
   }
-  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand { display: flex; align-items: center; gap: 10px; cursor: pointer; }
   .logo {
     width: 34px; height: 34px; border-radius: 10px;
     background: var(--grad-user); color: #fff;
@@ -182,6 +183,13 @@
     background: var(--card); border: 1px solid var(--border-soft);
     border-radius: var(--r-lg) var(--r-lg) var(--r-lg) 4px;
   }
+  /* AI 消息的轻量身份标识（UI.md 第六条）：连续多条 bot 消息只在第一条显示 */
+  .msg.bot::before {
+    content: "✦ 清灵"; display: block;
+    font-size: 11.5px; font-weight: 600; letter-spacing: 0.02em;
+    color: var(--primary-bright); opacity: 0.75; margin-bottom: 3px;
+  }
+  .msg.bot + .msg.bot::before { display: none; }
   @keyframes msg-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
   .msg .saved-att { display: block; margin-bottom: 6px; font-size: var(--fs-xs); opacity: 0.8; }
   .msg .cursor { display: inline-block; width: 8px; height: 15px; background: var(--primary-soft); vertical-align: -2px; animation: blink 0.8s infinite; }
@@ -280,6 +288,11 @@
   .w-title { font-size: 22px; font-weight: 600; margin-top: 12px; }
   .w-sub { font-size: var(--fs-sm); color: var(--muted); margin-top: 10px; line-height: 1.6; }
   .w-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 28px; }
+  #explore-btn {
+    margin-top: 18px; padding: 8px 14px; border: none; background: transparent;
+    color: var(--primary-bright); font-size: 13px; cursor: pointer; border-radius: 8px;
+  }
+  #explore-btn:hover { background: var(--primary-light); }
   .w-card {
     display: flex; align-items: center; gap: 10px; padding: 14px 16px;
     background: var(--card); border: 1px solid var(--border-soft); border-radius: var(--r-lg);
@@ -354,6 +367,7 @@
   .composer-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
   .composer-hint { margin-left: auto; font-size: var(--fs-xs); color: var(--muted); }
   @media (max-width: 640px) { .composer-hint { display: none; } }
+  #disclaimer { margin: 8px 4px 0; text-align: center; font-size: 11.5px; color: var(--muted); opacity: 0.75; }
   #composer .iconbtn { background: transparent; }
   .iconbtn {
     padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--r-md);
@@ -464,6 +478,39 @@
   }
   #auth-cancel { color: var(--text); background: var(--bg); border: 1px solid var(--border) !important; }
   #auth-submit { color: #fff; background: var(--primary); }
+  /* 关于清灵（UI.md 第十六/十七条）：Header 品牌区与欢迎页"探索清灵"均可打开 */
+  #about-mask {
+    position: fixed; inset: 0; background: rgba(8, 12, 24, 0.58);
+    display: none; align-items: center; justify-content: center; z-index: 20;
+    padding: 20px;
+  }
+  #about-mask.show { display: flex; }
+  #about-modal {
+    width: min(400px, 100%); background: var(--card); color: var(--text);
+    border: 1px solid var(--border); border-radius: 20px; padding: 28px;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.32); text-align: center;
+  }
+  .about-logo {
+    width: 54px; height: 54px; margin: 0 auto 14px; border-radius: 16px;
+    background: var(--grad-user); display: grid; place-items: center;
+    box-shadow: var(--shadow-1);
+  }
+  #about-title { font-size: 21px; }
+  #about-title .about-en { font-size: 13px; color: var(--muted); font-weight: 400; margin-left: 4px; }
+  .about-sub { color: var(--text-2); font-size: 13.5px; margin-top: 4px; }
+  .about-ver { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .about-caps { display: grid; gap: 8px; margin: 18px 0; text-align: left; }
+  .about-caps .cap {
+    display: flex; align-items: baseline; gap: 10px; padding: 9px 12px;
+    background: var(--bg); border: 1px solid var(--border-soft); border-radius: 10px;
+  }
+  .about-caps .cap b { font-size: 13px; flex: none; }
+  .about-caps .cap span { font-size: 12.5px; color: var(--muted); }
+  #about-close {
+    width: 100%; padding: 11px; border-radius: 12px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 14px;
+  }
+  #about-close:hover { border-color: var(--primary); background: var(--primary-light); }
   #auth-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
 <script>/* marked v18.0.11 (MIT) · 内联以保持单文件自包含、支持离线打包部署 */
@@ -557,13 +604,13 @@ if(__exports != exports)module.exports = exports;return module.exports}));
 </aside>
 <div id="sidebar-mask"></div>
 <div id="main">
-<header title="单用户本地模式 · 写操作会弹窗确认 · 支持语音/图片输入">
+<header title="清灵 QingLing · 清华校园智能助手">
   <button id="menu-btn" class="iconbtn" type="button" title="会话列表"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg></button>
-  <div class="brand">
-    <div class="logo">✦</div>
+  <div class="brand" title="关于清灵">
+    <div class="logo" aria-hidden="true"><svg viewBox="0 0 32 32" width="20" height="20"><g fill="#fff"><ellipse cx="16" cy="9" rx="3.4" ry="5.2"/><ellipse cx="16" cy="9" rx="3.4" ry="5.2" transform="rotate(72 16 16)"/><ellipse cx="16" cy="9" rx="3.4" ry="5.2" transform="rotate(144 16 16)"/><ellipse cx="16" cy="9" rx="3.4" ry="5.2" transform="rotate(216 16 16)"/><ellipse cx="16" cy="9" rx="3.4" ry="5.2" transform="rotate(288 16 16)"/></g><circle cx="16" cy="16" r="2.6" fill="#e9d5ff"/></svg></div>
     <div class="brand-text">
-      <span class="brand-name">清华小助手</span>
-      <span class="brand-sub">Tsinghua AI Assistant</span>
+      <span class="brand-name">清灵</span>
+      <span class="brand-sub">QingLing · 清华校园智能助手</span>
     </div>
   </div>
   <span class="ctl">
@@ -577,14 +624,15 @@ if(__exports != exports)module.exports = exports;return module.exports}));
 <div id="chat">
   <div id="welcome" hidden>
     <div class="w-spark">✦</div>
-    <h1 class="w-title">今天想在清华做点什么？</h1>
-    <p class="w-sub" id="w-login-hint">登录清华账号后可以查询课表、约场馆、看电费——先点击右上角「登录」</p>
+    <h1 class="w-title">今天想让清灵帮你做什么？</h1>
+    <p class="w-sub" id="w-login-hint">你好，我是清灵——课程、日程、场馆、图书馆和校园服务，都可以问我。</p>
     <div class="w-grid">
       <button class="w-card" type="button" data-q="我今天有什么课？"><span class="w-ico">📚</span><span>查今天的课表</span></button>
       <button class="w-card" type="button" data-q="今晚哪里可以打羽毛球？"><span class="w-ico">🏃</span><span>查场馆空位</span></button>
       <button class="w-card" type="button" data-q="帮我看看图书馆哪里有位置"><span class="w-ico">📖</span><span>图书馆座位</span></button>
       <button class="w-card" type="button" data-q="我明天下午有什么空闲时间？"><span class="w-ico">🗓️</span><span>找空闲时间</span></button>
     </div>
+    <button id="explore-btn" type="button">探索清灵 →</button>
   </div>
 </div>
 <div id="toasts"></div>
@@ -592,7 +640,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
 <div id="composer-wrap">
   <div id="thumbs" hidden></div>
   <div id="composer">
-    <textarea id="q" rows="1" placeholder="问点什么，如：今晚哪里可以打羽毛球？" autocomplete="off"></textarea>
+    <textarea id="q" rows="1" placeholder="有什么想让清灵帮你查的？" autocomplete="off"></textarea>
     <div class="composer-row">
       <button id="attach" class="iconbtn" title="发送图片"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
       <button id="mic" class="iconbtn" title="语音输入"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg></button>
@@ -601,7 +649,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
       <input id="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
     </div>
   </div>
-</div>
+  <p id="disclaimer">清灵的回答可能存在误差，重要信息请以学校官方信息为准</p>
 </div>
 
 <div id="modal-mask">
@@ -619,7 +667,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
 <div id="auth-mask" aria-hidden="true">
   <div id="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title">
     <div class="auth-badge">🔐</div>
-    <h3 id="auth-title">登录清华小助手</h3>
+    <h3 id="auth-title">连接清华 Info</h3>
     <p id="auth-status">使用清华 Info 账号登录，凭证只会发送到本机服务。</p>
     <div id="auth-login-fields">
       <label>学号<input id="auth-username" type="text" inputmode="numeric" autocomplete="username" maxlength="128" placeholder="输入学号"></label>
@@ -639,10 +687,35 @@ if(__exports != exports)module.exports = exports;return module.exports}));
   </div>
 </div>
 
+<div id="about-mask" aria-hidden="true">
+  <div id="about-modal" role="dialog" aria-modal="true" aria-labelledby="about-title">
+    <div class="about-logo" aria-hidden="true"><svg viewBox="0 0 32 32" width="30" height="30"><g fill="#fff"><ellipse cx="16" cy="9" rx="3.4" ry="5.2"/><ellipse cx="16" cy="9" rx="3.4" ry="5.2" transform="rotate(72 16 16)"/><ellipse cx="16" cy="9" rx="3.4" ry="5.2" transform="rotate(144 16 16)"/><ellipse cx="16" cy="9" rx="3.4" ry="5.2" transform="rotate(216 16 16)"/><ellipse cx="16" cy="9" rx="3.4" ry="5.2" transform="rotate(288 16 16)"/></g><circle cx="16" cy="16" r="2.6" fill="#e9d5ff"/></svg></div>
+    <h3 id="about-title">清灵 <span class="about-en">QingLing</span></h3>
+    <p class="about-sub">清华校园智能助手</p>
+    <p class="about-ver">Version 0.1.0</p>
+    <div class="about-caps">
+      <div class="cap"><b>课程</b><span>查询课表、上课地点</span></div>
+      <div class="cap"><b>日程</b><span>寻找空闲时间</span></div>
+      <div class="cap"><b>图书馆</b><span>查询座位情况</span></div>
+      <div class="cap"><b>体育</b><span>查询场馆开放和空位</span></div>
+      <div class="cap"><b>校园服务</b><span>获取常用校园信息</span></div>
+    </div>
+    <button id="about-close" type="button">好的</button>
+  </div>
+</div>
+
 <script>
+/* 品牌常量（UI.md 第二十条）：动态文案统一从这里取，改名只改这一处。
+ * 静态 HTML（标题/Header/欢迎页）直接写死，避免首屏闪烁。 */
+const BRAND = {
+  name: "清灵",
+  englishName: "QingLing",
+  subtitle: "清华校园智能助手",
+};
 const chat = document.getElementById("chat");
 const q = document.getElementById("q");
 const sendBtn = document.getElementById("send");
+const aboutMask = document.getElementById("about-mask");
 const mask = document.getElementById("modal-mask");
 const authMask = document.getElementById("auth-mask");
 const authStatus = document.getElementById("auth-status");
@@ -989,6 +1062,22 @@ welcome.querySelectorAll(".w-card").forEach((card) => {
   };
 });
 
+/* ---- 关于清灵（UI.md 第十六/十七条）：Header 品牌区与"探索清灵"打开 ---- */
+function openAbout() {
+  aboutMask.classList.add("show");
+  aboutMask.setAttribute("aria-hidden", "false");
+}
+function closeAbout() {
+  aboutMask.classList.remove("show");
+  aboutMask.setAttribute("aria-hidden", "true");
+}
+document.querySelector(".brand").addEventListener("click", openAbout);
+document.getElementById("explore-btn").addEventListener("click", openAbout);
+document.getElementById("about-close").addEventListener("click", closeAbout);
+aboutMask.addEventListener("click", (e) => {
+  if (e.target === aboutMask) closeAbout();
+});
+
 let soundOn = store.get("snd", "1") === "1";
 let ttsOn = store.get("tts", "0") === "1";
 const sndToggle = document.getElementById("snd-toggle");
@@ -1124,7 +1213,7 @@ function createThinkingCard() {
   card.className = "thinking";
   card.innerHTML =
     '<div class="think-bar"></div>' +
-    '<div class="think-head"><span class="spark">✦</span><span>清华小助手正在处理</span><span class="think-time">0s</span></div>' +
+    `<div class="think-head"><span class="spark">✦</span><span>${BRAND.name}正在思考</span><span class="think-time">0s</span></div>` +
     '<div class="think-steps"></div>';
   chat.appendChild(card);
   // 即使发送前用户曾上翻，也要保证本轮即时反馈进入可视区域。
@@ -1138,7 +1227,7 @@ function createThinkingCard() {
   }, 500);
 
   // 模拟阶段文案按时间轮换（真实工具行会并行插入，见 addTool）
-  const phases = ["正在理解你的问题", "正在查询校园信息", "正在整理结果"];
+  const phases = [`正在理解你的需求`, `正在查询校园服务`, `正在整理结果`];
   let phaseIdx = 0;
   let statusStep = null;
   const phaseTimer = setInterval(() => {
@@ -1172,7 +1261,7 @@ function createThinkingCard() {
   let generating = false;
   const addTool = (name) => {
     generating = false;
-    setStatus("正在查询校园信息");
+    setStatus(`正在查询校园服务`);
     return mkStep(`正在查询「${toolLabel(name)}」…`, "active");
   };
   const markGenerating = () => {
@@ -1229,7 +1318,7 @@ function attachMsgActions(el) {
   };
   bar.appendChild(mkBtn("📋", "复制", () => {
     navigator.clipboard.writeText(el.dataset.raw ?? el.textContent ?? "")
-      .then(() => toast("已复制到剪贴板", "ok"))
+      .then(() => toast(`已复制${BRAND.name}的回答`, "ok"))
       .catch(() => toast("复制失败", "err"));
   }));
   bar.appendChild(mkBtn("↻", "重新生成", () => {
@@ -1261,16 +1350,16 @@ function attachMsgActions(el) {
   el.appendChild(bar);
 }
 
-/* ---- 错误卡片：技术错误转人话 + 可折叠详情 + 重新生成 ---- */
+/* ---- 错误卡片：技术错误转人话 + 可折叠详情 + 重新生成（品牌语言见 UI.md 第十二条） ---- */
 const ERROR_HINTS = [
-  {re: /concurrent request limit|HTTP 429/i, title: "AI 服务暂时繁忙", body: "当前请求较多，请稍等片刻再试。"},
-  {re: /HTTP 40[13]/, title: "AI 服务拒绝请求", body: "可能是额度或配置问题，请稍后再试。"},
-  {re: /timeout|ETIMEDOUT|aborted/i, title: "请求超时", body: "服务响应太慢或网络不稳定，请重试。"},
-  {re: /fetch failed|network|ECONN/i, title: "网络连接失败", body: "请检查网络连接后重试。"},
+  {re: /concurrent request limit|HTTP 429/i, title: `${BRAND.name}暂时有点忙`, body: "当前请求较多，这次没有成功完成，你可以稍后再试一次。"},
+  {re: /HTTP 40[13]/, title: `${BRAND.name}暂时无法完成这次请求`, body: "可能是服务配置或额度问题，请稍后再试。"},
+  {re: /timeout|ETIMEDOUT|aborted/i, title: `${BRAND.name}暂时连接不上服务`, body: "服务响应太慢或网络不稳定，请稍后再试。"},
+  {re: /fetch failed|network|ECONN/i, title: `${BRAND.name}暂时连接不上服务`, body: "请检查网络连接后重试。"},
 ];
 function humanizeError(raw) {
   for (const h of ERROR_HINTS) if (h.re.test(raw)) return h;
-  return {title: "出了点问题", body: "刚才的操作没有成功，请重试。"};
+  return {title: `${BRAND.name}遇到了一点问题`, body: "刚才的操作没有成功，请重试。"};
 }
 
 let lastQuestion = null;   // 供"重新生成"使用
@@ -1283,7 +1372,7 @@ function showErrorCard(raw) {
     `<div class="err-head">⚠️ ${hint.title}</div>` +
     `<div class="err-body">${hint.body}</div>` +
     '<details class="err-detail"><summary>技术详情</summary><pre></pre></details>' +
-    '<div class="err-actions"><button class="err-retry" type="button">↻ 重新生成</button></div>';
+    '<div class="err-actions"><button class="err-retry" type="button">↻ 让清灵再试一次</button></div>';
   card.querySelector("pre").textContent = raw;
   card.querySelector(".err-retry").onclick = () => {
     card.remove();
@@ -1433,7 +1522,7 @@ async function logout() {
     clearChatHistory();
     pendingImages = [];
     renderThumbs();
-    toast("已退出登录，校园服务已关闭", "ok");
+    toast("已退出登录，清灵已断开校园服务", "ok");
     updateWelcome();
   }
 }
@@ -1563,7 +1652,7 @@ function handleAuthEvent(data) {
       authenticated = true;
       updateLoginButton();
       if (newlyAuthenticated) {
-        toast("✓ 登录成功，已连接清华 Info", "ok");
+        toast("✓ 清灵已连接你的清华 Info", "ok");
       }
     }
     setAuthMessage("认证成功，正在继续查询…");

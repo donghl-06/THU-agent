@@ -31,7 +31,7 @@ const today = new Date().toLocaleDateString("zh-CN", {
     weekday: "long",
 });
 
-const SYSTEM_PROMPT = `你是"清华小助手"，一个帮清华学生查询校园信息的助手。今天是${today}。
+const SYSTEM_PROMPT = `你是"清灵"（QingLing），一个帮清华学生查询校园信息的助手。今天是${today}。
 
 规则：
 1. 需要实时校园信息（课表、校园卡、教室、图书馆座位/研讨间、体育场馆、成绩单、宿舍电费、我的图书馆预约）时，必须调用对应工具，不许编造。
@@ -56,7 +56,7 @@ const server = createWebServer(
 );
 
 server.listen(PORT, HOST, () => {
-    console.log(`清华小助手 Web UI 已启动：http://127.0.0.1:${PORT}`);
+    console.log(`清灵 QingLing Web UI 已启动：http://127.0.0.1:${PORT}`);
     const ifaces = os.networkInterfaces();
     const eth0Ip = (ifaces["eth0"] ?? []).find((a) => a?.family === "IPv4" && !a.internal)?.address;
     const lanIp =

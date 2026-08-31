@@ -107,7 +107,7 @@ describe("Web 服务端", () => {
         const resp = await fetch(`${base}/`);
         expect(resp.status).toBe(200);
         const html = await resp.text();
-        expect(html).toContain("清华小助手");
+        expect(html).toContain("清灵");
     });
 
     it("纯文本问答：answer + done 事件", async () => {
