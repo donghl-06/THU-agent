@@ -5,17 +5,64 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>清华小助手</title>
 <style>
-  :root {
-    --bg: #f5f6f8; --card: #ffffff; --text: #1a1a1a; --muted: #888;
-    --primary: #660874; --primary-light: #f3e8f5; --border: #e4e4e7;
-    --ok: #16a34a; --err: #dc2626; --tool: #0369a1;
+  /* ===== Design Tokens · 深色为默认主题（清华紫 #82318E 作强调） ===== */
+  :root, :root[data-theme="dark"] {
+    color-scheme: dark;
+    /* 表面层次 */
+    --bg: #111113;            /* 页面底 */
+    --bg-soft: #18181b;       /* Header / 输入区 */
+    --card: #1e1e22;          /* AI 消息卡片 */
+    --card-hover: #26262b;
+    --inset: #0c0c0e;         /* 内嵌区域（缩略图底等） */
+    /* 文字 */
+    --text: #ececf1;
+    --text-2: #a6a6b0;        /* 次级 */
+    --muted: #73737d;
+    /* 线 */
+    --border: #2c2c33;
+    --border-soft: #232329;
+    /* 品牌清华紫 */
+    --primary: #8f3fa3;       /* 交互主色 */
+    --primary-strong: #82318e;
+    --primary-bright: #c79ad3;/* 深底上的紫文字 */
+    --primary-soft: #a855f7;  /* glow / 高光 */
+    --primary-light: rgba(143, 63, 163, 0.16);
+    --grad-user: linear-gradient(135deg, #7c2f8e, #9a44ae);
+    --ring: rgba(168, 85, 247, 0.20);
+    /* 语义色 */
+    --ok: #34d399;
+    --err: #f87171;
+    --tool: #6ea8fe;
+    /* 圆角 / 阴影 / 字号 */
+    --r-sm: 8px; --r-md: 12px; --r-lg: 16px; --r-xl: 20px;
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35);
+    --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.40);
+    --fs-body: 15px; --fs-sm: 13px; --fs-xs: 12px;
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #18181b; --card: #27272a; --text: #e4e4e7; --muted: #71717a;
-      --primary: #c084fc; --primary-light: #3b2144; --border: #3f3f46;
-      --tool: #7dd3fc;
-    }
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg: #f6f6f8;
+    --bg-soft: #ffffff;
+    --card: #ffffff;
+    --card-hover: #f2f2f5;
+    --inset: #ededf0;
+    --text: #1b1b20;
+    --text-2: #55555f;
+    --muted: #8a8a94;
+    --border: #e3e3e9;
+    --border-soft: #ebebf0;
+    --primary: #82318e;
+    --primary-strong: #6d2879;
+    --primary-bright: #8f3fa3;
+    --primary-soft: #a855f7;
+    --primary-light: #f5ebf7;
+    --grad-user: linear-gradient(135deg, #82318e, #a13fb5);
+    --ring: rgba(130, 49, 142, 0.18);
+    --ok: #16a34a;
+    --err: #dc2626;
+    --tool: #0369a1;
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.06);
+    --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.10);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -167,6 +214,7 @@
 <header>清华小助手<span class="sub">单用户本地模式 · 写操作会弹窗确认 · 支持语音/图片输入</span>
   <span class="ctl">
     <button id="login-btn" type="button">登录</button>
+    <button id="theme-toggle" class="iconbtn" type="button" title="切换到浅色模式">🌞</button>
     <button id="tts-toggle" class="iconbtn" title="朗读回复开关">🔊</button>
     <button id="snd-toggle" class="iconbtn" title="提示音效开关">🔔</button>
   </span>
@@ -290,6 +338,21 @@ const store = {
 const CHAT_HISTORY_KEY = "thu-assistant-chat-v1";
 const MAX_SAVED_MESSAGES = 100;
 const MAX_SAVED_TEXT_LENGTH = 20000;
+
+/* ---- 主题切换（默认深色，localStorage 持久化） ---- */
+const themeBtn = document.getElementById("theme-toggle");
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  themeBtn.textContent = t === "dark" ? "🌞" : "🌙";
+  themeBtn.title = t === "dark" ? "切换到浅色模式" : "切换到深色模式";
+}
+let theme = store.get("theme", "dark");
+applyTheme(theme);
+themeBtn.onclick = () => {
+  theme = theme === "dark" ? "light" : "dark";
+  store.set("theme", theme);
+  applyTheme(theme);
+};
 
 function saveChatHistory() {
   const records = [...chat.children]
