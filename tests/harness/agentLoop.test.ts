@@ -179,6 +179,32 @@ describe("Agent Loop", () => {
         // 第二次调用应带着完整历史
         expect(llm.seen[1].map((m) => m.role)).toEqual(["system", "user", "assistant", "user"]);
     });
+
+    it("中止工具执行后立即结束并回滚本轮消息", async () => {
+        let markStarted!: () => void;
+        const started = new Promise<void>((resolve) => { markStarted = resolve; });
+        const hangingSkill: Skill = {
+            name: "hanging",
+            description: "永不返回，仅测试中止",
+            inputSchema: {type: "object", properties: {}},
+            async execute() {
+                markStarted();
+                return new Promise<never>(() => {});
+            },
+        };
+        const llm = fakeLlm([toolCallMsg("hanging", {}), textMsg("第二问正常回答")]);
+        const agent = new Agent([hangingSkill], "你是测试助手", llm);
+        const controller = new AbortController();
+
+        const first = agent.ask("第一问", {signal: controller.signal});
+        await started;
+        controller.abort();
+        await expect(first).rejects.toMatchObject({name: "AbortError"});
+
+        const second = await agent.ask("第二问");
+        expect(second.answer).toBe("第二问正常回答");
+        expect(llm.seen[1].map((message) => message.role)).toEqual(["system", "user"]);
+    });
 });
 
 describe("写操作确认流", () => {

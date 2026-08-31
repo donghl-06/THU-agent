@@ -319,12 +319,12 @@
   .md hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
   /* Message Actions：AI 回复 hover 时显示（文档十八） */
   .msg-actions {
-    display: flex; gap: 4px; margin-top: 10px; padding-top: 8px;
+    display: none; gap: 4px; margin-top: 10px; padding-top: 8px;
     border-top: 1px solid var(--border-soft);
-    opacity: 0; transition: opacity 0.15s;
+    opacity: 1;
   }
-  .msg.bot:hover .msg-actions { opacity: 1; }
-  @media (hover: none) { .msg-actions { opacity: 1; } }
+  .msg.bot:hover .msg-actions { display: flex; }
+  @media (hover: none) { .msg-actions { display: flex; } }
   .msg-actions button {
     border: none; background: transparent; color: var(--muted);
     font-size: 14px; padding: 3px 8px; border-radius: 7px; cursor: pointer;
@@ -671,6 +671,7 @@ let loginInFlight = false;
 let loginAbortController = null;
 let authCancelRequested = false;
 let authenticated = false;
+let stopping = false;
 const authMethodLabels = {
   totp: {icon: "🔢", label: "验证器动态码", hint: "使用验证器 App 中的当前验证码"},
   mobile: {icon: "📱", label: "短信验证码", hint: "向已绑定手机号发送验证码"},
@@ -1399,8 +1400,8 @@ function updateLoginButton() {
   loginBtn.classList.toggle("logged-in", authenticated);
   loginBtn.title = authenticated ? "点击退出登录" : "使用清华 Info 账号登录";
   connStatus.hidden = !authenticated;
-  sendBtn.textContent = busy ? "■ 停止" : "发送";
-  sendBtn.disabled = busy ? false : loginInFlight; // busy 时按钮是"停止"
+  sendBtn.textContent = stopping ? "正在停止…" : busy ? "■ 停止" : "发送";
+  sendBtn.disabled = stopping || (!busy && loginInFlight);
 }
 
 function openLoginModal() {
@@ -1669,6 +1670,20 @@ fetch("/api/auth/status").then((resp) => resp.json()).then((data) => {
 
 /* ---- SSE 解析（fetch 流，EventSource 不支持 POST） ---- */
 let chatAbort = null; // 当前问答的中止控制器（"停止生成"）
+let chatCancelPromise = null;
+function stopCurrentChat() {
+  if (!chatAbort || chatCancelPromise) return;
+  const controller = chatAbort;
+  stopping = true;
+  updateLoginButton();
+  chatCancelPromise = Promise.resolve().then(async () => {
+    controller.abort();
+    try {
+      await fetch("/api/chat/cancel", {method: "POST"});
+    } catch { /* 原请求断开仍会触发服务端中止 */ }
+  });
+}
+
 async function ask(question, images) {
   busy = true;
   updateLoginButton(); // 发送按钮 → "■ 停止"
@@ -1783,6 +1798,9 @@ async function ask(question, images) {
       sfx.error();
     }
   } finally {
+    const cancellation = chatCancelPromise;
+    if (cancellation) await cancellation;
+    if (chatCancelPromise === cancellation) chatCancelPromise = null;
     // 收尾：光标气泡渲染已收到的内容、确保 Thinking Card 已收起
     thinking.dismiss();
     if (botDiv) {
@@ -1790,6 +1808,7 @@ async function ask(question, images) {
       else botDiv.remove();
       saveChatHistory();
     }
+    stopping = false;
     busy = false;
     chatAbort = null;
     updateLoginButton();
@@ -1807,7 +1826,7 @@ function submit(text, imgs) {
   ask(text, imgs).catch((e) => { showErrorCard("网络错误：" + e.message); sfx.error(); });
 }
 sendBtn.onclick = () => {
-  if (busy) { chatAbort?.abort(); return; } // 发送中点击 = 停止生成
+  if (busy) { stopCurrentChat(); return; } // 等服务端确认清理完成后再允许下一问
   const text = q.value.trim();
   const imgs = pendingImages;
   if (!text && imgs.length === 0) return;
