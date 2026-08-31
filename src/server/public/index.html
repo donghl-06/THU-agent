@@ -332,6 +332,15 @@ function clearChatHistory() {
   store.set(CHAT_HISTORY_KEY, "[]");
 }
 
+function showStartupGuide() {
+  if (chat.querySelector(".msg")) return;
+  if (authenticated) {
+    addMsg("bot", "欢迎回来！你已登录清华账号，可以直接告诉我你的需求，例如查询课表、寻找空闲时间或了解校园服务。");
+  } else {
+    addMsg("bot", "你好！欢迎使用清华小助手 👋\n请先点击右上角“登录”，使用清华 Info 账号登录并完成二次认证。登录成功后，我就可以帮你查询课表、规划空闲时间以及了解校园服务。");
+  }
+}
+
 let soundOn = store.get("snd", "1") === "1";
 let ttsOn = store.get("tts", "0") === "1";
 const sndToggle = document.getElementById("snd-toggle");
@@ -719,8 +728,12 @@ function handleAuthEvent(data) {
     showAuthCode(data);
   } else if (data.phase === "success") {
     if (authOrigin === "login") {
+      const newlyAuthenticated = !authenticated;
       authenticated = true;
       updateLoginButton();
+      if (newlyAuthenticated) {
+        addMsg("bot", "登录成功！你现在可以开始使用清华小助手了。直接告诉我你的需求即可，例如查询课表、寻找空闲时间或了解校园服务。");
+      }
     }
     setAuthMessage("认证成功，正在继续查询…");
     window.setTimeout(closeAuthModal, 600);
@@ -818,7 +831,11 @@ authCode.addEventListener("keydown", (e) => {
 fetch("/api/auth/status").then((resp) => resp.json()).then((data) => {
   authenticated = data.authenticated === true;
   updateLoginButton();
-}).catch(() => updateLoginButton());
+  showStartupGuide();
+}).catch(() => {
+  updateLoginButton();
+  showStartupGuide();
+});
 
 /* ---- SSE 解析（fetch 流，EventSource 不支持 POST） ---- */
 async function ask(question, images) {
