@@ -727,7 +727,6 @@ function addUserMsg(text, images) {
   saveChatHistory();
   updateWelcome();
   scrollDown(true);
-  return div;
 }
 
 /* ---- 声音：提示音效（WebAudio 合成，无音频文件） + TTS 朗读 ---- */
@@ -831,9 +830,7 @@ function saveChatHistory() {
     sessionsState.sessions.push(session);
   }
   session.messages = records;
-  if (records.length === 0) {
-    session.title = "新对话";
-  } else if (session.title === "新对话") {
+  if (session.title === "新对话") {
     const derived = deriveTitle(records);
     if (derived !== "新对话") session.title = derived;
   }
@@ -1288,9 +1285,9 @@ function showErrorCard(raw) {
     if (lastQuestion == null && !(lastImages ?? []).length) return;
     const text = lastQuestion, imgs = lastImages;
     lastQuestion = null; lastImages = null;
-    const userDiv = addUserMsg(text, imgs);
+    addUserMsg(text, imgs);
     sfx.send();
-    ask(text, imgs, userDiv).catch((e) => { showErrorCard("网络错误：" + e.message); sfx.error(); });
+    ask(text, imgs).catch((e) => { showErrorCard("网络错误：" + e.message); sfx.error(); });
   };
   chat.appendChild(card);
   updateWelcome();
@@ -1668,7 +1665,7 @@ fetch("/api/auth/status").then((resp) => resp.json()).then((data) => {
 
 /* ---- SSE 解析（fetch 流，EventSource 不支持 POST） ---- */
 let chatAbort = null; // 当前问答的中止控制器（"停止生成"）
-async function ask(question, images, userDiv = null) {
+async function ask(question, images) {
   busy = true;
   updateLoginButton(); // 发送按钮 → "■ 停止"
   lastQuestion = question;  // 供失败后"重新生成"
@@ -1676,8 +1673,6 @@ async function ask(question, images, userDiv = null) {
   const thinking = createThinkingCard(); // 立即出现，不等 API
   let botDiv = null;       // 当前流式回答的气泡
   let botText = "";
-  let cancelled = false;
-  const existingNodes = new Set(chat.children);
   chatAbort = new AbortController();
   try {
     const resp = await fetch("/api/chat", {
@@ -1778,34 +1773,15 @@ async function ask(question, images, userDiv = null) {
     }
   } catch (e) {
     if (e?.name === "AbortError") {
-      cancelled = true;
-      if (userDiv?.isConnected) {
-        let node = userDiv;
-        while (node) {
-          const next = node.nextElementSibling;
-          node.remove();
-          node = next;
-        }
-      } else {
-        for (const node of [...chat.children]) {
-          if (!existingNodes.has(node)) node.remove();
-        }
-      }
-      lastQuestion = null;
-      lastImages = null;
-      saveChatHistory();
-      updateWelcome();
-      scrollDown(true);
-      toast("已停止并撤销本轮对话");
+      toast("已停止生成");
     } else {
       showErrorCard("网络错误：" + e.message);
       sfx.error();
     }
   } finally {
     // 收尾：光标气泡渲染已收到的内容、确保 Thinking Card 已收起
-    if (cancelled) thinking.el.remove();
-    else thinking.dismiss();
-    if (!cancelled && botDiv) {
+    thinking.dismiss();
+    if (botDiv) {
       if (botText) renderMd(botDiv, botText);
       else botDiv.remove();
       saveChatHistory();
@@ -1822,9 +1798,9 @@ function submit(text, imgs) {
   if ((!text && imgs.length === 0) || busy) return;
   if (rec) rec.stop(); // 发送时停止语音输入
   try { speechSynthesis.cancel(); } catch {} // 新一轮开始时停止朗读
-  const userDiv = addUserMsg(text, imgs);
+  addUserMsg(text, imgs);
   sfx.send();
-  ask(text, imgs, userDiv).catch((e) => { showErrorCard("网络错误：" + e.message); sfx.error(); });
+  ask(text, imgs).catch((e) => { showErrorCard("网络错误：" + e.message); sfx.error(); });
 }
 sendBtn.onclick = () => {
   if (busy) { chatAbort?.abort(); return; } // 发送中点击 = 停止生成

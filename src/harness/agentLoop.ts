@@ -84,59 +84,47 @@ export class Agent {
 
     /** 问一个问题，拿到最终回答。多轮对话通过 messages 数组自然延续 */
     async ask(question: string, opts: AskOptions = {}): Promise<AgentRunResult> {
-        const messageCheckpoint = this.messages.length;
-        try {
-            this.throwIfAborted(opts.signal);
-            // 带图片时构造多模态 parts（OpenAI vision 协议）；纯文本保持字符串不变
-            const content: ChatMessage["content"] = opts.images?.length
-                ? [
-                    {type: "text", text: question || "请看这张图。"},
-                    ...opts.images.map((url) => ({type: "image_url" as const, image_url: {url}})),
-                ]
-                : question;
-            this.messages.push({role: "user", content});
-            const toolCalls: AgentRunResult["toolCalls"] = [];
+        // 带图片时构造多模态 parts（OpenAI vision 协议）；纯文本保持字符串不变
+        const content: ChatMessage["content"] = opts.images?.length
+            ? [
+                {type: "text", text: question || "请看这张图。"},
+                ...opts.images.map((url) => ({type: "image_url" as const, image_url: {url}})),
+            ]
+            : question;
+        this.messages.push({role: "user", content});
+        const toolCalls: AgentRunResult["toolCalls"] = [];
 
-            for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-                this.throwIfAborted(opts.signal);
-                // 有 onToken 且 LLM 支持流式 → 走流式；否则退回普通 chat
-                const message = opts.onToken && this.llm.chatStream
-                    ? await this.llm.chatStream(this.messages, this.registry.schemas(), opts.onToken, opts.signal)
-                    : await this.llm.chat(this.messages, this.registry.schemas(), opts.signal);
-                this.throwIfAborted(opts.signal);
-                this.messages.push(message);
+        for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+            // 有 onToken 且 LLM 支持流式 → 走流式；否则退回普通 chat
+            const message = opts.onToken && this.llm.chatStream
+                ? await this.llm.chatStream(this.messages, this.registry.schemas(), opts.onToken, opts.signal)
+                : await this.llm.chat(this.messages, this.registry.schemas(), opts.signal);
+            this.messages.push(message);
 
-                if (!message.tool_calls?.length) {
-                    // 模型的 assistant 消息永远是纯文本（parts 只出现在用户消息里）
-                    const answer = typeof message.content === "string" ? message.content : "";
-                    return {answer, toolCalls};
-                }
-
-                // 并行只用于纯读调用：写操作（requiresConfirmation）必须串行，
-                // 保证确认弹窗一个接一个出现、扣费/下单顺序可预期
-                const calls = message.tool_calls;
-                const hasWrite = calls.some((c) => this.skillsByName.get(c.function.name)?.requiresConfirmation);
-                const results = hasWrite
-                    ? await this.runSerial(calls, opts)
-                    : await this.runParallel(calls, opts);
-                this.throwIfAborted(opts.signal);
-                for (const [i, result] of results.entries()) {
-                    toolCalls.push({name: calls[i].function.name, input: calls[i].function.arguments, result});
-                    this.messages.push({role: "tool", tool_call_id: calls[i].id, content: result});
-                }
+            if (!message.tool_calls?.length) {
+                // 模型的 assistant 消息永远是纯文本（parts 只出现在用户消息里）
+                const answer = typeof message.content === "string" ? message.content : "";
+                return {answer, toolCalls};
             }
-            throw new Error(`工具调用超过 ${MAX_TOOL_ROUNDS} 轮仍未收敛，已中止（疑似模型行为异常）。`);
-        } catch (error) {
-            // 一轮 ask 要么完整提交，要么完全撤销，避免中止/失败的半截任务污染下一轮上下文。
-            this.messages.splice(messageCheckpoint);
-            throw error;
+
+            // 并行只用于纯读调用：写操作（requiresConfirmation）必须串行，
+            // 保证确认弹窗一个接一个出现、扣费/下单顺序可预期
+            const calls = message.tool_calls;
+            const hasWrite = calls.some((c) => this.skillsByName.get(c.function.name)?.requiresConfirmation);
+            const results = hasWrite
+                ? await this.runSerial(calls, opts)
+                : await this.runParallel(calls, opts);
+            for (const [i, result] of results.entries()) {
+                toolCalls.push({name: calls[i].function.name, input: calls[i].function.arguments, result});
+                this.messages.push({role: "tool", tool_call_id: calls[i].id, content: result});
+            }
         }
+        throw new Error(`工具调用超过 ${MAX_TOOL_ROUNDS} 轮仍未收敛，已中止（疑似模型行为异常）。`);
     }
 
     private async runSerial(calls: NonNullable<ChatMessage["tool_calls"]>, opts: AskOptions): Promise<string[]> {
         const out: string[] = [];
         for (const call of calls) {
-            this.throwIfAborted(opts.signal);
             out.push(await this.runOne(call.function.name, call, opts));
         }
         return out;
@@ -152,12 +140,10 @@ export class Agent {
         call: NonNullable<ChatMessage["tool_calls"]>[number],
         opts: AskOptions,
     ): Promise<string> {
-        this.throwIfAborted(opts.signal);
         const t0 = performance.now();
         opts.onToolEvent?.({phase: "start", name});
         try {
             const result = await this.registry.execute(call);
-            this.throwIfAborted(opts.signal);
             let success = false;
             try {
                 success = (JSON.parse(result) as {success?: boolean}).success === true;
@@ -166,18 +152,10 @@ export class Agent {
             return result;
         } catch (e) {
             opts.onToolEvent?.({phase: "end", name, ms: performance.now() - t0, success: false});
-            this.throwIfAborted(opts.signal);
             return JSON.stringify({
                 success: false,
                 error: {code: "TOOL_CRASH", message: `工具执行异常：${(e as Error).message}`},
             });
         }
-    }
-
-    private throwIfAborted(signal?: AbortSignal): void {
-        if (!signal?.aborted) return;
-        const error = new Error("请求已中止");
-        error.name = "AbortError";
-        throw error;
     }
 }

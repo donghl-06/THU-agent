@@ -22,15 +22,4 @@ describe("Web UI 请求状态", () => {
         expect(tokenBranch).toContain("thinking.markGenerating()");
         expect(tokenBranch).not.toContain("thinking.dismiss()");
     });
-
-    it("停止生成会删除本轮界面节点并清除重试上下文", () => {
-        const abortBranch = /if \(e\?\.name === "AbortError"\) \{([\s\S]*?)\n    \} else \{/.exec(html)?.[1] ?? "";
-        expect(abortBranch).toContain("node.remove()");
-        expect(abortBranch).toContain("lastQuestion = null");
-        expect(abortBranch).toContain("saveChatHistory()");
-
-        const submit = /function submit\(text, imgs\) \{([\s\S]*?)\n\}/.exec(html)?.[1] ?? "";
-        expect(submit).toContain("const userDiv = addUserMsg(text, imgs)");
-        expect(submit).toContain("ask(text, imgs, userDiv)");
-    });
 });
