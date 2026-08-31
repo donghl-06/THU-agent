@@ -62,6 +62,26 @@ pnpm agent   # 命令行 Agent：注册全部 5 个查询技能，模型自主�
 今晚气膜馆羽毛球还有场吗？
 ```
 
+## 供任意 AI Agent 调用
+
+仓库内置了一个遵循 Agent Skills 目录结构的项目级 Skill：
+`.agents/skills/thu-agent/SKILL.md`。兼容 Agent Skills 且能运行本地命令的
+AI Agent 可以自动发现它，并通过机器可读 CLI 使用 `createAllSkills()` 中装配的
+全部校园能力，不需要接入本项目自己的 LLM。
+
+也可以直接检查这层接口：
+
+```bash
+pnpm --silent skill list
+pnpm --silent skill describe get_schedule
+pnpm --silent skill call get_schedule --input '{"date":"2026-08-31"}'
+```
+
+输出统一为 JSON。查询调用只需要 `THU_*` 凭证，不需要 `LLM_*` 配置。
+所有 `requiresConfirmation: true` 的预约、取消、充值和支付类操作默认拒绝执行；
+外部 Agent 必须先向用户展示完整操作参数并取得本次明确同意，之后才能为该次调用
+附加 `--confirmed-by-user`。确认不能跨调用复用，失败或结果不明确时也不能自动重试。
+
 ⚠️ `.env` 已在 `.gitignore` 中，**绝不要**把真实凭证写进 `.env.example` 或任何会被提交的文件。
 
 ## 验证
