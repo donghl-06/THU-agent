@@ -22,6 +22,7 @@
  *       answer  {text}                    最终完整回答（前端校对用）
  *       done    {}                        本轮结束
  *       error   {message}                 出错
+ *   POST /api/chat/cancel → 中止当前问答并等待服务端完成清理
  *   POST /api/confirm   → {id, approved} 应答确认请求
  *   POST /api/auth/login  → {username, password} → SSE 登录流
  *   GET  /api/auth/status → {authenticated}
@@ -181,6 +182,8 @@ export function createWebServer(
     const pendingConfirms = new Map<string, PendingConfirm>();
     let confirmSeq = 0;
     let busy = false;
+    let activeChatAbort: AbortController | undefined;
+    let activeChatDone: Promise<void> | undefined;
     let pendingAuth: PendingAuth | undefined;
     let authSeq = 0;
     let currentAuthHooks: TwoFactorHooks = {};
@@ -197,6 +200,14 @@ export function createWebServer(
         clearTimeout(pending.timer);
         pendingAuth = undefined;
         pending.resolve(undefined);
+    };
+
+    const closePendingConfirms = (): void => {
+        for (const pending of pendingConfirms.values()) {
+            clearTimeout(pending.timer);
+            pending.resolve(false);
+        }
+        pendingConfirms.clear();
     };
 
     const createAuthHooks = (
@@ -330,6 +341,9 @@ export function createWebServer(
     };
 
     const handleChat = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+        if (busy && activeChatAbort?.signal.aborted && activeChatDone) {
+            await activeChatDone;
+        }
         if (busy) {
             res.writeHead(409).end("another question is in flight");
             return;
@@ -370,14 +384,21 @@ export function createWebServer(
         busy = true;
         writeSseHeaders(res);
 
+        const chatAbort = new AbortController();
+        let resolveChatDone!: () => void;
+        const chatDone = new Promise<void>((resolve) => { resolveChatDone = resolve; });
+        activeChatAbort = chatAbort;
+        activeChatDone = chatDone;
+
         let authUsed = false;
         const authHooks = createAuthHooks(res, () => { authUsed = true; }, () => authUsed);
         currentAuthHooks = authHooks;
         // 客户端断开（用户点"停止生成"）→ 中止 LLM 请求，省掉后续 token
-        const chatAbort = new AbortController();
         res.once("close", () => {
             chatAbort.abort();
+            if (activeChatAbort !== chatAbort) return;
             if (currentAuthHooks === authHooks) closePendingAuth();
+            closePendingConfirms();
         });
 
         // 本轮确认桥：推 SSE confirm 事件，挂起等 /api/confirm
@@ -426,11 +447,33 @@ export function createWebServer(
             if (!chatAbort.signal.aborted) sseSend(res, "error", {message: (e as Error).message});
         } finally {
             if (pendingAuth) closePendingAuth();
+            closePendingConfirms();
             busy = false;
             currentConfirm = async () => false;
             currentAuthHooks = {};
+            if (activeChatAbort === chatAbort) {
+                activeChatAbort = undefined;
+                activeChatDone = undefined;
+                resolveChatDone();
+            }
             res.end();
         }
+    };
+
+    const handleChatCancel = async (res: ServerResponse): Promise<void> => {
+        const controller = activeChatAbort;
+        const done = activeChatDone;
+        if (!controller || !done) {
+            res.writeHead(200, {"Content-Type": "application/json"});
+            res.end(JSON.stringify({cancelled: false}));
+            return;
+        }
+        controller.abort();
+        closePendingAuth();
+        closePendingConfirms();
+        await done;
+        res.writeHead(200, {"Content-Type": "application/json"});
+        res.end(JSON.stringify({cancelled: true}));
     };
 
     const handleAuthMethod = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
@@ -537,6 +580,7 @@ export function createWebServer(
             if (req.method === "GET" && url.pathname === "/api/auth/status") return handleAuthStatus(res);
             if (req.method === "POST" && url.pathname === "/api/auth/login") return handleAuthLogin(req, res);
             if (req.method === "POST" && url.pathname === "/api/auth/logout") return handleAuthLogout(res);
+            if (req.method === "POST" && url.pathname === "/api/chat/cancel") return handleChatCancel(res);
             if (req.method === "POST" && url.pathname === "/api/chat") return handleChat(req, res);
             if (req.method === "POST" && url.pathname === "/api/confirm") return handleConfirm(req, res);
             if (req.method === "POST" && url.pathname === "/api/auth/method") return handleAuthMethod(req, res);

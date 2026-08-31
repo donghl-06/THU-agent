@@ -455,6 +455,42 @@ describe("Web 服务端", () => {
         await resp2.text();
     }, 10000);
 
+    it("停止生成：挂起的工具调用被中止，下一问不会收到 409", async () => {
+        let markStarted!: () => void;
+        const started = new Promise<void>((resolve) => { markStarted = resolve; });
+        const hangingSkill: Skill = {
+            name: "hanging",
+            description: "永不返回，仅测试中止",
+            inputSchema: {type: "object", properties: {}},
+            async execute() {
+                markStarted();
+                return new Promise<never>(() => {});
+            },
+        };
+        await start([toolCallMsg("hanging", {}), textMsg("第二问正常回答")], [hangingSkill]);
+
+        const first = await fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question: "第一问"}),
+        });
+        await started;
+
+        const cancelled = await fetch(`${base}/api/chat/cancel`, {method: "POST"});
+        expect(cancelled.status).toBe(200);
+        expect(await cancelled.json()).toEqual({cancelled: true});
+        await first.text();
+
+        const second = await fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question: "第二问"}),
+        });
+        expect(second.status).toBe(200);
+        const events = await readSse(second);
+        expect(events.find((event) => event.event === "answer")?.data.text).toBe("第二问正常回答");
+    }, 10000);
+
     it("空问题返回 400", async () => {
         await start([textMsg("x")]);
         const resp = await fetch(`${base}/api/chat`, {
