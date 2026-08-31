@@ -205,6 +205,22 @@
   }
   #scroll-btn:hover { color: var(--text); background: var(--card-hover); }
   #scroll-btn[hidden] { display: none; }
+  /* Welcome Screen：空对话状态 + 快捷问题（文档十四） */
+  #welcome { align-self: center; text-align: center; padding: 9vh 16px 0; width: min(560px, 100%); }
+  .w-spark { font-size: 30px; color: var(--primary-bright); }
+  .w-title { font-size: 22px; font-weight: 600; margin-top: 12px; }
+  .w-sub { font-size: var(--fs-sm); color: var(--muted); margin-top: 10px; line-height: 1.6; }
+  .w-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 28px; }
+  .w-card {
+    display: flex; align-items: center; gap: 10px; padding: 14px 16px;
+    background: var(--card); border: 1px solid var(--border-soft); border-radius: var(--r-lg);
+    color: var(--text); font-size: var(--fs-sm); cursor: pointer; text-align: left;
+    transition: border-color 0.15s, background 0.15s, transform 0.15s;
+  }
+  .w-card:hover { border-color: var(--primary); background: var(--primary-light); transform: translateY(-1px); }
+  .w-ico { font-size: 18px; }
+  #welcome[hidden] { display: none; }
+  @media (max-width: 560px) { .w-grid { grid-template-columns: 1fr; } }
   .qr-card { align-self: flex-start; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; text-align: center; }
   .qr-card img { width: 220px; height: 220px; }
   .qr-card .url { font-size: 12px; color: var(--muted); word-break: break-all; margin-top: 8px; max-width: 260px; }
@@ -355,7 +371,19 @@
     <button id="snd-toggle" class="iconbtn" title="提示音效开关">🔔</button>
   </span>
 </header>
-<div id="chat"></div>
+<div id="chat">
+  <div id="welcome" hidden>
+    <div class="w-spark">✦</div>
+    <h1 class="w-title">今天想在清华做点什么？</h1>
+    <p class="w-sub" id="w-login-hint">登录清华账号后可以查询课表、约场馆、看电费——先点击右上角「登录」</p>
+    <div class="w-grid">
+      <button class="w-card" type="button" data-q="我今天有什么课？"><span class="w-ico">📚</span><span>查今天的课表</span></button>
+      <button class="w-card" type="button" data-q="今晚哪里可以打羽毛球？"><span class="w-ico">🏃</span><span>查场馆空位</span></button>
+      <button class="w-card" type="button" data-q="帮我看看图书馆哪里有位置"><span class="w-ico">📖</span><span>图书馆座位</span></button>
+      <button class="w-card" type="button" data-q="我明天下午有什么空闲时间？"><span class="w-ico">🗓️</span><span>找空闲时间</span></button>
+    </div>
+  </div>
+</div>
 <div id="toasts"></div>
 <button id="scroll-btn" type="button" title="回到底部" hidden>↓</button>
 <div id="composer-wrap">
@@ -472,6 +500,7 @@ function addMsg(role, text) {
   div.textContent = text;
   chat.appendChild(div);
   saveChatHistory();
+  updateWelcome();
   scrollDown();
   return div;
 }
@@ -489,6 +518,7 @@ function addUserMsg(text, images) {
   div.appendChild(document.createTextNode(text));
   chat.appendChild(div);
   saveChatHistory();
+  updateWelcome();
   scrollDown(true);
 }
 
@@ -549,6 +579,7 @@ function restoreChatHistory() {
     div.appendChild(document.createTextNode(record.text));
     chat.appendChild(div);
   }
+  updateWelcome();
   scrollDown();
 }
 
@@ -557,14 +588,19 @@ function clearChatHistory() {
   store.set(CHAT_HISTORY_KEY, "[]");
 }
 
-function showStartupGuide() {
-  if (chat.querySelector(".msg")) return;
-  if (authenticated) {
-    addMsg("bot", "欢迎回来！你已登录清华账号，可以直接告诉我你的需求，例如查询课表、寻找空闲时间或了解校园服务。");
-  } else {
-    addMsg("bot", "你好！欢迎使用清华小助手 👋\n请先点击右上角“登录”，使用清华 Info 账号登录并完成二次认证。登录成功后，我就可以帮你查询课表、规划空闲时间以及了解校园服务。");
-  }
+/* ---- Welcome Screen：仅在空对话时显示，随首条内容出现而隐藏 ---- */
+const welcome = document.getElementById("welcome");
+const wLoginHint = document.getElementById("w-login-hint");
+function updateWelcome() {
+  welcome.hidden = !!chat.querySelector(".msg, .thinking, .error-card, .qr-card, .pay-card");
+  wLoginHint.hidden = authenticated;
 }
+welcome.querySelectorAll(".w-card").forEach((card) => {
+  card.onclick = () => {
+    const text = card.dataset.q;
+    submit(text, []);
+  };
+});
 
 let soundOn = store.get("snd", "1") === "1";
 let ttsOn = store.get("tts", "0") === "1";
@@ -793,6 +829,7 @@ function showErrorCard(raw) {
     ask(text, imgs).catch((e) => { showErrorCard("网络错误：" + e.message); sfx.error(); });
   };
   chat.appendChild(card);
+  updateWelcome();
   scrollDown();
 }
 
@@ -930,7 +967,7 @@ async function logout() {
     pendingImages = [];
     renderThumbs();
     toast("已退出登录，校园服务已关闭", "ok");
-    showStartupGuide();
+    updateWelcome();
   }
 }
 
@@ -1158,10 +1195,10 @@ authCode.addEventListener("keydown", (e) => {
 fetch("/api/auth/status").then((resp) => resp.json()).then((data) => {
   authenticated = data.authenticated === true;
   updateLoginButton();
-  showStartupGuide();
+  updateWelcome();
 }).catch(() => {
   updateLoginButton();
-  showStartupGuide();
+  updateWelcome();
 });
 
 /* ---- SSE 解析（fetch 流，EventSource 不支持 POST） ---- */
