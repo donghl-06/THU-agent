@@ -681,7 +681,14 @@ chat.addEventListener("scroll", () => {
   scrollBtn.hidden = followScroll;
 });
 function scrollDown(force = false) {
-  if (!force && !followScroll) return;
+  if (force) {
+    // 新请求会同步追加“用户消息 → Thinking Card”。浏览器的 scroll 事件
+    // 可能尚未把 followScroll 更新回来，因此这里必须同步恢复跟随状态。
+    followScroll = true;
+    scrollBtn.hidden = true;
+  } else if (!followScroll) {
+    return;
+  }
   chat.scrollTop = chat.scrollHeight;
 }
 scrollBtn.onclick = () => scrollDown(true);
@@ -1115,7 +1122,8 @@ function createThinkingCard() {
     '<div class="think-head"><span class="spark">✦</span><span>清华小助手正在处理</span><span class="think-time">0s</span></div>' +
     '<div class="think-steps"></div>';
   chat.appendChild(card);
-  scrollDown();
+  // 即使发送前用户曾上翻，也要保证本轮即时反馈进入可视区域。
+  scrollDown(true);
 
   const steps = card.querySelector(".think-steps");
   const timeEl = card.querySelector(".think-time");
@@ -1156,7 +1164,19 @@ function createThinkingCard() {
     card.classList.add("removing");
     setTimeout(() => card.remove(), 260);
   };
-  const addTool = (name) => mkStep(`正在查询「${toolLabel(name)}」…`, "active");
+  let generating = false;
+  const addTool = (name) => {
+    generating = false;
+    setStatus("正在查询校园信息");
+    return mkStep(`正在查询「${toolLabel(name)}」…`, "active");
+  };
+  const markGenerating = () => {
+    if (dismissed || generating) return;
+    generating = true;
+    clearInterval(phaseTimer);
+    setStatus("正在生成回答");
+    scrollDown();
+  };
   const finishTool = (el, e) => {
     el.className = "think-step " + (e.success === false ? "fail" : "done");
     el.querySelector("span:last-child").textContent =
@@ -1169,7 +1189,7 @@ function createThinkingCard() {
     }
     scrollDown();
   };
-  return {el: card, addTool, finishTool, dismiss};
+  return {el: card, addTool, finishTool, markGenerating, dismiss};
 }
 
 /* ---- Markdown 渲染（marked 内联库）：仅对最终回答渲染，流式过程保持纯文本 ---- */
@@ -1677,7 +1697,6 @@ async function ask(question, images) {
     const chips = new Map(); // 进行中的工具状态行
 
     const ensureBot = () => {
-      thinking.dismiss(); // 首个 token 到达，收起 Thinking Card
       if (!botDiv) {
         botDiv = addMsg("bot", "");
         botDiv.innerHTML = '<span class="cursor"></span>';
@@ -1714,6 +1733,8 @@ async function ask(question, images) {
 
         if (ev === "token") {
           botText += data.text;
+          // 中间工具决策轮也可能输出前置文字，不能因此提前删除处理状态。
+          thinking.markGenerating();
           ensureBot();
           renderBot();
         } else if (ev === "tool") {
@@ -1736,8 +1757,10 @@ async function ask(question, images) {
         } else if (ev === "answer") {
           // 最终回答校对：以完整 answer 为准，并渲染 Markdown
           botText = data.text;
+          thinking.markGenerating();
           ensureBot();
           renderMd(botDiv, botText);
+          thinking.dismiss();
           saveChatHistory();
           scrollDown();
           if (ttsOn && botText) speak(botText);
