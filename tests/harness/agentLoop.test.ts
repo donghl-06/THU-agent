@@ -179,6 +179,61 @@ describe("Agent Loop", () => {
         // 第二次调用应带着完整历史
         expect(llm.seen[1].map((m) => m.role)).toEqual(["system", "user", "assistant", "user"]);
     });
+
+    it("中止的 ask 会回滚本轮上下文，下一问不会继续旧任务", async () => {
+        const controller = new AbortController();
+        const seen: ChatMessage[][] = [];
+        let calls = 0;
+        const llm: LlmClient = {
+            async chat(messages) {
+                seen.push([...messages]);
+                calls += 1;
+                if (calls === 1) {
+                    controller.abort();
+                    return textMsg("这段中止后的回答不应提交");
+                }
+                return textMsg("新任务完成");
+            },
+        };
+        const agent = new Agent([], "你是测试助手", llm);
+
+        await expect(agent.ask("执行旧任务", {signal: controller.signal})).rejects.toMatchObject({
+            name: "AbortError",
+        });
+        const result = await agent.ask("执行新任务");
+
+        expect(result.answer).toBe("新任务完成");
+        expect(seen[1].map((m) => m.role)).toEqual(["system", "user"]);
+        expect(seen[1][1].content).toBe("执行新任务");
+        expect(seen[1].some((m) => m.content === "执行旧任务")).toBe(false);
+    });
+
+    it("工具执行期间中止后不会进入下一轮模型调用", async () => {
+        const controller = new AbortController();
+        let executed = 0;
+        const abortingSkill: Skill = {
+            name: "aborting_read",
+            description: "执行时触发中止，仅测试用",
+            inputSchema: {type: "object", properties: {}},
+            async execute() {
+                executed += 1;
+                controller.abort();
+                return ok({finished: true});
+            },
+        };
+        const llm = fakeLlm([toolCallMsg("aborting_read", {}), textMsg("新任务完成")]);
+        const agent = new Agent([abortingSkill], "你是测试助手", llm);
+
+        await expect(agent.ask("执行会中止的工具", {signal: controller.signal})).rejects.toMatchObject({
+            name: "AbortError",
+        });
+        expect(executed).toBe(1);
+        expect(llm.seen).toHaveLength(1);
+
+        await agent.ask("执行新任务");
+        expect(llm.seen[1].map((m) => m.role)).toEqual(["system", "user"]);
+        expect(llm.seen[1][1].content).toBe("执行新任务");
+    });
 });
 
 describe("写操作确认流", () => {

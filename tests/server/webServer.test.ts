@@ -407,12 +407,14 @@ describe("Web 服务端", () => {
 
     it("停止生成：客户端断开 → 中止信号传到 LLM 且 busy 释放", async () => {
         const seenSignals: AbortSignal[] = [];
+        const seenMessages: ChatMessage[][] = [];
         let calls = 0;
         server = createWebServer((confirm: ConfirmFn) =>
             new Agent([echoSkill], "测试", {
-                async chat(_messages, _tools, signal) {
+                async chat(messages, _tools, signal) {
                     calls += 1;
                     seenSignals.push(signal!);
+                    seenMessages.push([...messages]);
                     if (calls === 1) {
                         // 模拟 LLM 长响应：挂起直到外部中止（或 5s 兜底）
                         await new Promise<void>((resolve) => {
@@ -453,6 +455,9 @@ describe("Web 服务端", () => {
         });
         expect(resp2.status).toBe(200);
         await resp2.text();
+        expect(seenMessages[1].map((message) => message.role)).toEqual(["system", "user"]);
+        expect(seenMessages[1][1].content).toBe("再来一问");
+        expect(seenMessages[1].some((message) => message.content === "你好")).toBe(false);
     }, 10000);
 
     it("空问题返回 400", async () => {
