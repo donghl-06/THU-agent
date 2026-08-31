@@ -188,6 +188,10 @@
   @keyframes blink { 50% { opacity: 0; } }
   /* Thinking Card：Agent 处理过程的实时状态（文档四/六/九/十） */
   .thinking {
+    /* flex:none：本卡是 #chat 滚动容器里唯一 overflow:hidden 的子项——
+       flex 自动最小尺寸因此归零，对话一长（内容溢出）就会被收缩算法
+       压扁成一条线（2026-08-31 用户实测），必须禁止收缩 */
+    flex: none;
     align-self: flex-start; width: min(480px, 88%);
     background: var(--card); border: 1px solid var(--border-soft);
     border-radius: var(--r-lg) var(--r-lg) var(--r-lg) 4px;
