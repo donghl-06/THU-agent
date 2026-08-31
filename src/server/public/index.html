@@ -99,15 +99,41 @@
   .msg .saved-att { display: block; margin-bottom: 6px; font-size: var(--fs-xs); opacity: 0.8; }
   .msg .cursor { display: inline-block; width: 8px; height: 15px; background: var(--primary-soft); vertical-align: -2px; animation: blink 0.8s infinite; }
   @keyframes blink { 50% { opacity: 0; } }
-  .tool-chip {
-    align-self: flex-start; font-size: 12.5px; color: var(--tool);
-    background: color-mix(in srgb, var(--tool) 10%, transparent);
-    border: 1px solid color-mix(in srgb, var(--tool) 30%, transparent);
-    border-radius: 999px; padding: 4px 12px; display: flex; gap: 8px; align-items: center;
+  /* Thinking Card：Agent 处理过程的实时状态（文档四/六/九/十） */
+  .thinking {
+    align-self: flex-start; width: min(480px, 88%);
+    background: var(--card); border: 1px solid var(--border-soft);
+    border-radius: var(--r-lg) var(--r-lg) var(--r-lg) 4px;
+    overflow: hidden; box-shadow: var(--shadow-1);
+    animation: msg-in 0.22s ease;
   }
-  .tool-chip .spin { animation: rot 1s linear infinite; display: inline-block; }
-  @keyframes rot { to { transform: rotate(360deg); } }
-  .tool-chip.fail { color: var(--err); border-color: color-mix(in srgb, var(--err) 30%, transparent); background: color-mix(in srgb, var(--err) 8%, transparent); }
+  .thinking.removing { opacity: 0; transform: translateY(-4px); transition: opacity 0.25s, transform 0.25s; }
+  .think-bar {
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--primary-soft), transparent);
+    background-size: 50% 100%;
+    animation: think-shimmer 1.4s linear infinite;
+  }
+  @keyframes think-shimmer { from { background-position: -60% 0; } to { background-position: 160% 0; } }
+  .think-head { display: flex; align-items: center; gap: 8px; padding: 12px 16px 8px; font-size: 14px; font-weight: 600; }
+  .think-head .spark { color: var(--primary-bright); }
+  .think-time { margin-left: auto; font-size: var(--fs-xs); color: var(--muted); font-weight: 400; }
+  .think-steps { display: flex; flex-direction: column; gap: 7px; padding: 0 16px 12px; }
+  .think-step { display: flex; align-items: center; gap: 9px; font-size: var(--fs-sm); color: var(--text-2); }
+  .think-step .dot {
+    width: 7px; height: 7px; border-radius: 50%; flex: none;
+    border: 1.5px solid var(--muted); background: transparent;
+  }
+  .think-step.active .dot {
+    border-color: var(--primary-soft); background: var(--primary-soft);
+    animation: think-pulse 1.2s ease infinite;
+  }
+  @keyframes think-pulse { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary-soft) 22%, transparent); } }
+  .think-step.done { color: var(--muted); }
+  .think-step.done .dot { border-color: var(--ok); background: var(--ok); }
+  .think-step.fail { color: var(--err); }
+  .think-step.fail .dot { border-color: var(--err); background: var(--err); }
+  .think-step .ms { margin-left: auto; font-size: var(--fs-xs); color: var(--muted); font-variant-numeric: tabular-nums; }
   .qr-card { align-self: flex-start; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; text-align: center; }
   .qr-card img { width: 220px; height: 220px; }
   .qr-card .url { font-size: 12px; color: var(--muted); word-break: break-all; margin-top: 8px; max-width: 260px; }
@@ -537,19 +563,81 @@ function renderThumbs() {
   });
 }
 
-function addToolChip(name) {
-  const div = document.createElement("div");
-  div.className = "tool-chip";
-  div.innerHTML = `<span class="spin">⏳</span><span>正在调用 ${name}…</span>`;
-  chat.appendChild(div);
-  scrollDown();
-  return div;
-}
+/* ---- Thinking Card：发送后立即给出可见反馈，真实工具事件驱动状态行 ---- */
+const TOOL_LABELS = {
+  get_schedule: "课表", get_classroom_state: "教室空闲情况", get_report: "成绩单",
+  get_campus_card_info: "校园卡信息", recharge_campus_card: "校园卡充值",
+  get_electricity: "宿舍电费", recharge_electricity: "电费充值",
+  get_library_seats: "图书馆座位", get_library_rooms: "研讨间",
+  book_library_seat: "预约图书馆座位", book_library_room: "预约研讨间",
+  cancel_library_booking: "取消图书馆预约", get_my_library_bookings: "我的预约",
+  get_sports_resources: "体育场馆", book_sports_field: "预约体育场馆", pay_sports_order: "体育订单支付",
+};
+const toolLabel = (name) => TOOL_LABELS[name] ?? name;
 
-function finishToolChip(chip, e) {
-  chip.classList.toggle("fail", e.success === false);
-  chip.innerHTML = `<span>${e.success === false ? "❌" : "✅"}</span><span>${e.name} ${e.success === false ? "失败" : "完成"}${e.ms != null ? "（" + (e.ms / 1000).toFixed(1) + "s）" : ""}</span>`;
+function createThinkingCard() {
+  const card = document.createElement("div");
+  card.className = "thinking";
+  card.innerHTML =
+    '<div class="think-bar"></div>' +
+    '<div class="think-head"><span class="spark">✦</span><span>清华小助手正在处理</span><span class="think-time">0s</span></div>' +
+    '<div class="think-steps"></div>';
+  chat.appendChild(card);
   scrollDown();
+
+  const steps = card.querySelector(".think-steps");
+  const timeEl = card.querySelector(".think-time");
+  const t0 = Date.now();
+  const timer = setInterval(() => {
+    timeEl.textContent = Math.floor((Date.now() - t0) / 1000) + "s";
+  }, 500);
+
+  // 模拟阶段文案按时间轮换（真实工具行会并行插入，见 addTool）
+  const phases = ["正在理解你的问题", "正在查询校园信息", "正在整理结果"];
+  let phaseIdx = 0;
+  let statusStep = null;
+  const phaseTimer = setInterval(() => {
+    phaseIdx = Math.min(phaseIdx + 1, phases.length - 1);
+    setStatus(phases[phaseIdx]);
+  }, 3500);
+
+  const mkStep = (text, state) => {
+    const el = document.createElement("div");
+    el.className = "think-step " + state;
+    el.innerHTML = `<span class="dot"></span><span>${text}</span>`;
+    steps.appendChild(el);
+    scrollDown();
+    return el;
+  };
+  const setStatus = (text) => {
+    if (statusStep) statusStep.remove();
+    statusStep = mkStep(text, "active");
+  };
+  setStatus(phases[0]);
+
+  let dismissed = false;
+  const dismiss = () => {
+    if (dismissed) return;
+    dismissed = true;
+    clearInterval(timer);
+    clearInterval(phaseTimer);
+    card.classList.add("removing");
+    setTimeout(() => card.remove(), 260);
+  };
+  const addTool = (name) => mkStep(`正在查询「${toolLabel(name)}」…`, "active");
+  const finishTool = (el, e) => {
+    el.className = "think-step " + (e.success === false ? "fail" : "done");
+    el.querySelector("span:last-child").textContent =
+      `「${toolLabel(e.name)}」${e.success === false ? "查询失败" : "完成"}`;
+    if (e.ms != null) {
+      const ms = document.createElement("span");
+      ms.className = "ms";
+      ms.textContent = (e.ms / 1000).toFixed(1) + "s";
+      el.appendChild(ms);
+    }
+    scrollDown();
+  };
+  return {el: card, addTool, finishTool, dismiss};
 }
 
 function showQr(data) {
@@ -921,12 +1009,14 @@ fetch("/api/auth/status").then((resp) => resp.json()).then((data) => {
 async function ask(question, images) {
   busy = true;
   sendBtn.disabled = true;
+  const thinking = createThinkingCard(); // 立即出现，不等 API
   const resp = await fetch("/api/chat", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({question, ...(images?.length ? {images} : {})}),
   });
   if (!resp.ok) {
+    thinking.dismiss();
     const message = await resp.text();
     if (resp.status === 401) {
       authenticated = false;
@@ -943,9 +1033,10 @@ async function ask(question, images) {
 
   let botDiv = null;       // 当前流式回答的气泡
   let botText = "";
-  const chips = new Map(); // 进行中的工具提示
+  const chips = new Map(); // 进行中的工具状态行
 
   const ensureBot = () => {
+    thinking.dismiss(); // 首个 token 到达，收起 Thinking Card
     if (!botDiv) {
       botDiv = addMsg("bot", "");
       botDiv.innerHTML = '<span class="cursor"></span>';
@@ -986,10 +1077,10 @@ async function ask(question, images) {
         renderBot();
       } else if (ev === "tool") {
         if (data.phase === "start") {
-          chips.set(data.name, addToolChip(data.name));
+          chips.set(data.name, thinking.addTool(data.name));
         } else {
           const chip = chips.get(data.name);
-          if (chip) { finishToolChip(chip, data); chips.delete(data.name); }
+          if (chip) { thinking.finishTool(chip, data); chips.delete(data.name); }
           if (data.success === false) sfx.toolFail(); else sfx.toolOk();
         }
       } else if (ev === "confirm") {
@@ -1010,12 +1101,14 @@ async function ask(question, images) {
         scrollDown();
         if (ttsOn && botText) speak(botText);
       } else if (ev === "error") {
+        thinking.dismiss();
         addMsg("bot", "出错了：" + data.message);
         sfx.error();
       }
     }
   }
-  // 流结束：去掉光标
+  // 流结束：去掉光标、确保 Thinking Card 已收起
+  thinking.dismiss();
   if (botDiv) {
     botDiv.textContent = botText;
     saveChatHistory();
