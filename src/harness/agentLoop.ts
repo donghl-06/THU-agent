@@ -45,6 +45,8 @@ export interface AskOptions {
     onToolEvent?: (e: ToolEvent) => void;
     /** 随问题附带的图片（data URL，如 data:image/png;base64,...）。需模型端点支持 vision */
     images?: string[];
+    /** 外部中止信号（Web UI"停止生成"用）；中止后本轮 ask 立即失败 */
+    signal?: AbortSignal;
 }
 
 export class Agent {
@@ -95,8 +97,8 @@ export class Agent {
         for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
             // 有 onToken 且 LLM 支持流式 → 走流式；否则退回普通 chat
             const message = opts.onToken && this.llm.chatStream
-                ? await this.llm.chatStream(this.messages, this.registry.schemas(), opts.onToken)
-                : await this.llm.chat(this.messages, this.registry.schemas());
+                ? await this.llm.chatStream(this.messages, this.registry.schemas(), opts.onToken, opts.signal)
+                : await this.llm.chat(this.messages, this.registry.schemas(), opts.signal);
             this.messages.push(message);
 
             if (!message.tool_calls?.length) {

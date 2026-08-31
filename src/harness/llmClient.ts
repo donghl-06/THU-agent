@@ -18,13 +18,14 @@ const TIMEOUT_MS = 120_000;
 const NETWORK_RETRY = 1;
 
 export interface LlmClient {
-    chat(messages: ChatMessage[], tools: ToolSchema[]): Promise<ChatMessage>;
+    /** signal：外部中止信号（可选，用户"停止生成"用），与内部超时信号合并 */
+    chat(messages: ChatMessage[], tools: ToolSchema[], signal?: AbortSignal): Promise<ChatMessage>;
     /**
      * 流式版本：onToken 收到每个内容 token；返回值与非流式一致
      * （tool_calls 在流里是增量碎片，内部拼好后整体返回）。
      * 可选方法——不支持流式的假 LLM 不实现它，Agent 会自动退回 chat。
      */
-    chatStream?(messages: ChatMessage[], tools: ToolSchema[], onToken: (token: string) => void): Promise<ChatMessage>;
+    chatStream?(messages: ChatMessage[], tools: ToolSchema[], onToken: (token: string) => void, signal?: AbortSignal): Promise<ChatMessage>;
 }
 
 /** 从 fetch 的 cause 链里挖出真正的底层原因（ECONNRESET/ENOTFOUND/…） */
@@ -40,13 +41,16 @@ function networkCause(e: unknown): string {
 
 export function createLlmClient(): LlmClient {
     /** 统一的请求入口（连通性 + 重试 + HTTP 错误归一化） */
-    const post = async (messages: ChatMessage[], tools: ToolSchema[], stream: boolean): Promise<Response> => {
+    const post = async (messages: ChatMessage[], tools: ToolSchema[], stream: boolean, signal?: AbortSignal): Promise<Response> => {
         let resp: Response | undefined;
+        // 外部中止信号与超时信号合并；外部中止不重试
+        const timeoutSignal = AbortSignal.timeout(TIMEOUT_MS);
+        const combined = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
         for (let attempt = 0; attempt <= NETWORK_RETRY; attempt++) {
             try {
                 resp = await fetch(`${config.llm.baseUrl}/chat/completions`, {
                     method: "POST",
-                    signal: AbortSignal.timeout(TIMEOUT_MS),
+                    signal: combined,
                     headers: {
                         "Content-Type": "application/json",
                         Authorization: `Bearer ${config.llm.apiKey}`,
@@ -60,6 +64,7 @@ export function createLlmClient(): LlmClient {
                 });
                 break;
             } catch (e) {
+                if (signal?.aborted) throw e; // 用户中止：原样抛出，不归一化不重试
                 if (e instanceof Error && e.name === "TimeoutError") {
                     throw new Error("LLM 请求超时（120s），请稍后重试。");
                 }
@@ -85,8 +90,8 @@ export function createLlmClient(): LlmClient {
     };
 
     return {
-        async chat(messages, tools) {
-            const resp = await post(messages, tools, false);
+        async chat(messages, tools, signal) {
+            const resp = await post(messages, tools, false, signal);
             const data = (await resp.json()) as ChatResponse;
             const message = data.choices?.[0]?.message;
             if (!message) {
@@ -95,8 +100,8 @@ export function createLlmClient(): LlmClient {
             return message;
         },
 
-        async chatStream(messages, tools, onToken) {
-            const resp = await post(messages, tools, true);
+        async chatStream(messages, tools, onToken, signal) {
+            const resp = await post(messages, tools, true, signal);
             if (!resp.body) throw new Error("LLM 流式响应没有 body。");
 
             // SSE 解析：逐行读 "data: {...}"，content 增量立刻回调，

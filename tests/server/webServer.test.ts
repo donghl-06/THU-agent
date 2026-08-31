@@ -405,6 +405,56 @@ describe("Web 服务端", () => {
         await firstEvents;
     }, 20000);
 
+    it("停止生成：客户端断开 → 中止信号传到 LLM 且 busy 释放", async () => {
+        const seenSignals: AbortSignal[] = [];
+        let calls = 0;
+        server = createWebServer((confirm: ConfirmFn) =>
+            new Agent([echoSkill], "测试", {
+                async chat(_messages, _tools, signal) {
+                    calls += 1;
+                    seenSignals.push(signal!);
+                    if (calls === 1) {
+                        // 模拟 LLM 长响应：挂起直到外部中止（或 5s 兜底）
+                        await new Promise<void>((resolve) => {
+                            signal!.addEventListener("abort", () => resolve(), {once: true});
+                            setTimeout(resolve, 5000);
+                        });
+                    }
+                    return textMsg(`回复 ${calls}`);
+                },
+            }), {requireLogin: false});
+        await new Promise<void>((r) => server!.listen(0, "127.0.0.1", r));
+        base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+        // 前端"停止生成" = abort fetch（断开连接）
+        const controller = new AbortController();
+        const pending = fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question: "你好"}),
+            signal: controller.signal,
+        });
+        // 轮询等待服务端进入 LLM 调用（固定 sleep 在高负载下不可靠）
+        for (let i = 0; i < 100 && calls === 0; i++) {
+            await new Promise((r) => setTimeout(r, 20));
+        }
+        expect(calls).toBe(1);
+        controller.abort();
+        await expect(pending).rejects.toThrow();
+
+        await new Promise((r) => setTimeout(r, 100));
+        expect(seenSignals[0]?.aborted).toBe(true);
+
+        // busy 已释放：紧接着再问应正常受理（而非 409）
+        const resp2 = await fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question: "再来一问"}),
+        });
+        expect(resp2.status).toBe(200);
+        await resp2.text();
+    }, 10000);
+
     it("空问题返回 400", async () => {
         await start([textMsg("x")]);
         const resp = await fetch(`${base}/api/chat`, {

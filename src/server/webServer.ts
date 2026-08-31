@@ -373,7 +373,10 @@ export function createWebServer(
         let authUsed = false;
         const authHooks = createAuthHooks(res, () => { authUsed = true; }, () => authUsed);
         currentAuthHooks = authHooks;
+        // 客户端断开（用户点"停止生成"）→ 中止 LLM 请求，省掉后续 token
+        const chatAbort = new AbortController();
         res.once("close", () => {
+            chatAbort.abort();
             if (currentAuthHooks === authHooks) closePendingAuth();
         });
 
@@ -399,6 +402,7 @@ export function createWebServer(
                 onToken: (text) => sseSend(res, "token", {text}),
                 onToolEvent: (e) => sseSend(res, "tool", e),
                 ...(images ? {images} : {}),
+                signal: chatAbort.signal,
             });
             const authFailure = result.toolCalls
                 .map((toolCall) => extractAuthFailure(toolCall.result))
@@ -419,7 +423,7 @@ export function createWebServer(
             sseSend(res, "answer", {text: result.answer});
             sseSend(res, "done", {});
         } catch (e) {
-            sseSend(res, "error", {message: (e as Error).message});
+            if (!chatAbort.signal.aborted) sseSend(res, "error", {message: (e as Error).message});
         } finally {
             if (pendingAuth) closePendingAuth();
             busy = false;

@@ -1127,7 +1127,8 @@ function updateLoginButton() {
   loginBtn.classList.toggle("logged-in", authenticated);
   loginBtn.title = authenticated ? "点击退出登录" : "使用清华 Info 账号登录";
   connStatus.hidden = !authenticated;
-  sendBtn.disabled = busy || loginInFlight;
+  sendBtn.textContent = busy ? "■ 停止" : "发送";
+  sendBtn.disabled = busy ? false : loginInFlight; // busy 时按钮是"停止"
 }
 
 function openLoginModal() {
@@ -1395,118 +1396,130 @@ fetch("/api/auth/status").then((resp) => resp.json()).then((data) => {
 });
 
 /* ---- SSE 解析（fetch 流，EventSource 不支持 POST） ---- */
+let chatAbort = null; // 当前问答的中止控制器（"停止生成"）
 async function ask(question, images) {
   busy = true;
-  sendBtn.disabled = true;
+  updateLoginButton(); // 发送按钮 → "■ 停止"
   lastQuestion = question;  // 供失败后"重新生成"
   lastImages = images;
   const thinking = createThinkingCard(); // 立即出现，不等 API
-  const resp = await fetch("/api/chat", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({question, ...(images?.length ? {images} : {})}),
-  });
-  if (!resp.ok) {
-    thinking.dismiss();
-    const message = await resp.text();
-    if (resp.status === 401) {
-      authenticated = false;
-      updateLoginButton();
-      toast("请先登录清华账号后再使用校园功能", "err");
-    } else {
-      showErrorCard(message);
-    }
-    sfx.error();
-    busy = false;
-    updateLoginButton();
-    return;
-  }
-
   let botDiv = null;       // 当前流式回答的气泡
   let botText = "";
-  const chips = new Map(); // 进行中的工具状态行
-
-  const ensureBot = () => {
-    thinking.dismiss(); // 首个 token 到达，收起 Thinking Card
-    if (!botDiv) {
-      botDiv = addMsg("bot", "");
-      botDiv.innerHTML = '<span class="cursor"></span>';
+  chatAbort = new AbortController();
+  try {
+    const resp = await fetch("/api/chat", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({question, ...(images?.length ? {images} : {})}),
+      signal: chatAbort.signal,
+    });
+    if (!resp.ok) {
+      const message = await resp.text();
+      if (resp.status === 401) {
+        authenticated = false;
+        updateLoginButton();
+        toast("请先登录清华账号后再使用校园功能", "err");
+      } else {
+        showErrorCard(message);
+      }
+      sfx.error();
+      return;
     }
-    return botDiv;
-  };
-  const renderBot = () => {
-    if (botDiv) botDiv.innerHTML = "";
-    if (botDiv) {
-      botDiv.appendChild(document.createTextNode(botText));
-      const c = document.createElement("span");
-      c.className = "cursor";
-      botDiv.appendChild(c);
-      scrollDown();
-    }
-  };
 
-  const reader = resp.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  for (;;) {
-    const {done, value} = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, {stream: true});
-    let idx;
-    while ((idx = buffer.indexOf("\n\n")) !== -1) {
-      const block = buffer.slice(0, idx);
-      buffer = buffer.slice(idx + 2);
-      const ev = /^event: (.*)$/m.exec(block)?.[1];
-      const dataStr = /^data: (.*)$/m.exec(block)?.[1];
-      if (!ev || !dataStr) continue;
-      let data;
-      try { data = JSON.parse(dataStr); } catch { continue; }
+    const chips = new Map(); // 进行中的工具状态行
 
-      if (ev === "token") {
-        botText += data.text;
-        ensureBot();
-        renderBot();
-      } else if (ev === "tool") {
-        if (data.phase === "start") {
-          chips.set(data.name, thinking.addTool(data.name));
-        } else {
-          const chip = chips.get(data.name);
-          if (chip) { thinking.finishTool(chip, data); chips.delete(data.name); }
-          if (data.success === false) sfx.toolFail(); else sfx.toolOk();
-        }
-      } else if (ev === "confirm") {
-        sfx.confirm();
-        showConfirm(data);
-      } else if (ev === "auth") {
-        handleAuthEvent(data);
-      } else if (ev === "qr") {
-        showQr(data);
-      } else if (ev === "payform") {
-        showPayForm(data);
-      } else if (ev === "answer") {
-        // 最终回答校对：以完整 answer 为准，并渲染 Markdown
-        botText = data.text;
-        ensureBot();
-        renderMd(botDiv, botText);
-        saveChatHistory();
+    const ensureBot = () => {
+      thinking.dismiss(); // 首个 token 到达，收起 Thinking Card
+      if (!botDiv) {
+        botDiv = addMsg("bot", "");
+        botDiv.innerHTML = '<span class="cursor"></span>';
+      }
+      return botDiv;
+    };
+    const renderBot = () => {
+      if (botDiv) botDiv.innerHTML = "";
+      if (botDiv) {
+        botDiv.appendChild(document.createTextNode(botText));
+        const c = document.createElement("span");
+        c.className = "cursor";
+        botDiv.appendChild(c);
         scrollDown();
-        if (ttsOn && botText) speak(botText);
-      } else if (ev === "error") {
-        thinking.dismiss();
-        showErrorCard(data.message);
-        sfx.error();
+      }
+    };
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, {stream: true});
+      let idx;
+      while ((idx = buffer.indexOf("\n\n")) !== -1) {
+        const block = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        const ev = /^event: (.*)$/m.exec(block)?.[1];
+        const dataStr = /^data: (.*)$/m.exec(block)?.[1];
+        if (!ev || !dataStr) continue;
+        let data;
+        try { data = JSON.parse(dataStr); } catch { continue; }
+
+        if (ev === "token") {
+          botText += data.text;
+          ensureBot();
+          renderBot();
+        } else if (ev === "tool") {
+          if (data.phase === "start") {
+            chips.set(data.name, thinking.addTool(data.name));
+          } else {
+            const chip = chips.get(data.name);
+            if (chip) { thinking.finishTool(chip, data); chips.delete(data.name); }
+            if (data.success === false) sfx.toolFail(); else sfx.toolOk();
+          }
+        } else if (ev === "confirm") {
+          sfx.confirm();
+          showConfirm(data);
+        } else if (ev === "auth") {
+          handleAuthEvent(data);
+        } else if (ev === "qr") {
+          showQr(data);
+        } else if (ev === "payform") {
+          showPayForm(data);
+        } else if (ev === "answer") {
+          // 最终回答校对：以完整 answer 为准，并渲染 Markdown
+          botText = data.text;
+          ensureBot();
+          renderMd(botDiv, botText);
+          saveChatHistory();
+          scrollDown();
+          if (ttsOn && botText) speak(botText);
+        } else if (ev === "error") {
+          thinking.dismiss();
+          showErrorCard(data.message);
+          sfx.error();
+        }
       }
     }
+  } catch (e) {
+    if (e?.name === "AbortError") {
+      toast("已停止生成");
+    } else {
+      showErrorCard("网络错误：" + e.message);
+      sfx.error();
+    }
+  } finally {
+    // 收尾：光标气泡渲染已收到的内容、确保 Thinking Card 已收起
+    thinking.dismiss();
+    if (botDiv) {
+      if (botText) renderMd(botDiv, botText);
+      else botDiv.remove();
+      saveChatHistory();
+    }
+    busy = false;
+    chatAbort = null;
+    updateLoginButton();
+    q.focus();
   }
-  // 流结束：去掉光标、渲染最终 Markdown、确保 Thinking Card 已收起
-  thinking.dismiss();
-  if (botDiv) {
-    renderMd(botDiv, botText);
-    saveChatHistory();
-  }
-  busy = false;
-  sendBtn.disabled = false;
-  q.focus();
 }
 
 /* 统一发送入口：发送按钮与"重新生成"共用 */
@@ -1519,6 +1532,7 @@ function submit(text, imgs) {
   ask(text, imgs).catch((e) => { showErrorCard("网络错误：" + e.message); sfx.error(); });
 }
 sendBtn.onclick = () => {
+  if (busy) { chatAbort?.abort(); return; } // 发送中点击 = 停止生成
   const text = q.value.trim();
   const imgs = pendingImages;
   if (!text && imgs.length === 0) return;
