@@ -185,4 +185,31 @@ describe("get_sports_resources Skill（假数据，无网络）", () => {
         expect(r.data!.venues[0].sessions).toHaveLength(0);
         expect(r.data!.note).toContain("未开放");
     });
+
+    it("省略 resourceName 时拒绝（全场景扫描必触发平台限流，2026-08-31）", async () => {
+        let called = 0;
+        const client = {
+            listScenes: async (): Promise<never[]> => { called++; return []; },
+            getFieldPage: async (): Promise<never[]> => [],
+        };
+        const s = createGetSportsResourcesSkill(client as never);
+        const r = (await s.execute({date: "2026-08-29"})) as {success: boolean; error?: {code: string}};
+        expect(r.success).toBe(false);
+        expect(r.error?.code).toBe("INVALID_INPUT");
+        expect(called).toBe(1); // 只调了 listScenes，没碰 getFieldPage
+    });
+
+    it("多个场景都查不到场地数据时，note 提示可能触发限流", async () => {
+        const client = {
+            listScenes: async () => [{uuid: "x1", sceneName: "气膜馆羽毛球", relatedType: "DEV"},
+                {uuid: "x2", sceneName: "综体羽毛球", relatedType: "DEV"}],
+            getFieldPage: async (): Promise<SportsField[]> => [], // 两个场景全空壳
+        };
+        const s = createGetSportsResourcesSkill(client as never);
+        const r = (await s.execute({resourceName: "羽毛球", date: "2026-08-29"})) as {
+            success: boolean; data?: SportsResourcesData;
+        };
+        expect(r.success).toBe(true);
+        expect(r.data!.note).toContain("限流");
+    });
 });
