@@ -1142,35 +1142,56 @@ const micBtn = document.getElementById("mic");
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 const PLACEHOLDER = "有什么想让清灵帮你查的？";
 let rec = null;
+let wantListen = false;   // 用户是否处于聆听状态（区分主动停止与服务端自动断开）
+let voiceBase = "";       // 开始聆听时输入框已有内容
+let voiceText = "";       // 跨实例累计的最终识别文本
+let instanceFinal = "";   // 当前识别实例内已定稿的文本
 if (!SR) {
   // 非 secure context（http://IP 访问）下浏览器不提供语音识别——不再隐藏按钮，
   // 点击时给出可执行的建议（改用 127.0.0.1 访问即可恢复）
   micBtn.onclick = () =>
     toast("当前访问方式不支持语音输入：请用 http://127.0.0.1:3457 打开本页后再试", "err");
 } else {
-  micBtn.onclick = () => {
-    if (rec) { rec.stop(); return; }
-    const base = q.value.trim();
+  const renderVoice = (interim) => {
+    q.value = (voiceBase ? voiceBase + " " : "") + voiceText + instanceFinal + interim;
+    resizeQ();
+  };
+  const resetMicUi = () => {
+    micBtn.classList.remove("recording");
+    micBtn.title = "语音输入";
+    q.placeholder = PLACEHOLDER;
+  };
+  /** 单次识别实例。服务端会在静音/约 60 秒时自动断开，onend 里按 wantListen 自动续听 */
+  const listenOnce = () => {
+    instanceFinal = "";
     rec = new SR();
     rec.lang = "zh-CN";
+    rec.continuous = true;      // 连续识别：不要一句话停顿就自动断
     rec.interimResults = true;
     rec.onresult = (e) => {
-      let text = "";
-      for (const r of e.results) text += r[0].transcript;
-      q.value = (base ? base + " " : "") + text;
-      resizeQ();
+      let interim = "";
+      let final = "";
+      for (let i = 0; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) final += t;
+        else interim += t;
+      }
+      instanceFinal = final;    // 每次全量重算，避免重复累计
+      renderVoice(interim);
     };
     rec.onend = () => {
       rec = null;
-      micBtn.classList.remove("recording");
-      micBtn.title = "语音输入";
-      q.placeholder = PLACEHOLDER;
+      voiceText += instanceFinal;
+      instanceFinal = "";
+      renderVoice("");
+      if (!wantListen) { resetMicUi(); return; }
+      // 自动断开：短暂间隔后续听，保持"点一次持续聆听"的体验
+      setTimeout(() => { if (wantListen && !rec) listenOnce(); }, 200);
     };
     rec.onerror = (e) => {
+      wantListen = false;
       rec = null;
-      micBtn.classList.remove("recording");
-      micBtn.title = "语音输入";
-      q.placeholder = PLACEHOLDER;
+      resetMicUi();
       const why = e.error === "not-allowed" || e.error === "service-not-allowed"
         ? "麦克风权限被拒绝，请在浏览器地址栏允许麦克风后重试"
         : e.error === "network"
@@ -1179,13 +1200,21 @@ if (!SR) {
       toast(why, "err");
       sfx.error();
     };
+    rec.start();
+  };
+  micBtn.onclick = () => {
+    if (rec) { wantListen = false; rec.stop(); return; }
+    wantListen = true;
+    voiceBase = q.value.trim();
+    voiceText = "";
     try {
-      rec.start();
+      listenOnce();
       micBtn.classList.add("recording");
       micBtn.title = "正在聆听，再次点击结束";
       q.placeholder = "聆听中…说完再点一次麦克风";
       toast("开始聆听，说完再点一次麦克风");
-    } catch {
+    } catch (e) {
+      wantListen = false;
       rec = null;
       toast("语音输入启动失败，请重试", "err");
     }
