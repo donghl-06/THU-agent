@@ -939,8 +939,15 @@ function renderMessages(records) {
   scrollDown();
 }
 
+/** 清空聊天区并回到欢迎页。welcome 是 #chat 的子节点，replaceChildren 会把它
+ *  一并删掉导致欢迎页再也出不来（须刷新才恢复），所以清空后要把它放回去 */
+function resetChatView() {
+  chat.replaceChildren(welcome);
+  updateWelcome();
+}
+
 function clearChatHistory() {
-  chat.replaceChildren();
+  resetChatView();
   sessionsState = {sessions: [], activeId: newSessionId()};
   persistSessions();
   renderSessionList();
@@ -996,9 +1003,8 @@ function newChat() {
   sessionsState.sessions.push(fresh);
   sessionsState.activeId = fresh.id;
   persistSessions();
-  chat.replaceChildren();
+  resetChatView();
   renderSessionList();
-  updateWelcome();
   closeSidebarMobile();
   q.focus();
 }
@@ -1010,7 +1016,7 @@ function switchSession(id) {
   saveChatHistory(); // 当前 DOM 归档
   sessionsState.activeId = id;
   persistSessions();
-  chat.replaceChildren();
+  resetChatView();
   renderMessages(activeSession()?.messages ?? []);
   renderSessionList();
 }
@@ -1037,7 +1043,7 @@ function requestDeleteSession(id) {
     sessionsState.sessions.splice(idx, 1);
     if (wasActive) {
       sessionsState.activeId = sessionsState.sessions[0]?.id ?? newSessionId();
-      chat.replaceChildren();
+      resetChatView();
       renderMessages(activeSession()?.messages ?? []);
     }
     persistSessions();
@@ -1134,9 +1140,13 @@ function speak(text) {
 /* ---- 语音输入（WebSpeech，浏览器不支持则隐藏按钮） ---- */
 const micBtn = document.getElementById("mic");
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const PLACEHOLDER = "有什么想让清灵帮你查的？";
 let rec = null;
 if (!SR) {
-  micBtn.style.display = "none";
+  // 非 secure context（http://IP 访问）下浏览器不提供语音识别——不再隐藏按钮，
+  // 点击时给出可执行的建议（改用 127.0.0.1 访问即可恢复）
+  micBtn.onclick = () =>
+    toast("当前访问方式不支持语音输入：请用 http://127.0.0.1:3457 打开本页后再试", "err");
 } else {
   micBtn.onclick = () => {
     if (rec) { rec.stop(); return; }
@@ -1148,13 +1158,37 @@ if (!SR) {
       let text = "";
       for (const r of e.results) text += r[0].transcript;
       q.value = (base ? base + " " : "") + text;
+      resizeQ();
     };
-    rec.onend = () => { rec = null; micBtn.classList.remove("recording"); };
-    rec.onerror = () => { rec = null; micBtn.classList.remove("recording"); };
+    rec.onend = () => {
+      rec = null;
+      micBtn.classList.remove("recording");
+      micBtn.title = "语音输入";
+      q.placeholder = PLACEHOLDER;
+    };
+    rec.onerror = (e) => {
+      rec = null;
+      micBtn.classList.remove("recording");
+      micBtn.title = "语音输入";
+      q.placeholder = PLACEHOLDER;
+      const why = e.error === "not-allowed" || e.error === "service-not-allowed"
+        ? "麦克风权限被拒绝，请在浏览器地址栏允许麦克风后重试"
+        : e.error === "network"
+          ? "语音识别服务连接失败（该功能需要联网）"
+          : "语音识别失败，请重试";
+      toast(why, "err");
+      sfx.error();
+    };
     try {
       rec.start();
       micBtn.classList.add("recording");
-    } catch { rec = null; }
+      micBtn.title = "正在聆听，再次点击结束";
+      q.placeholder = "聆听中…说完再点一次麦克风";
+      toast("开始聆听，说完再点一次麦克风");
+    } catch {
+      rec = null;
+      toast("语音输入启动失败，请重试", "err");
+    }
   };
 }
 
@@ -1317,9 +1351,23 @@ function attachMsgActions(el) {
     return b;
   };
   bar.appendChild(mkBtn("📋", "复制", () => {
-    navigator.clipboard.writeText(el.dataset.raw ?? el.textContent ?? "")
-      .then(() => toast(`已复制${BRAND.name}的回答`, "ok"))
-      .catch(() => toast("复制失败", "err"));
+    const text = el.dataset.raw ?? el.textContent ?? "";
+    const done = () => toast(`已复制${BRAND.name}的回答`, "ok");
+    const fail = () => toast("复制失败，请长按/手动选择复制", "err");
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(done, fail);
+      return;
+    }
+    // 非 secure context（如 http://IP 访问）下 clipboard API 不存在，退回 execCommand
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.cssText = "position:fixed;opacity:0";
+    document.body.appendChild(ta);
+    ta.select();
+    let copied = false;
+    try { copied = document.execCommand("copy"); } catch { /* 忽略 */ }
+    ta.remove();
+    copied ? done() : fail();
   }));
   bar.appendChild(mkBtn("↻", "重新生成", () => {
     if (busy) return;
@@ -1653,6 +1701,8 @@ function handleAuthEvent(data) {
       updateLoginButton();
       if (newlyAuthenticated) {
         toast("✓ 清灵已连接你的清华 Info", "ok");
+        // 刚登录的用户从干净的欢迎页开始（UI 需求：登录后展示"今天想让清灵帮你做什么"）
+        resetChatView();
       }
     }
     setAuthMessage("认证成功，正在继续查询…");
@@ -1937,7 +1987,9 @@ q.addEventListener("keydown", (e) => {
     sendBtn.click();
   }
 });
-renderMessages(activeSession()?.messages ?? []);
+/* 初始只显示欢迎页，不自动恢复上次会话内容（历史会话在侧栏点开查看）——
+   未登录、刚登录、新建对话三种状态都落在同一个干净画面 */
+resetChatView();
 renderSessionList();
 q.focus();
 </script>
