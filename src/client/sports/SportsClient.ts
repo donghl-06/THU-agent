@@ -651,10 +651,15 @@ export class SportsClient {
      * 某场景某天的场地列表（含每块场地的可约状态）。
      * 服务端要求按"房间"维度查询（classTypeEnum=ROOM + classTypeUuid），
      * 否则返回空列表——先走位置级联拿到全部房间，再逐房间查询合并。
+     *
+     * sceneUseType 两轮查询：球类是团体场地模式（SPORT_GROUP）；游泳馆等
+     * 个人票务场馆在团体视角下恒定返回空，必须用个人模式（SPORT_PERSON）
+     * 重查（2026-09-02 用户抓包实锤，8-31"有位报满"的真正根因）。
+     * 球类第一轮就有数据，不会多花请求。
      */
     async getFieldPage(sceneUuid: string, date: string): Promise<SportsField[]> {
         const rooms = await this.listRooms(sceneUuid);
-        const perRoom = await Promise.all(rooms.map((room) =>
+        const query = (sceneUseType: string) => Promise.all(rooms.map((room) =>
             this.api<SportsField[]>("/api/reserve/current/page", {
                 method: "POST",
                 body: {
@@ -666,12 +671,14 @@ export class SportsClient {
                     classTypeEnum: "ROOM",
                     classTypeUuid: room.uuid,
                     reserveDate: date,
-                    sceneUseType: "SPORT_GROUP",
+                    sceneUseType,
                     pageSize: 999,
                     pageNum: 1,
                 },
             }),
         ));
+        let perRoom = await query("SPORT_GROUP");
+        if (perRoom.flat().length === 0) perRoom = await query("SPORT_PERSON");
         return perRoom.flat().map((f) => ({
             uuid: f.uuid,
             siteName: f.siteName,
