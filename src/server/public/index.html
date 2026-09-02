@@ -343,7 +343,7 @@
     font-size: 14px; padding: 3px 8px; border-radius: 7px; cursor: pointer;
   }
   .msg-actions button:hover { background: var(--card-hover); color: var(--text); }
-  .msg-actions button.sel { color: var(--primary-bright); }
+  /* （赞/踩已移除：单用户本地应用反馈无处可去，避免假功能） */
   .qr-card { align-self: flex-start; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; text-align: center; }
   .qr-card img { width: 220px; height: 220px; }
   .qr-card .url { font-size: 12px; color: var(--muted); word-break: break-all; margin-top: 8px; max-width: 260px; }
@@ -1338,7 +1338,7 @@ function renderMd(el, raw) {
   if (el.classList.contains("bot")) attachMsgActions(el);
 }
 
-/* ---- Message Actions：复制 / 重新生成 / 赞踩 ---- */
+/* ---- Message Actions：复制 / 重新生成 ---- */
 function attachMsgActions(el) {
   const bar = document.createElement("div");
   bar.className = "msg-actions";
@@ -1385,16 +1385,6 @@ function attachMsgActions(el) {
     scrollDown(true);
     ask(question, []).catch((e) => { showErrorCard("网络错误：" + e.message); sfx.error(); });
   }));
-  const fb = () => (b) => {
-    const wasSel = b.classList.contains("sel");
-    bar.querySelectorAll("button").forEach((x) => x.classList.remove("sel"));
-    if (!wasSel) {
-      b.classList.add("sel");
-      toast("感谢反馈");
-    }
-  };
-  bar.appendChild(mkBtn("👍", "有帮助", fb()));
-  bar.appendChild(mkBtn("👎", "没帮助", fb()));
   el.appendChild(bar);
 }
 
