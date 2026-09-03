@@ -6,6 +6,9 @@
 import {afterEach, describe, expect, it} from "vitest";
 import type {AddressInfo} from "node:net";
 import type {Server} from "node:http";
+import {readFileSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
 import {Agent} from "../../src/harness/agentLoop";
 import type {LlmClient} from "../../src/harness/llmClient";
 import type {ChatMessage} from "../../src/harness/types";
@@ -627,5 +630,83 @@ describe("Web 服务端", () => {
         await askIn("", "第二问");
         // 两次都落 default：第二问能看见第一问的上下文
         expect(JSON.stringify(llm.seen[1])).toContain("第一问");
+    });
+});
+
+describe("会话持久化（Step 21c）", () => {
+    let server: Server | undefined;
+    let base = "";
+    let storeFile = "";
+
+    afterEach(async () => {
+        if (server) await new Promise((r) => server!.close(r));
+        server = undefined;
+        if (storeFile) {
+            await import("node:fs").then((fs) => fs.rmSync(storeFile, {force: true}));
+            storeFile = "";
+        }
+    });
+
+    /** 起一个带持久化的服务实例；path 缺省时新建临时文件，重启场景显式传同一路径 */
+    async function startPersisted(script: ChatMessage[], path?: string) {
+        storeFile = path ?? join(tmpdir(), `thu-sessions-test-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+        const llm = fakeLlm(script);
+        server = createWebServer((confirm: ConfirmFn) =>
+            new Agent([echoSkill], "测试系统提示", llm, async (call, skill) => confirm(call, skill)),
+            {requireLogin: false, sessionStorePath: storeFile});
+        await new Promise<void>((r) => server!.listen(0, "127.0.0.1", r));
+        base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+        return llm;
+    }
+
+    const askIn = (sessionId: string, question: string) =>
+        fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question, sessionId}),
+        }).then(readSse);
+
+    it("重启（新服务实例）后恢复会话上下文，system 换用新提示词", async () => {
+        const firstFile = join(tmpdir(), `thu-sessions-restart-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+        await startPersisted([textMsg("记住了")], firstFile);
+        await askIn("s_p", "我叫小明");
+        await new Promise((r) => server!.close(r));
+        server = undefined;
+
+        const llm2 = await startPersisted([textMsg("你是小明")], firstFile);
+        await askIn("s_p", "我叫什么？");
+        const restored = JSON.stringify(llm2.seen[0]);
+        expect(restored).toContain("我叫小明");
+        expect(restored).toContain("记住了");
+        // system 是新实例的提示词，不是恢复来的旧文本
+        expect(llm2.seen[0][0].role).toBe("system");
+        expect(llm2.seen[0][0].content).toBe("测试系统提示");
+    });
+
+    it("持久化内容剔除图片 base64，文字保留", async () => {
+        await startPersisted([textMsg("图看到了")]);
+        await fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+                question: "看图",
+                sessionId: "s_img",
+                images: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUg=="],
+            }),
+        }).then(readSse);
+        const raw = readFileSync(storeFile, "utf8");
+        expect(raw).not.toContain("iVBORw0KGgo");
+        expect(raw).toContain("看图");
+    });
+
+    it("destroy 会话同时清除持久化文件中的该会话", async () => {
+        await startPersisted([textMsg("a"), textMsg("b")]);
+        await askIn("s_kill", "橘子暗号");
+        await fetch(`${base}/api/session/destroy`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({sessionId: "s_kill"}),
+        });
+        expect(readFileSync(storeFile, "utf8")).not.toContain("橘子暗号");
     });
 });

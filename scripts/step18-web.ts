@@ -55,7 +55,7 @@ const server = createWebServer(
             () => thuClient!.login(),
         );
     },
-    {port: PORT, indexHtmlPath},
+    {port: PORT, indexHtmlPath, sessionStorePath: join(scriptDirectory, "..", "data", "sessions.json")},
 );
 
 server.listen(PORT, HOST, () => {

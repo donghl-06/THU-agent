@@ -513,7 +513,7 @@ THU-agent/                        ← 项目根（git 仓库）
                     工具失败/确认弹窗/错误各有提示音，顶栏 🔔 可关。
                   单测 156 个全绿（+7：多模态 parts 构造、默认提示语、
                   capabilities、图片校验四条）。
-[进行中] Step 21 会话架构修复（2026-09-04 定案，现存问题：前端已多会话，
+[已完成] Step 21 会话架构修复（2026-09-04 定案，现存问题：前端已多会话，
                   后端仍是单一共享 Agent——切换/新建会话不影响后端上下文，
                   跨会话串味；messages 只增不减；进程重启即失忆）：
                   ① [已完成] 会话隔离：/api/chat 带 sessionId（非法/缺省落
@@ -533,9 +533,15 @@ THU-agent/                        ← 项目根（git 仓库）
                     Agent 构造器加可选 trim 参数（测试可调小阈值）。
                     单测 +4：摘要裁剪/本体不动、整轮淘汰+配对完整、
                     图片占位（旧裁新留）、当前轮不裁。
-                  ③ 会话持久化：messages 落 data/sessions.json（.gitignore），
-                    重启恢复；恢复时换用新 systemPrompt（旧日期会过期）；
-                    图片 parts 只留文字；step18-web 传存储路径，测试不落盘。
+                  ③ [已完成] 会话持久化（src/server/sessionStore.ts，Step 21c）：
+                    messages 落 data/sessions.json（临时文件+rename 原子写，
+                    data/ 进 .gitignore），重启由 getOrCreateAgent 恢复——
+                    system 消息换用新实例的 systemPrompt（旧的带过期日期）；
+                    持久化前净化：去 system、图片 parts 归并纯文本（base64
+                    不落盘）、200 条上限；destroy 同步删盘；持久化失败不影响
+                    服务。Agent 加 snapshotMessages/loadMessages。step18-web
+                    传存储路径，webServer 测试默认不落盘（显式传 tmp 路径）。
+                    单测 +3：重启恢复+新 system、图片剔除、destroy 清盘。
 [计划中] Step 22 复活两个被砍技能（Step 15 时砍掉，前置障碍现已被扫清）：
                   ① get_dorm_score 宿舍卫生：上游返回公示图片，当时文本模型
                     无法消费；现在 vision 已通（Step 20）。Skill 保持零 LLM，

@@ -119,6 +119,16 @@ export class Agent {
         await this.loginHandler();
     }
 
+    /** 只读快照（会话持久化用）：复制数组，消息对象共享 */
+    snapshotMessages(): ChatMessage[] {
+        return [...this.messages];
+    }
+
+    /** 恢复历史（进程重启后由 server 层调用）：整体替换 messages */
+    loadMessages(messages: ChatMessage[]): void {
+        this.messages.splice(0, this.messages.length, ...messages);
+    }
+
     /** 问一个问题，拿到最终回答。多轮对话通过 messages 数组自然延续 */
     async ask(question: string, opts: AskOptions = {}): Promise<AgentRunResult> {
         const messageCheckpoint = this.messages.length;

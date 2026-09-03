@@ -7,6 +7,9 @@ release/
 packaging/**/bin/
 packaging/**/obj/
 
+# 运行时数据（会话持久化等，含对话内容，不进 git）
+data/
+
 # 参考仓库（只读，不进 git）
 reference/
 

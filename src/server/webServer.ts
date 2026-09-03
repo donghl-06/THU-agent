@@ -45,6 +45,7 @@ import {join} from "node:path";
 import type {Agent} from "../harness/agentLoop";
 import type {ConfirmFn} from "../harness/toolRegistry";
 import {config} from "../config/env";
+import {SessionStore} from "./sessionStore";
 import type {LoginCredentials, TwoFactorHooks} from "../client/auth";
 
 /** 确认请求 5 分钟不应答按拒绝处理（防 Promise 悬挂） */
@@ -160,6 +161,11 @@ export interface WebServerOptions {
     indexHtmlPath?: string;
     /** 是否要求先通过 /api/auth/login；生产 Web UI 默认开启。 */
     requireLogin?: boolean;
+    /**
+     * 会话持久化文件路径（Step 21c）。提供时：会话 messages 落盘、
+     * 重启恢复；不提供则纯内存（测试默认不落盘）。
+     */
+    sessionStorePath?: string;
 }
 
 /**
@@ -174,6 +180,7 @@ export function createWebServer(
     const requireLogin = opts.requireLogin ?? true;
     const indexPath = opts.indexHtmlPath ?? join(process.cwd(), "src", "server", "public", "index.html");
     const indexHtml = readFileSync(indexPath, "utf8");
+    const store = opts.sessionStorePath ? new SessionStore(opts.sessionStorePath) : undefined;
 
     // 多会话：前端每个会话一个 Agent（各自 messages 延续上下文，互不串味）。
     // 登录态仍全局共享——agentFactory 侧复用同一 ThuClient，登录一次全会话可用。
@@ -206,7 +213,8 @@ export function createWebServer(
     const normalizeSessionId = (value: unknown): string =>
         typeof value === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(value) ? value : DEFAULT_SESSION;
 
-    /** 取会话 Agent，没有就建（登录态由 factory 侧共享，无需重新登录） */
+    /** 取会话 Agent，没有就建（登录态由 factory 侧共享，无需重新登录；
+     *  配了持久化时新 Agent 恢复该会话的历史——system 换用当前的新提示词） */
     const getOrCreateAgent = (sessionId: string): Agent => {
         const existing = agents.get(sessionId);
         if (existing) {
@@ -216,6 +224,10 @@ export function createWebServer(
             return existing;
         }
         const created = agentFactory(delegatingConfirm, delegatingAuthHooks);
+        const saved = store?.get(sessionId);
+        if (saved?.length) {
+            created.loadMessages([created.snapshotMessages()[0], ...saved]);
+        }
         agents.set(sessionId, created);
         while (agents.size > MAX_SESSION_AGENTS) {
             const oldest = agents.keys().next().value;
@@ -452,9 +464,10 @@ export function createWebServer(
                 sseSend(res, "confirm", {id, name: skill.name, args});
             });
 
+        let sessionAgent: Agent | undefined;
         try {
-            const agent = getOrCreateAgent(sessionId);
-            const result = await agent.ask(question, {
+            sessionAgent = getOrCreateAgent(sessionId);
+            const result = await sessionAgent.ask(question, {
                 onToken: (text) => sseSend(res, "token", {text}),
                 onToolEvent: (e) => sseSend(res, "tool", e),
                 ...(images ? {images} : {}),
@@ -491,6 +504,8 @@ export function createWebServer(
                 activeChatDone = undefined;
                 resolveChatDone();
             }
+            // 会话上下文落盘（ask 失败时已回滚到问前状态，落盘内容一致）
+            if (store && sessionAgent) store.set(sessionId, sessionAgent.snapshotMessages());
             res.end();
         }
     };
@@ -522,8 +537,11 @@ export function createWebServer(
         }
         if (parsed.all === true) {
             agents.clear();
+            store?.clear();
         } else {
-            agents.delete(normalizeSessionId(parsed.sessionId));
+            const sid = normalizeSessionId(parsed.sessionId);
+            agents.delete(sid);
+            store?.delete(sid);
         }
         res.writeHead(200, {"Content-Type": "application/json"}).end("{}");
     };
