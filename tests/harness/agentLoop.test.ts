@@ -423,6 +423,36 @@ describe("Step 17 性能优化行为", () => {
         expect(r.answer).toContain("如实告知");
     });
 
+    it("工具结果带 imagesBase64 时追加带图 user 消息；vision 关闭时不追加", async () => {
+        const imgSkill: Skill = {
+            name: "with_image",
+            description: "返回公示图，仅测试用",
+            inputSchema: {type: "object", properties: {}},
+            async execute() { return ok({note: "图", imagesBase64: ["cHJ2anBnZGF0YQ=="]}); },
+        };
+        const llm = fakeLlm([toolCallMsg("with_image", {}), textMsg("根据图回答")]);
+        const agent = new Agent([imgSkill], "系统", llm);
+        await agent.ask("查宿舍卫生");
+        const secondCall = llm.seen[1];
+        const imgMsg = secondCall.find((m) => m.role === "user" && Array.isArray(m.content));
+        expect(imgMsg).toBeDefined();
+        const parts = imgMsg!.content as {type: string; text?: string; image_url?: {url: string}}[];
+        expect(parts.some((p) => p.type === "image_url" && p.image_url?.url === "data:image/jpeg;base64,cHJ2anBnZGF0YQ==")).toBe(true);
+
+        // vision 关闭（LLM_VISION=0）→ 不追加图片消息
+        const prev = process.env.LLM_VISION;
+        process.env.LLM_VISION = "0";
+        try {
+            const llm2 = fakeLlm([toolCallMsg("with_image", {}), textMsg("答")]);
+            const agent2 = new Agent([imgSkill], "系统", llm2);
+            await agent2.ask("再查一次");
+            expect(llm2.seen[1].find((m) => m.role === "user" && Array.isArray(m.content))).toBeUndefined();
+        } finally {
+            if (prev === undefined) delete process.env.LLM_VISION;
+            else process.env.LLM_VISION = prev;
+        }
+    });
+
     it("LLM 多轮回报 usage 时按轮累计到 ask 结果；没有 usage 则缺省", async () => {
         const script = [toolCallMsg("echo", {}), textMsg("完")];
         const llmWithUsage: LlmClient = {

@@ -19,6 +19,7 @@
 import type {Skill} from "../skills/base/types";
 import {createLlmClient, type LlmClient} from "./llmClient";
 import {ToolRegistry, type ConfirmFn} from "./toolRegistry";
+import {config} from "../config/env";
 import type {ChatMessage, TokenUsage} from "./types";
 
 /** 单轮对话最多允许的工具调用轮数（防模型失控死循环） */
@@ -183,6 +184,21 @@ export class Agent {
                     toolCalls.push({name: calls[i].function.name, input: calls[i].function.arguments, result});
                     this.messages.push({role: "tool", tool_call_id: calls[i].id, content: result});
                 }
+                // 工具带图（如宿舍卫生公示图）：OpenAI 协议 tool 消息只能是字符串，
+                // 图以"带图 user 消息"追加在工具结果之后喂给 vision 模型（Step 20/22a）
+                const toolImages = this.collectToolImages(results);
+                if (toolImages.length > 0) {
+                    this.messages.push({
+                        role: "user",
+                        content: [
+                            {type: "text", text: "（以上工具返回了公示图片，请结合图片内容回答。）"},
+                            ...toolImages.map((b64) => ({
+                                type: "image_url" as const,
+                                image_url: {url: b64.startsWith("data:") ? b64 : `data:image/jpeg;base64,${b64}`},
+                            })),
+                        ],
+                    });
+                }
             }
             throw new Error(`工具调用超过 ${MAX_TOOL_ROUNDS} 轮仍未收敛，已中止（疑似模型行为异常）。`);
         } catch (error) {
@@ -218,9 +234,24 @@ export class Agent {
         return [...head, ...kept, ...current];
     }
 
+    /** 从工具结果 JSON 里提取 base64 图（data.imagesBase64）；vision 关闭时忽略 */
+    private collectToolImages(results: string[]): string[] {
+        if (!config.llm.vision) return [];
+        const images: string[] = [];
+        for (const raw of results) {
+            try {
+                const parsed = JSON.parse(raw) as {data?: {imagesBase64?: unknown}};
+                const arr = Array.isArray(parsed.data?.imagesBase64) ? parsed.data.imagesBase64 : [];
+                for (const img of arr) {
+                    if (typeof img === "string" && img.length > 0) images.push(img);
+                }
+            } catch { /* 非 JSON 结果无图 */ }
+        }
+        return images.slice(0, 4);
+    }
+
     /** 旧轮单条消息瘦身：超长工具结果 → 摘要；图片 parts → 占位文本 */
-    private slimForView(m: ChatMessage): ChatMessage {
-        if (m.role === "tool" && typeof m.content === "string" && m.content.length > this.trim.toolResultKeepChars) {
+    private slimForView(m: ChatMessage): ChatMessage {        if (m.role === "tool" && typeof m.content === "string" && m.content.length > this.trim.toolResultKeepChars) {
             let note = `历史工具结果已省略（原文 ${m.content.length} 字符）`;
             try {
                 const parsed = JSON.parse(m.content) as {success?: boolean; error?: {code?: string}};

@@ -12,6 +12,7 @@ import {createGetLibrarySeatsSkill} from "./library/getLibrarySeats";
 import {createGetSportsResourcesSkill} from "./sports/getSportsResources";
 import {createGetReportSkill} from "./academic/getReport";
 import {createGetElectricitySkill} from "./dorm/getElectricity";
+import {createGetDormScoreSkill} from "./dorm/getDormScore";
 import {createGetLibraryRoomsSkill} from "./library/getLibraryRooms";
 import {createBookSportsFieldSkill, type CaptchaSolver} from "./sports/bookSportsField";
 import {createGetMyLibraryBookingsSkill} from "./library/getMyLibraryBookings";
@@ -63,6 +64,8 @@ export function createAllSkills(opts: SkillAssemblyOptions = {}): Skill[] {
         createGetReportSkill(thu),
         createGetElectricitySkill(thu, new MyhomeClient()),
         createGetLibraryRoomsSkill(thu),
+        // Step 22a：宿舍卫生成绩（公示图 → vision 模型读，Step 15 时因纯文本模型搁置）
+        createGetDormScoreSkill(thu),
         // Step 16：我的图书馆预约（取消场景前置查询）
         createGetMyLibraryBookingsSkill(thu),
         // 写操作：Harness 会在执行前向用户确认（requiresConfirmation）

@@ -172,6 +172,11 @@ export class ThuClient {
         return this.call(() => this.helper.getEleRemainder());
     }
 
+    /** 获取宿舍卫生成绩公示图（uFetch 对 image/* 返回 base64，交给 vision 模型读） */
+    async getDormScore(): ReturnType<InfoHelper["getDormScore"]> {
+        return this.call(() => this.helper.getDormScore());
+    }
+
     /** 获取宿舍电费缴费记录（[账号, 订单号, 时间, 渠道, 金额, 状态][] 元组） */
     async getElePayRecord(): ReturnType<InfoHelper["getElePayRecord"]> {
         return this.call(() => this.helper.getElePayRecord());

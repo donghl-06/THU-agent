@@ -542,11 +542,18 @@ THU-agent/                        ← 项目根（git 仓库）
                     服务。Agent 加 snapshotMessages/loadMessages。step18-web
                     传存储路径，webServer 测试默认不落盘（显式传 tmp 路径）。
                     单测 +3：重启恢复+新 system、图片剔除、destroy 清盘。
-[计划中] Step 22 复活两个被砍技能（Step 15 时砍掉，前置障碍现已被扫清）：
-                  ① get_dorm_score 宿舍卫生：上游返回公示图片，当时文本模型
-                    无法消费；现在 vision 已通（Step 20）。Skill 保持零 LLM，
-                    结果带 imagesBase64；agentLoop 在 tool 消息后追加带图
-                    user 消息喂 vision 模型。
+[进行中] Step 22 复活两个被砍技能（Step 15 时砍掉，前置障碍现已被扫清）：
+                  ① [已完成] get_dorm_score 宿舍卫生：ThuClient 包装
+                    helper.getDormScore（实测确认 lib uFetch 对 image/*
+                    Content-Type 返回 base64，公示图数据合法）；Skill 保持
+                    零 LLM，结果 data.imagesBase64 带出；agentLoop 新增
+                    collectToolImages——工具结果带图时在 tool 消息后追加
+                    带图 user 消息（OpenAI 协议 tool 消息只能字符串），
+                    LLM_VISION=0 时不追加；DormAuthError（无 message 的
+                    LIB_ERROR）转 DORM_SCORE_UNAVAILABLE 友好提示。
+                    单测 +5（skill 4 + agentLoop 带图 1）。
+                    ⚠ 真链验证待做：需要 Web UI 登录后问"宿舍卫生成绩"，
+                    确认 vision 模型能读公示图报分。
                   ② get_network_status 校园网（usereg）：当时卡图形验证码；
                     超级鹰通道已在体育预约跑通（复用）。UseregClient 独立
                     cookie jar（m.myhome 教训）：验证码图 → 识别 → 登录 →
