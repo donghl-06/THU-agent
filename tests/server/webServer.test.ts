@@ -14,11 +14,14 @@ import type {TwoFactorHooks} from "../../src/client/auth";
 import {ok, type Skill} from "../../src/skills/base/types";
 import {createWebServer} from "../../src/server/webServer";
 
-/** 脚本化假 LLM（沿用 harness 测试的模式） */
-function fakeLlm(script: ChatMessage[]): LlmClient {
+/** 脚本化假 LLM（沿用 harness 测试的模式）；seen 记录每轮收到的完整 messages */
+function fakeLlm(script: ChatMessage[]): LlmClient & {seen: ChatMessage[][]} {
     let i = 0;
+    const seen: ChatMessage[][] = [];
     return {
-        async chat() {
+        seen,
+        async chat(messages) {
+            seen.push([...messages]);
             const next = script[i++];
             if (!next) throw new Error("假 LLM 脚本已耗尽");
             return next;
@@ -560,5 +563,69 @@ describe("Web 服务端", () => {
             body: JSON.stringify({question: "看图", images: "data:image/png;base64,xx"}),
         });
         expect(resp.status).toBe(400);
+    });
+
+    /** 起服务：所有会话共享同一个脚本化 LLM（跨会话观察上下文串扰用） */
+    async function startWithSharedLlm(script: ChatMessage[], skills: Skill[] = [echoSkill]) {
+        const llm = fakeLlm(script);
+        server = createWebServer((confirm: ConfirmFn) =>
+            new Agent(skills, "测试", llm, async (call, skill) => confirm(call, skill)), {requireLogin: false});
+        await new Promise<void>((r) => server!.listen(0, "127.0.0.1", r));
+        base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+        return llm;
+    }
+
+    const askIn = (sessionId: string, question: string) =>
+        fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question, sessionId}),
+        }).then(readSse);
+
+    it("不同 sessionId 的会话上下文互不串扰", async () => {
+        const llm = await startWithSharedLlm([textMsg("好的小明"), textMsg("好的小红"), textMsg("你叫小明")]);
+        await askIn("s_aaa", "我叫小明");
+        await askIn("s_bbb", "我叫小红");
+        await askIn("s_aaa", "我叫什么？");
+        // 第三问（s_aaa）的上下文应含 s_aaa 的历史、绝不含 s_bbb 的
+        const thirdCall = JSON.stringify(llm.seen[2]);
+        expect(thirdCall).toContain("小明");
+        expect(thirdCall).not.toContain("小红");
+    });
+
+    it("destroy 会话后对应上下文清空", async () => {
+        const llm = await startWithSharedLlm([textMsg("记住了"), textMsg("你还没告诉过我名字")]);
+        await askIn("s_del", "我叫小明");
+        const destroy = await fetch(`${base}/api/session/destroy`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({sessionId: "s_del"}),
+        });
+        expect(destroy.status).toBe(200);
+        await askIn("s_del", "我叫什么？");
+        expect(JSON.stringify(llm.seen[1])).not.toContain("小明");
+    });
+
+    it("destroy all 清空全部会话上下文", async () => {
+        const llm = await startWithSharedLlm([textMsg("a1"), textMsg("b1"), textMsg("ok")]);
+        await askIn("s_x1", "橘子味暗号");
+        await askIn("s_x2", "香蕉味暗号");
+        await fetch(`${base}/api/session/destroy`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({all: true}),
+        });
+        await askIn("s_x1", "暗号是什么？");
+        const lastCall = JSON.stringify(llm.seen[2]);
+        expect(lastCall).not.toContain("橘子");
+        expect(lastCall).not.toContain("香蕉");
+    });
+
+    it("非法 sessionId 落到默认会话（不报错）", async () => {
+        const llm = await startWithSharedLlm([textMsg("一问"), textMsg("二问")]);
+        await askIn("../evil", "第一问");
+        await askIn("", "第二问");
+        // 两次都落 default：第二问能看见第一问的上下文
+        expect(JSON.stringify(llm.seen[1])).toContain("第一问");
     });
 });

@@ -951,6 +951,12 @@ function clearChatHistory() {
   sessionsState = {sessions: [], activeId: newSessionId()};
   persistSessions();
   renderSessionList();
+  // 后端各会话的上下文一并销毁（logout 时服务端已清，这里兜底覆盖其他调用方）
+  fetch("/api/session/destroy", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({all: true}),
+  }).catch(() => {});
 }
 
 /* ---- 会话栏交互：新建 / 切换 / 删除 ---- */
@@ -1040,7 +1046,14 @@ function requestDeleteSession(id) {
     deleteTargetId = null;
     if (idx < 0) return;
     const wasActive = sessionsState.sessions[idx].id === sessionsState.activeId;
+    const deletedId = sessionsState.sessions[idx].id;
     sessionsState.sessions.splice(idx, 1);
+    // 后端对应会话的上下文一并销毁，防止"删掉的会话"在服务端复活
+    fetch("/api/session/destroy", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({sessionId: deletedId}),
+    }).catch(() => {});
     if (wasActive) {
       sessionsState.activeId = sessionsState.sessions[0]?.id ?? newSessionId();
       resetChatView();
@@ -1855,7 +1868,7 @@ async function ask(question, images) {
     const resp = await fetch("/api/chat", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({question, ...(images?.length ? {images} : {})}),
+      body: JSON.stringify({question, sessionId: sessionsState.activeId, ...(images?.length ? {images} : {})}),
       signal: chatAbort.signal,
     });
     if (!resp.ok) {

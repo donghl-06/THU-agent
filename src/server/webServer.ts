@@ -10,7 +10,9 @@
  * 接口：
  *   GET  /              → 单页前端
  *   GET  /api/capabilities → {vision}  前端据此显隐图片上传入口
- *   POST /api/chat      → {question, images?} → SSE 流，事件：
+ *   POST /api/chat      → {question, sessionId?, images?} → SSE 流，事件：
+ *       （sessionId 标识前端会话，缺省/非法落到 "default"；每个会话一个
+ *         Agent 各自延续上下文，但共享同一登录态——见 agentFactory 实现）
  *       （images 为 data URL 数组，最多 4 张、每张 base64 不超过 6MB 字符；
  *         仅当端点支持 vision 时可用，见 config.llm.vision）
  *       token   {text}                    回答的流式片段
@@ -23,6 +25,7 @@
  *       done    {}                        本轮结束
  *       error   {message}                 出错
  *   POST /api/chat/cancel → 中止当前问答并等待服务端完成清理
+ *   POST /api/session/destroy → {sessionId} 或 {all:true} 销毁后端会话上下文
  *   POST /api/confirm   → {id, approved} 应答确认请求
  *   POST /api/auth/login  → {username, password} → SSE 登录流
  *   GET  /api/auth/status → {authenticated}
@@ -172,8 +175,13 @@ export function createWebServer(
     const indexPath = opts.indexHtmlPath ?? join(process.cwd(), "src", "server", "public", "index.html");
     const indexHtml = readFileSync(indexPath, "utf8");
 
-    // 单用户会话：整个服务共享一个 Agent（多轮对话靠它的 messages 延续）
-    let agent: Agent | undefined;
+    // 多会话：前端每个会话一个 Agent（各自 messages 延续上下文，互不串味）。
+    // 登录态仍全局共享——agentFactory 侧复用同一 ThuClient，登录一次全会话可用。
+    const agents = new Map<string, Agent>();
+    /** 缺省/非法 sessionId 的落点（兼容不带 sessionId 的调用方与旧测试） */
+    const DEFAULT_SESSION = "default";
+    /** 会话 Agent 上限（LRU 淘汰最久未用的，防长驻进程泄漏） */
+    const MAX_SESSION_AGENTS = 50;
     let authenticated = false;
     /** 当前轮的确认桥（busy 互斥保证只有一轮在跑） */
     let currentConfirm: ConfirmFn = async () => false;
@@ -192,6 +200,29 @@ export function createWebServer(
             currentAuthHooks.twoFactorMethodHook?.(hasWeChatBool, phone, hasTotp) ?? Promise.resolve(undefined),
         twoFactorAuthHook: () => currentAuthHooks.twoFactorAuthHook?.() ?? Promise.resolve(undefined),
         onLoginSuccess: () => currentAuthHooks.onLoginSuccess?.(),
+    };
+
+    /** 前端会话 id 白名单字符（对齐 localStorage 侧生成的 s_xxx 格式）；非法一律落 default */
+    const normalizeSessionId = (value: unknown): string =>
+        typeof value === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(value) ? value : DEFAULT_SESSION;
+
+    /** 取会话 Agent，没有就建（登录态由 factory 侧共享，无需重新登录） */
+    const getOrCreateAgent = (sessionId: string): Agent => {
+        const existing = agents.get(sessionId);
+        if (existing) {
+            // Map 迭代按插入序：重插一次即刷新 LRU 新鲜度
+            agents.delete(sessionId);
+            agents.set(sessionId, existing);
+            return existing;
+        }
+        const created = agentFactory(delegatingConfirm, delegatingAuthHooks);
+        agents.set(sessionId, created);
+        while (agents.size > MAX_SESSION_AGENTS) {
+            const oldest = agents.keys().next().value;
+            if (oldest === undefined || oldest === sessionId) break;
+            agents.delete(oldest);
+        }
+        return created;
     };
 
     const closePendingAuth = (): void => {
@@ -306,14 +337,16 @@ export function createWebServer(
         });
 
         try {
-            agent = agentFactory(delegatingConfirm, delegatingAuthHooks, credentials);
-            await agent.login();
+            const loginAgent = agentFactory(delegatingConfirm, delegatingAuthHooks, credentials);
+            await loginAgent.login();
             authenticated = true;
+            // 默认会话直接复用登录建的 Agent；其余会话按需新建（共享同一登录态）
+            agents.set(DEFAULT_SESSION, loginAgent);
             if (!authSuccessSent) sseSend(res, "auth", {phase: "success"});
             sseSend(res, "done", {});
         } catch (e) {
             authenticated = false;
-            agent = undefined;
+            agents.delete(DEFAULT_SESSION);
             sseSend(res, "auth", {phase: "error", message: (e as Error).message});
             sseSend(res, "done", {});
         } finally {
@@ -334,7 +367,7 @@ export function createWebServer(
             res.writeHead(409).end("another operation is in flight");
             return;
         }
-        agent = undefined;
+        agents.clear();
         authenticated = false;
         res.writeHead(200, {"Content-Type": "application/json"});
         res.end(JSON.stringify({authenticated: false}));
@@ -348,12 +381,13 @@ export function createWebServer(
             res.writeHead(409).end("another question is in flight");
             return;
         }
-        if (requireLogin && (!authenticated || !agent)) {
+        if (requireLogin && !authenticated) {
             res.writeHead(401).end("请先点击右上角“登录”并完成清华账号认证");
             return;
         }
         let question: string;
         let images: string[] | undefined;
+        let sessionId: string;
         let rawBody: string;
         try {
             rawBody = await readBody(req);
@@ -362,7 +396,7 @@ export function createWebServer(
             return;
         }
         try {
-            const parsed = JSON.parse(rawBody) as {question?: unknown; images?: unknown};
+            const parsed = JSON.parse(rawBody) as {question?: unknown; images?: unknown; sessionId?: unknown};
             const imgErr = validateImages(parsed.images);
             if (imgErr) {
                 res.writeHead(400).end(imgErr);
@@ -373,6 +407,7 @@ export function createWebServer(
                 return;
             }
             images = parsed.images as string[] | undefined;
+            sessionId = normalizeSessionId(parsed.sessionId);
             if (typeof parsed.question !== "string") throw new Error();
             question = parsed.question.trim();
             if (!question && !images) throw new Error();
@@ -418,7 +453,7 @@ export function createWebServer(
             });
 
         try {
-            agent ??= agentFactory(delegatingConfirm, delegatingAuthHooks);
+            const agent = getOrCreateAgent(sessionId);
             const result = await agent.ask(question, {
                 onToken: (text) => sseSend(res, "token", {text}),
                 onToolEvent: (e) => sseSend(res, "tool", e),
@@ -474,6 +509,23 @@ export function createWebServer(
         await done;
         res.writeHead(200, {"Content-Type": "application/json"});
         res.end(JSON.stringify({cancelled: true}));
+    };
+
+    /** 销毁后端会话上下文：前端删会话/清空历史时调用，防止残留上下文复活 */
+    const handleSessionDestroy = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+        let parsed: {sessionId?: unknown; all?: unknown};
+        try {
+            parsed = JSON.parse(await readBody(req)) as {sessionId?: unknown; all?: unknown};
+        } catch {
+            res.writeHead(400).end("bad json");
+            return;
+        }
+        if (parsed.all === true) {
+            agents.clear();
+        } else {
+            agents.delete(normalizeSessionId(parsed.sessionId));
+        }
+        res.writeHead(200, {"Content-Type": "application/json"}).end("{}");
     };
 
     const handleAuthMethod = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
@@ -581,6 +633,7 @@ export function createWebServer(
             if (req.method === "POST" && url.pathname === "/api/auth/login") return handleAuthLogin(req, res);
             if (req.method === "POST" && url.pathname === "/api/auth/logout") return handleAuthLogout(res);
             if (req.method === "POST" && url.pathname === "/api/chat/cancel") return handleChatCancel(res);
+            if (req.method === "POST" && url.pathname === "/api/session/destroy") return handleSessionDestroy(req, res);
             if (req.method === "POST" && url.pathname === "/api/chat") return handleChat(req, res);
             if (req.method === "POST" && url.pathname === "/api/confirm") return handleConfirm(req, res);
             if (req.method === "POST" && url.pathname === "/api/auth/method") return handleAuthMethod(req, res);

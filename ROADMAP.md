@@ -513,12 +513,17 @@ THU-agent/                        ← 项目根（git 仓库）
                     工具失败/确认弹窗/错误各有提示音，顶栏 🔔 可关。
                   单测 156 个全绿（+7：多模态 parts 构造、默认提示语、
                   capabilities、图片校验四条）。
-[计划中] Step 21 会话架构修复（2026-09-04 定案，现存问题：前端已多会话，
+[进行中] Step 21 会话架构修复（2026-09-04 定案，现存问题：前端已多会话，
                   后端仍是单一共享 Agent——切换/新建会话不影响后端上下文，
                   跨会话串味；messages 只增不减；进程重启即失忆）：
-                  ① 会话隔离：/api/chat 带 sessionId，后端 Map<sessionId, Agent>，
-                    多 Agent 共享同一 ThuClient 登录态（登录一次全会话可用）；
-                    新增会话销毁端点；logout 清全部；LRU 上限防泄漏。
+                  ① [已完成] 会话隔离：/api/chat 带 sessionId（非法/缺省落
+                    "default"），后端 Map<sessionId, Agent>（LRU 50 上限防泄漏）；
+                    step18-web 的 ThuClient 提到 factory 外只建一次，所有会话
+                    Agent 共享同一登录态，换会话不用重新登录；新增
+                    POST /api/session/destroy（单个/all）删会话时销毁后端上下文；
+                    logout 清全部；登录成功建的 Agent 落在 default 会话。
+                    前端 ask 带活跃会话 id，删会话/清空历史时调 destroy。
+                    单测 +4：跨会话不串味、destroy 单个、destroy all、非法 id 兜底。
                   ② 上下文裁剪：发送视图两级裁剪（不动存储本体）——
                     旧轮超长 tool 结果裁成一行摘要；超过轮数上限整轮淘汰
                     （保持 assistant.tool_calls↔tool 消息配对完整性）；

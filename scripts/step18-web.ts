@@ -41,15 +41,18 @@ const SYSTEM_PROMPT = `你是"清灵"（QingLing），一个帮清华学生查�
 5. 回答简洁口语化，像同学之间说话。`;
 
 // 认证由 Web UI 按需触发；需要二次认证时通过 SSE 弹窗与后端交互
+// 多会话：每个前端会话一个 Agent，但 ThuClient 只建一次——
+// 所有会话共享同一登录态，换会话不用重新登录。
+let thuClient: ThuClient | undefined;
 const server = createWebServer(
     (confirm: ConfirmFn, authHooks, credentials?: LoginCredentials) => {
-        const thuClient = new ThuClient(authHooks, credentials);
+        thuClient ??= new ThuClient(authHooks, credentials);
         return new Agent(
             createAllSkills({prewarm: false, authHooks, credentials, thuClient}),
             SYSTEM_PROMPT,
             undefined,
             confirm,
-            () => thuClient.login(),
+            () => thuClient!.login(),
         );
     },
     {port: PORT, indexHtmlPath},
