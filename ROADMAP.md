@@ -570,18 +570,30 @@ THU-agent/                        ← 项目根（git 仓库）
                     单测 +4：本地假 usereg 站点全链路（RSA 密文用测试私钥
                     解密校验、错码换图重试、三连败报错、skill 降级）。
                     ⚠ 真链验证待做：需校园网环境 + 超级鹰配置实测登录与解析。
-[计划中] Step 23 主动式能力（从被动应答到主动 Agent）：
+[已完成] Step 23 主动式能力（从被动应答到主动 Agent）：
                   核心设计：LLM 只负责"创建任务"（走确认流），到点执行走
                   确定性代码路径直接调 skill.execute，不再烧 LLM。
-                  ① 任务模型 + 进程内 scheduler：reminder（到点提醒）/
-                    monitor（条件查询如低电费）/booking（到点预约）三类，
-                    JSON 文件存储重启恢复，不引任务队列。
-                  ② 通知通道：前端轮询 /api/notifications + toast + 音效 +
-                    浏览器 Notification API。
-                  ③ 定时抢场：到点预热登录 → 直接走 bookSportsField 链路
-                    （超级鹰过滑块）；执行前查未支付订单（Step 13 坑④：
-                    有未支付订单时一切新预约被拒）。
-[计划中] 小项（穿插在大步骤之间，不单独占步骤号）：
+                  ① 任务模型 + 进程内 scheduler（src/tasks/）：
+                    reminder/monitor（电费监控，m.myhome 查电量低于阈值触发，
+                    未触发按间隔顺延）/booking 三类；TaskStore 落盘
+                    data/tasks.json 重启恢复；30s 轮询不引任务队列；
+                    过期保护——booking 落后超 10 分钟拒绝执行（服务停摆后
+                    重启绝不突然下单），转"已过期"通知；执行异常转失败通知。
+                  ② 通知通道：NotificationHub + GET /api/notifications
+                    （drain 即消费）+ 前端 30s 轮询 → toast + 音效 +
+                    浏览器 Notification（首次点击静默请求权限）；
+                    GET /api/tasks、POST /api/tasks/cancel。
+                  ③ 任务类技能（仅装配 scheduler 的环境提供）：
+                    create_reminder / schedule_sports_booking（均确认流；
+                    抢场 payType 创建时必填，执行时不再问）/
+                    list_my_tasks / cancel_task；sessionId 经
+                    AsyncLocalStorage 从 server 层透传（模型无感知）；
+                    抢场执行器直接调 bookSportsField.execute（独立
+                    SportsClient + 超级鹰）；system prompt 增任务类引导规则。
+                  未能真实抢场端到端（需真 6 点场次），已用单测覆盖执行器
+                  合同（成功消息/失败消息/过期拒绝/异常转通知）。
+                  ⚠ 真链验证待做：真实抢场一次 + 低电费触发一次。
+[已完成] 小项（穿插在大步骤之间，不单独占步骤号）：
                   ① [已完成] Token 统计：llmClient 解析 usage（流式加
                     stream_options.include_usage，端点报 400 不认识该字段时
                     自动去字段重发），Agent 按轮累计进 AgentRunResult，

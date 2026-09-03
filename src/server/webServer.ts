@@ -27,6 +27,9 @@
  *       error   {message}                 出错
  *   POST /api/chat/cancel → 中止当前问答并等待服务端完成清理
  *   POST /api/session/destroy → {sessionId} 或 {all:true} 销毁后端会话上下文
+ *   GET  /api/notifications → {notifications} 任务执行通知（drain 即消费，前端 30s 轮询）
+ *   GET  /api/tasks         → {tasks} 定时任务列表
+ *   POST /api/tasks/cancel  → {id} 取消定时任务
  *   POST /api/confirm   → {id, approved} 应答确认请求
  *   POST /api/auth/login  → {username, password} → SSE 登录流
  *   GET  /api/auth/status → {authenticated}
@@ -48,6 +51,9 @@ import type {ConfirmFn} from "../harness/toolRegistry";
 import type {TokenUsage} from "../harness/types";
 import {config} from "../config/env";
 import {SessionStore} from "./sessionStore";
+import {NotificationHub} from "./notificationHub";
+import {taskSessionContext} from "../tasks/sessionContext";
+import type {TaskScheduler} from "../tasks/scheduler";
 import type {LoginCredentials, TwoFactorHooks} from "../client/auth";
 
 /** 确认请求 5 分钟不应答按拒绝处理（防 Promise 悬挂） */
@@ -176,6 +182,10 @@ export interface WebServerOptions {
      * 重启恢复；不提供则纯内存（测试默认不落盘）。
      */
     sessionStorePath?: string;
+    /** 任务调度器（Step 23）。提供时暴露 /api/tasks 查询与取消端点 */
+    scheduler?: TaskScheduler;
+    /** 通知中心（Step 23）。提供时暴露 /api/notifications 轮询端点 */
+    notificationHub?: NotificationHub;
 }
 
 /**
@@ -191,6 +201,8 @@ export function createWebServer(
     const indexPath = opts.indexHtmlPath ?? join(process.cwd(), "src", "server", "public", "index.html");
     const indexHtml = readFileSync(indexPath, "utf8");
     const store = opts.sessionStorePath ? new SessionStore(opts.sessionStorePath) : undefined;
+    const scheduler = opts.scheduler;
+    const hub = opts.notificationHub;
 
     // 多会话：前端每个会话一个 Agent（各自 messages 延续上下文，互不串味）。
     // 登录态仍全局共享——agentFactory 侧复用同一 ThuClient，登录一次全会话可用。
@@ -477,12 +489,13 @@ export function createWebServer(
         let sessionAgent: Agent | undefined;
         try {
             sessionAgent = getOrCreateAgent(sessionId);
-            const result = await sessionAgent.ask(question, {
+            // 任务类 skill 需要知道归属会话（通知回传定位）；经 AsyncLocalStorage 透传
+            const result = await taskSessionContext.run(sessionId, () => sessionAgent!.ask(question, {
                 onToken: (text) => sseSend(res, "token", {text}),
                 onToolEvent: (e) => sseSend(res, "tool", e),
                 ...(images ? {images} : {}),
                 signal: chatAbort.signal,
-            });
+            }));
             const authFailure = result.toolCalls
                 .map((toolCall) => extractAuthFailure(toolCall.result))
                 .find((message): message is string => Boolean(message));
@@ -558,6 +571,51 @@ export function createWebServer(
             store?.delete(sid);
         }
         res.writeHead(200, {"Content-Type": "application/json"}).end("{}");
+    };
+
+    /** 任务执行通知：前端轮询取走（drain 即消费） */
+    const handleNotifications = (res: ServerResponse): void => {
+        if (requireLogin && !authenticated) {
+            res.writeHead(401).end("not authenticated");
+            return;
+        }
+        res.writeHead(200, {"Content-Type": "application/json"});
+        res.end(JSON.stringify({notifications: hub ? hub.drain() : []}));
+    };
+
+    /** 定时任务列表（给前端展示/调试；对话内 list_my_tasks 也可查） */
+    const handleTaskList = (res: ServerResponse): void => {
+        if (requireLogin && !authenticated) {
+            res.writeHead(401).end("not authenticated");
+            return;
+        }
+        res.writeHead(200, {"Content-Type": "application/json"});
+        res.end(JSON.stringify({tasks: scheduler ? scheduler.list() : []}));
+    };
+
+    /** 取消定时任务 */
+    const handleTaskCancel = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+        if (!scheduler) {
+            res.writeHead(404).end("scheduler unavailable");
+            return;
+        }
+        let parsed: {id?: unknown};
+        try {
+            parsed = JSON.parse(await readBody(req)) as {id?: unknown};
+        } catch {
+            res.writeHead(400).end("bad json");
+            return;
+        }
+        if (typeof parsed.id !== "string" || !parsed.id.trim()) {
+            res.writeHead(400).end("id required");
+            return;
+        }
+        const task = scheduler.cancel(parsed.id.trim());
+        if (!task) {
+            res.writeHead(404).end("task not found or already finished");
+            return;
+        }
+        res.writeHead(200, {"Content-Type": "application/json"}).end(JSON.stringify({cancelled: task.id}));
     };
 
     const handleAuthMethod = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
@@ -666,6 +724,9 @@ export function createWebServer(
             if (req.method === "POST" && url.pathname === "/api/auth/logout") return handleAuthLogout(res);
             if (req.method === "POST" && url.pathname === "/api/chat/cancel") return handleChatCancel(res);
             if (req.method === "POST" && url.pathname === "/api/session/destroy") return handleSessionDestroy(req, res);
+            if (req.method === "GET" && url.pathname === "/api/notifications") return handleNotifications(res);
+            if (req.method === "GET" && url.pathname === "/api/tasks") return handleTaskList(res);
+            if (req.method === "POST" && url.pathname === "/api/tasks/cancel") return handleTaskCancel(req, res);
             if (req.method === "POST" && url.pathname === "/api/chat") return handleChat(req, res);
             if (req.method === "POST" && url.pathname === "/api/confirm") return handleConfirm(req, res);
             if (req.method === "POST" && url.pathname === "/api/auth/method") return handleAuthMethod(req, res);

@@ -16,6 +16,9 @@ import type {ConfirmFn} from "../../src/harness/toolRegistry";
 import type {TwoFactorHooks} from "../../src/client/auth";
 import {ok, type Skill} from "../../src/skills/base/types";
 import {createWebServer} from "../../src/server/webServer";
+import {NotificationHub} from "../../src/server/notificationHub";
+import {TaskScheduler} from "../../src/tasks/scheduler";
+import {currentSessionId} from "../../src/tasks/sessionContext";
 
 /** 脚本化假 LLM（沿用 harness 测试的模式）；seen 记录每轮收到的完整 messages */
 function fakeLlm(script: ChatMessage[]): LlmClient & {seen: ChatMessage[][]} {
@@ -366,6 +369,71 @@ describe("Web 服务端", () => {
         const usage = events.find((e) => e.event === "usage");
         expect(usage?.data.totalTokens).toBe(120);
         expect(usage?.data.promptTokens).toBe(100);
+    });
+
+    it("skill 能读到当前会话 id（任务归属用）", async () => {
+        let seenSession: string | undefined;
+        const sessionSkill: Skill = {
+            name: "which_session",
+            description: "读会话上下文，仅测试用",
+            inputSchema: {type: "object", properties: {}},
+            async execute() {
+                seenSession = currentSessionId();
+                return ok({});
+            },
+        };
+        await start([toolCallMsg("which_session", {}), textMsg("好的")], [sessionSkill]);
+        const resp = await fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question: "创建任务", sessionId: "s_ctx"}),
+        });
+        await readSse(resp);
+        expect(seenSession).toBe("s_ctx");
+    });
+
+    it("通知与任务端点：push 后可取走，drain 即消费", async () => {
+        const hub = new NotificationHub();
+        const scheduler = new TaskScheduler({
+            notify: (task, message) => hub.push(task.id, task.title, message),
+            executeBooking: async () => "ok",
+            checkMonitor: async () => ({triggered: false, message: ""}),
+        });
+        server = createWebServer((confirm: ConfirmFn) =>
+            new Agent([echoSkill], "测试", fakeLlm([textMsg("x")]), async (call, skill) => confirm(call, skill)),
+            {requireLogin: false, notificationHub: hub, scheduler});
+        await new Promise<void>((r) => server!.listen(0, "127.0.0.1", r));
+        base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+        // 没通知时返回空
+        let resp = await fetch(`${base}/api/notifications`);
+        expect(((await resp.json()) as {notifications: unknown[]}).notifications).toHaveLength(0);
+
+        // scheduler 加提醒任务并立刻到期 → tick 执行 → 通知入队
+        scheduler.add({kind: "reminder", title: "电费要充了", sessionId: "s1", nextRunAt: Date.now() - 10});
+        await scheduler.tick();
+
+        resp = await fetch(`${base}/api/notifications`);
+        const drained = (await resp.json()) as {notifications: {title: string; message: string}[]};
+        expect(drained.notifications).toHaveLength(1);
+        expect(drained.notifications[0].message).toBe("电费要充了");
+
+        // drain 即消费：再取为空
+        resp = await fetch(`${base}/api/notifications`);
+        expect(((await resp.json()) as {notifications: unknown[]}).notifications).toHaveLength(0);
+
+        // 任务列表可见（含已完成的提醒）
+        const tasksResp = await fetch(`${base}/api/tasks`);
+        const tasks = (await tasksResp.json()) as {tasks: {id: string; done?: boolean}[]};
+        expect(tasks.tasks).toHaveLength(1);
+
+        // 取消端点：对已完成任务 404
+        const cancel = await fetch(`${base}/api/tasks/cancel`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({id: tasks.tasks[0].id}),
+        });
+        expect(cancel.status).toBe(404);
     });
 
     it("工具结果带 payFormHtml 时发 payform 事件", async () => {

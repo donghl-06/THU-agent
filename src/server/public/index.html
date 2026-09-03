@@ -1891,6 +1891,29 @@ fetch("/api/auth/status").then((resp) => resp.json()).then((data) => {
   updateWelcome();
 });
 
+/* ---- 任务通知轮询（Step 23）：提醒/抢场结果到点由服务端推入队列，这里 30s 取走 ---- */
+async function pollNotifications() {
+  try {
+    const resp = await fetch("/api/notifications");
+    if (!resp.ok) return;
+    const data = await resp.json();
+    for (const n of data.notifications ?? []) {
+      toast(`⏰ ${n.title}：${n.message}`, "ok");
+      sfx.confirm();
+      if ("Notification" in window && Notification.permission === "granted") {
+        new Notification("清灵 · " + n.title, {body: n.message});
+      }
+    }
+  } catch { /* 网络抖动下一轮再取 */ }
+}
+setInterval(pollNotifications, 30000);
+// 浏览器系统通知需要用户手势授权：首次点击时静默请求一次
+document.addEventListener("click", () => {
+  if ("Notification" in window && Notification.permission === "default") {
+    Notification.requestPermission();
+  }
+}, {once: true});
+
 /* ---- SSE 解析（fetch 流，EventSource 不支持 POST） ---- */
 let chatAbort = null; // 当前问答的中止控制器（"停止生成"）
 let chatCancelPromise = null;

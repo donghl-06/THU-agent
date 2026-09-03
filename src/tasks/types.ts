@@ -50,5 +50,14 @@ export interface BookingTask extends BaseTask {
 
 export type AgentTask = ReminderTask | MonitorTask | BookingTask;
 
+/** 推给前端的任务执行通知（/api/notifications 轮询取走） */
+export interface TaskNotification {
+    id: string;
+    taskId: string;
+    title: string;
+    message: string;
+    at: number;
+}
+
 /** 过期太久的 booking 不再执行（防止服务停摆后启动突然下单），只通知过期 */
 export const MAX_LATE_MS = 10 * 60 * 1000;
