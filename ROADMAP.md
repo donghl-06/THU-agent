@@ -563,11 +563,17 @@ THU-agent/                        ← 项目根（git 仓库）
                     （超级鹰过滑块）；执行前查未支付订单（Step 13 坑④：
                     有未支付订单时一切新预约被拒）。
 [计划中] 小项（穿插在大步骤之间，不单独占步骤号）：
-                  ① Token 统计：llmClient 解析 usage（流式加
-                    stream_options.include_usage），SSE usage 事件，
-                    前端气泡下方小字 + 会话累计；单价可配（LLM_PRICE_*，
-                    元/百万 token），不配只显示 token 数。
-                  ② 校历感知：.env 配学期第一周周一（SEMESTER_START），
-                    system prompt 注入"X月X日 星期X · 第 N 教学周"。
+                  ① [已完成] Token 统计：llmClient 解析 usage（流式加
+                    stream_options.include_usage，端点报 400 不认识该字段时
+                    自动去字段重发），Agent 按轮累计进 AgentRunResult，
+                    webServer 发 usage SSE 事件（配 LLM_PRICE_IN/OUT
+                    元/百万 token 时带估算费用）；前端回答气泡下方小字 +
+                    侧栏会话累计（随会话持久化）。假端点单测 4 个验证
+                    非流式/流式/降级重发。
+                  ② [已完成] 校历感知（src/harness/dateContext.ts）：
+                    .env 配 SEMESTER_START（学期第一教学周周一），系统
+                    提示词注入"今天是X年X月X日 星期X · 秋季学期第 N 教学
+                    周"（开学前提示尚未开学；>20 周提示考试周或假期）；
+                    step10/step18 两处 SYSTEM_PROMPT 统一换用。单测 6 个。
                   ③ 快捷指令：输入框上方常驻常用问法胶囊，点按即发送（纯前端）。
 [下一步] 远期：多用户 App（本机凭证模式）见上文；.ics 日历导出待用户单独确认

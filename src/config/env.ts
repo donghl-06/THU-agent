@@ -56,6 +56,13 @@ export const config = {
             return Number.isFinite(v) && v > 0 ? v : undefined;
         },
     },
+    /** 校历：学期第一教学周的周一日期（YYYY-MM-DD）。配置后 system prompt 注入教学周 */
+    calendar: {
+        get semesterStart(): string | undefined {
+            const v = process.env.SEMESTER_START;
+            return v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined;
+        },
+    },
     /** 超级鹰打码平台（预约滑块验证码用，单次约 0.01 元）。不预约可不填 */
     chaojiying: {
         get user() {
