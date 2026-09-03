@@ -354,6 +354,13 @@
   .pay-card .tip { font-size: 12px; color: var(--muted); margin-top: 8px; }
   /* Composer：卡片式输入区（文档十二） */
   #composer-wrap { padding: 12px max(24px, calc((100% - 1040px) / 2)) 20px; }
+  .quick-chips { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 2px 8px; }
+  .quick-chip {
+    border: 1px solid var(--border); background: var(--card); color: var(--text-2);
+    font-size: var(--fs-sm); padding: 6px 13px; border-radius: 999px; cursor: pointer;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+  }
+  .quick-chip:hover { border-color: var(--primary); color: var(--text); background: var(--primary-light); }
   #composer {
     background: var(--bg-soft); border: 1px solid var(--border);
     border-radius: var(--r-xl); padding: 10px 12px 8px;
@@ -641,6 +648,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
 <div id="toasts"></div>
 <button id="scroll-btn" type="button" title="回到底部" hidden>↓</button>
 <div id="composer-wrap">
+  <div id="quick-chips" class="quick-chips" hidden></div>
   <div id="thumbs" hidden></div>
   <div id="composer">
     <textarea id="q" rows="1" placeholder="有什么想让清灵帮你查的？" autocomplete="off"></textarea>
@@ -1095,8 +1103,27 @@ document.getElementById("new-chat").onclick = newChat;
 /* ---- Welcome Screen：仅在空对话时显示，随首条内容出现而隐藏 ---- */
 const welcome = document.getElementById("welcome");
 const wLoginHint = document.getElementById("w-login-hint");
+/* ---- 快捷指令：对话非空时常驻输入框上方的常用问法胶囊（点按即发送） ---- */
+const QUICK_ACTIONS = [
+  {label: "今晚羽毛球场", q: "今晚哪里可以打羽毛球？现在还有场吗？"},
+  {label: "图书馆座位", q: "现在图书馆哪里还有座位？"},
+  {label: "校园卡余额", q: "我的校园卡余额是多少？"},
+  {label: "今天有课吗", q: "我今天有什么课？"},
+  {label: "宿舍电量", q: "宿舍还剩多少电？"},
+];
+const quickChips = document.getElementById("quick-chips");
+for (const action of QUICK_ACTIONS) {
+  const chip = document.createElement("button");
+  chip.type = "button";
+  chip.className = "quick-chip";
+  chip.textContent = action.label;
+  chip.onclick = () => { if (!busy) submit(action.q, []); };
+  quickChips.appendChild(chip);
+}
 function updateWelcome() {
-  welcome.hidden = !!chat.querySelector(".msg, .thinking, .error-card, .qr-card, .pay-card");
+  const hasContent = !!chat.querySelector(".msg, .thinking, .error-card, .qr-card, .pay-card");
+  welcome.hidden = hasContent;
+  quickChips.hidden = !hasContent; // 空对话时欢迎大卡片已有推荐，有内容后换成常驻胶囊
   wLoginHint.hidden = authenticated;
 }
 welcome.querySelectorAll(".w-card").forEach((card) => {
