@@ -207,6 +207,92 @@ describe("Agent Loop", () => {
     });
 });
 
+describe("Step 21b 上下文裁剪", () => {
+    /** 返回超长结果的测试 Skill */
+    const bigResultSkill: Skill = {
+        name: "big",
+        description: "返回超长结果，仅测试用",
+        inputSchema: {type: "object", properties: {}},
+        async execute() { return ok({blob: "x".repeat(5000)}); },
+    };
+
+    /** 断言视图里每条 tool 消息的 tool_call_id 都能在更早的 assistant.tool_calls 里找到 */
+    function expectPairsIntact(view: ChatMessage[]) {
+        const ids = new Set<string>();
+        for (const m of view) {
+            for (const c of m.tool_calls ?? []) ids.add(c.id);
+            if (m.role === "tool") expect(ids.has(m.tool_call_id ?? "")).toBe(true);
+        }
+    }
+
+    it("旧轮超长工具结果在发送视图里裁成摘要，messages 本体不动", async () => {
+        const llm = fakeLlm([toolCallMsg("big", {}), textMsg("第一轮完"), textMsg("第二轮答")]);
+        const agent = new Agent([bigResultSkill], "系统", llm, undefined, undefined, {toolResultKeepChars: 100});
+        await agent.ask("第一问");
+        await agent.ask("第二问");
+
+        // seen[1] 是第一问的收尾轮——工具结果还在当前轮，不该被裁；
+        // seen[2] 是第二问的视图——第一问的工具结果已是旧轮，应被裁成摘要
+        const curTool = llm.seen[1].find((m) => m.role === "tool")!;
+        expect((curTool.content as string).length).toBeGreaterThan(5000);
+
+        const oldTool = llm.seen[2].find((m) => m.role === "tool")!;
+        const trimmed = oldTool.content as string;
+        expect(trimmed.length).toBeLessThan(200);
+        expect(trimmed).toContain("已省略");
+
+        // 本体未被修改（持久化依赖原样 messages）
+        const raw = (agent as unknown as {messages: ChatMessage[]}).messages
+            .find((m) => m.role === "tool")!;
+        expect((raw.content as string).length).toBeGreaterThan(5000);
+    });
+
+    it("超过轮次上限时最旧整轮淘汰，tool 消息配对保持完整", async () => {
+        const script: ChatMessage[] = [];
+        for (let i = 0; i < 4; i++) script.push(toolCallMsg("echo", {n: i}, `call_${i}`), textMsg(`第 ${i} 轮完`));
+        const llm = fakeLlm([...script, textMsg("最后一问答完")]);
+        const agent = new Agent([echoSkill], "系统", llm, undefined, undefined, {maxTurns: 2});
+        for (let i = 0; i < 4; i++) await agent.ask(`第 ${i} 问`);
+        await agent.ask("第 5 问");
+
+        const view = llm.seen.at(-1)!;
+        expectPairsIntact(view);
+        // 只保留最近 2 个历史轮 + 当前轮：第 0/1 轮的用户问题应被整轮淘汰
+        const all = JSON.stringify(view);
+        expect(all).not.toContain("第 0 问");
+        expect(all).not.toContain("第 1 问");
+        expect(all).toContain("第 2 问");
+        expect(all).toContain("第 3 问");
+        expect(all).toContain("第 5 问");
+        // system 前缀恒保留
+        expect(view[0].role).toBe("system");
+    });
+
+    it("旧轮图片换占位文本，当前轮图片原样保留", async () => {
+        const img = "data:image/png;base64,iVBORw0KGgo=";
+        const llm = fakeLlm([textMsg("第一答"), textMsg("第二答")]);
+        const agent = new Agent([], "系统", llm, undefined, undefined, {toolResultKeepChars: 10});
+        await agent.ask("看图一", {images: [img]});
+        await agent.ask("看图二", {images: [img]});
+
+        const userMsgs = llm.seen[1].filter((m) => m.role === "user");
+        const oldParts = userMsgs[0].content as {type: string; text?: string}[];
+        expect(oldParts.some((p) => p.type === "text" && p.text === "（图片已省略）")).toBe(true);
+        expect(oldParts.some((p) => p.type === "image_url")).toBe(false);
+
+        const curParts = userMsgs[1].content as {type: string}[];
+        expect(curParts.some((p) => p.type === "image_url")).toBe(true);
+    });
+
+    it("当前轮的超长工具结果不裁剪（模型正需要它）", async () => {
+        const llm = fakeLlm([toolCallMsg("big", {}), textMsg("答")]);
+        const agent = new Agent([bigResultSkill], "系统", llm, undefined, undefined, {toolResultKeepChars: 100});
+        await agent.ask("查大结果");
+        const toolMsg = llm.seen[1].find((m) => m.role === "tool")!;
+        expect(toolMsg.content as string).toContain("xxxxx");
+    });
+});
+
 describe("写操作确认流", () => {
     it("用户同意后写操作才真正执行", async () => {
         const state = {executed: false};

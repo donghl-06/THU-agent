@@ -13,6 +13,8 @@
  *   - 并行：模型单轮发多个纯读工具调用时并行执行（写操作仍串行，
  *     避免确认弹窗/扣费顺序被打乱）
  *   - 工具事件：onToolEvent 把"开始/结束"暴露给调用方（UI 进度提示用）
+ * Step 21b 上下文裁剪：发给模型的是裁剪视图（旧轮超长工具结果 → 摘要、
+ *   旧轮图片 → 占位、超限旧轮整轮淘汰），messages 本体不动。
  */
 import type {Skill} from "../skills/base/types";
 import {createLlmClient, type LlmClient} from "./llmClient";
@@ -21,6 +23,16 @@ import type {ChatMessage} from "./types";
 
 /** 单轮对话最多允许的工具调用轮数（防模型失控死循环） */
 const MAX_TOOL_ROUNDS = 10;
+
+/** 上下文裁剪配置（Step 21b）：只裁"发给模型的视图"，存储本体不动 */
+export interface TrimOptions {
+    /** 发送视图最多保留的历史用户轮次（当前轮恒完整保留） */
+    maxTurns: number;
+    /** 旧轮工具结果超过该字符数裁成一行摘要 */
+    toolResultKeepChars: number;
+}
+
+const DEFAULT_TRIM: TrimOptions = {maxTurns: 20, toolResultKeepChars: 2000};
 
 function waitForAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
     signal.throwIfAborted();
@@ -73,12 +85,14 @@ export class Agent {
     private readonly skillsByName: Map<string, Skill>;
     private readonly messages: ChatMessage[] = [];
     private readonly loginHandler?: () => Promise<void>;
+    private readonly trim: TrimOptions;
 
     /**
      * @param skills 注册的技能清单
      * @param systemPrompt 系统提示词
      * @param llm 可选注入（测试用假 LLM）
      * @param confirm 写操作的用户确认回调；不写则写操作一律拒绝执行
+     * @param trim 上下文裁剪配置（缺省用 DEFAULT_TRIM）
      */
     constructor(
         skills: Skill[],
@@ -86,11 +100,16 @@ export class Agent {
         llm?: LlmClient,
         confirm?: ConfirmFn,
         loginHandler?: () => Promise<void>,
+        trim?: Partial<TrimOptions>,
     ) {
         this.llm = llm ?? createLlmClient();
         this.registry = new ToolRegistry(skills, confirm);
         this.skillsByName = new Map(skills.map((s) => [s.name, s]));
         this.loginHandler = loginHandler;
+        this.trim = {
+            maxTurns: trim?.maxTurns ?? DEFAULT_TRIM.maxTurns,
+            toolResultKeepChars: trim?.toolResultKeepChars ?? DEFAULT_TRIM.toolResultKeepChars,
+        };
         this.messages.push({role: "system", content: systemPrompt});
     }
 
@@ -116,10 +135,12 @@ export class Agent {
         try {
             for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
                 opts.signal?.throwIfAborted();
-                // 有 onToken 且 LLM 支持流式 → 走流式；否则退回普通 chat
+                // 发送裁剪视图而非完整 messages（Step 21b）；有 onToken 且 LLM
+                // 支持流式 → 走流式；否则退回普通 chat
+                const view = this.viewForLlm();
                 const message = opts.onToken && this.llm.chatStream
-                    ? await this.llm.chatStream(this.messages, this.registry.schemas(), opts.onToken, opts.signal)
-                    : await this.llm.chat(this.messages, this.registry.schemas(), opts.signal);
+                    ? await this.llm.chatStream(view, this.registry.schemas(), opts.onToken, opts.signal)
+                    : await this.llm.chat(view, this.registry.schemas(), opts.signal);
                 opts.signal?.throwIfAborted();
                 this.messages.push(message);
 
@@ -146,6 +167,53 @@ export class Agent {
             this.messages.splice(messageCheckpoint);
             throw error;
         }
+    }
+
+    /**
+     * 构造发给模型的裁剪视图（Step 21b）：只决定"发送什么"，不动 this.messages。
+     * - 轮次上限：保留最近 N 个完整历史轮次 + 当前轮，更早的整轮淘汰
+     *   （一轮 = user 消息及其后所有 assistant/tool 消息；整轮删除不会拆散
+     *   assistant.tool_calls ↔ tool 的配对，OpenAI 协议要求 tool 消息前有对应调用）；
+     * - 旧轮瘦身：超长 tool 结果裁成一行摘要；旧轮图片换占位文本
+     *   （base64 是 token 大头，历史图片对后续回答几乎没用）。
+     */
+    private viewForLlm(): ChatMessage[] {
+        const starts: number[] = [];
+        for (const [i, m] of this.messages.entries()) {
+            if (m.role === "user") starts.push(i);
+        }
+        const currentStart = starts.at(-1);
+        if (currentStart === undefined) return this.messages; // 没有用户消息，原样发
+        const head = this.messages.slice(0, starts[0]); // system 前缀，恒保留
+        const current = this.messages.slice(currentStart); // 当前轮，恒原样
+        const oldStarts = starts.slice(0, -1);
+        const oldTurns: ChatMessage[][] = oldStarts.map((start, i) =>
+            this.messages.slice(start, oldStarts[i + 1] ?? currentStart));
+        const kept = oldTurns
+            .slice(-this.trim.maxTurns)
+            .flat()
+            .map((m) => this.slimForView(m));
+        return [...head, ...kept, ...current];
+    }
+
+    /** 旧轮单条消息瘦身：超长工具结果 → 摘要；图片 parts → 占位文本 */
+    private slimForView(m: ChatMessage): ChatMessage {
+        if (m.role === "tool" && typeof m.content === "string" && m.content.length > this.trim.toolResultKeepChars) {
+            let note = `历史工具结果已省略（原文 ${m.content.length} 字符）`;
+            try {
+                const parsed = JSON.parse(m.content) as {success?: boolean; error?: {code?: string}};
+                if (parsed.success === false && parsed.error?.code) {
+                    note = `历史工具调用失败：${parsed.error.code}（详情已省略）`;
+                }
+            } catch { /* 非 JSON 结果保持通用摘要 */ }
+            return {...m, content: JSON.stringify({trimmed: true, note})};
+        }
+        if (Array.isArray(m.content) && m.content.some((p) => p.type === "image_url")) {
+            const parts = m.content.map((p) =>
+                p.type === "image_url" ? {type: "text" as const, text: "（图片已省略）"} : p);
+            return {...m, content: parts};
+        }
+        return m;
     }
 
     private async runSerial(calls: NonNullable<ChatMessage["tool_calls"]>, opts: AskOptions): Promise<string[]> {

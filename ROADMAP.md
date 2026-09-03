@@ -524,10 +524,15 @@ THU-agent/                        ← 项目根（git 仓库）
                     logout 清全部；登录成功建的 Agent 落在 default 会话。
                     前端 ask 带活跃会话 id，删会话/清空历史时调 destroy。
                     单测 +4：跨会话不串味、destroy 单个、destroy all、非法 id 兜底。
-                  ② 上下文裁剪：发送视图两级裁剪（不动存储本体）——
-                    旧轮超长 tool 结果裁成一行摘要；超过轮数上限整轮淘汰
-                    （保持 assistant.tool_calls↔tool 消息配对完整性）；
-                    旧轮 base64 图片换占位文本。
+                  ② [已完成] 上下文裁剪（agentLoop.viewForLlm，Step 21b）：
+                    发送视图两级裁剪（不动存储本体）——旧轮超长 tool 结果
+                    （默认 >2000 字符）裁成一行摘要（失败调用保留错误码）；
+                    超过轮数上限（默认 20）整轮淘汰（保持
+                    assistant.tool_calls↔tool 消息配对完整性）；旧轮 base64
+                    图片换"（图片已省略）"占位；当前轮内容恒不裁。
+                    Agent 构造器加可选 trim 参数（测试可调小阈值）。
+                    单测 +4：摘要裁剪/本体不动、整轮淘汰+配对完整、
+                    图片占位（旧裁新留）、当前轮不裁。
                   ③ 会话持久化：messages 落 data/sessions.json（.gitignore），
                     重启恢复；恢复时换用新 systemPrompt（旧日期会过期）；
                     图片 parts 只留文字；step18-web 传存储路径，测试不落盘。
