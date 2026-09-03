@@ -513,4 +513,45 @@ THU-agent/                        ← 项目根（git 仓库）
                     工具失败/确认弹窗/错误各有提示音，顶栏 🔔 可关。
                   单测 156 个全绿（+7：多模态 parts 构造、默认提示语、
                   capabilities、图片校验四条）。
-[下一步] 待规划（远期：多用户 App·本机凭证模式，见上文）
+[计划中] Step 21 会话架构修复（2026-09-04 定案，现存问题：前端已多会话，
+                  后端仍是单一共享 Agent——切换/新建会话不影响后端上下文，
+                  跨会话串味；messages 只增不减；进程重启即失忆）：
+                  ① 会话隔离：/api/chat 带 sessionId，后端 Map<sessionId, Agent>，
+                    多 Agent 共享同一 ThuClient 登录态（登录一次全会话可用）；
+                    新增会话销毁端点；logout 清全部；LRU 上限防泄漏。
+                  ② 上下文裁剪：发送视图两级裁剪（不动存储本体）——
+                    旧轮超长 tool 结果裁成一行摘要；超过轮数上限整轮淘汰
+                    （保持 assistant.tool_calls↔tool 消息配对完整性）；
+                    旧轮 base64 图片换占位文本。
+                  ③ 会话持久化：messages 落 data/sessions.json（.gitignore），
+                    重启恢复；恢复时换用新 systemPrompt（旧日期会过期）；
+                    图片 parts 只留文字；step18-web 传存储路径，测试不落盘。
+[计划中] Step 22 复活两个被砍技能（Step 15 时砍掉，前置障碍现已被扫清）：
+                  ① get_dorm_score 宿舍卫生：上游返回公示图片，当时文本模型
+                    无法消费；现在 vision 已通（Step 20）。Skill 保持零 LLM，
+                    结果带 imagesBase64；agentLoop 在 tool 消息后追加带图
+                    user 消息喂 vision 模型。
+                  ② get_network_status 校园网（usereg）：当时卡图形验证码；
+                    超级鹰通道已在体育预约跑通（复用）。UseregClient 独立
+                    cookie jar（m.myhome 教训）：验证码图 → 识别 → 登录 →
+                    余额/在线设备，识别失败换图重试 ≤3 次。
+[计划中] Step 23 主动式能力（从被动应答到主动 Agent）：
+                  核心设计：LLM 只负责"创建任务"（走确认流），到点执行走
+                  确定性代码路径直接调 skill.execute，不再烧 LLM。
+                  ① 任务模型 + 进程内 scheduler：reminder（到点提醒）/
+                    monitor（条件查询如低电费）/booking（到点预约）三类，
+                    JSON 文件存储重启恢复，不引任务队列。
+                  ② 通知通道：前端轮询 /api/notifications + toast + 音效 +
+                    浏览器 Notification API。
+                  ③ 定时抢场：到点预热登录 → 直接走 bookSportsField 链路
+                    （超级鹰过滑块）；执行前查未支付订单（Step 13 坑④：
+                    有未支付订单时一切新预约被拒）。
+[计划中] 小项（穿插在大步骤之间，不单独占步骤号）：
+                  ① Token 统计：llmClient 解析 usage（流式加
+                    stream_options.include_usage），SSE usage 事件，
+                    前端气泡下方小字 + 会话累计；单价可配（LLM_PRICE_*，
+                    元/百万 token），不配只显示 token 数。
+                  ② 校历感知：.env 配学期第一周周一（SEMESTER_START），
+                    system prompt 注入"X月X日 星期X · 第 N 教学周"。
+                  ③ 快捷指令：输入框上方常驻常用问法胶囊，点按即发送（纯前端）。
+[下一步] 远期：多用户 App（本机凭证模式）见上文；.ics 日历导出待用户单独确认
