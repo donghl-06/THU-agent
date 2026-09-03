@@ -80,6 +80,7 @@
   }
   #new-chat:hover { border-color: var(--primary); background: var(--primary-light); }
   #session-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+  .session-usage { flex: none; padding: 8px 10px; font-size: var(--fs-xs); color: var(--muted); border-top: 1px solid var(--border); }
   .session-item {
     display: flex; align-items: center; gap: 6px; padding: 9px 10px;
     border-radius: var(--r-md); cursor: pointer; font-size: var(--fs-sm);
@@ -192,6 +193,7 @@
   .msg.bot + .msg.bot::before { display: none; }
   @keyframes msg-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
   .msg .saved-att { display: block; margin-bottom: 6px; font-size: var(--fs-xs); opacity: 0.8; }
+  .msg .msg-meta { margin-top: 6px; font-size: var(--fs-xs); color: var(--muted); }
   .msg .cursor { display: inline-block; width: 8px; height: 15px; background: var(--primary-soft); vertical-align: -2px; animation: blink 0.8s infinite; }
   @keyframes blink { 50% { opacity: 0; } }
   /* Thinking Card：Agent 处理过程的实时状态（文档四/六/九/十） */
@@ -601,6 +603,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
 <aside id="sidebar">
   <button id="new-chat" type="button"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>新建对话</button>
   <div id="session-list"></div>
+  <div id="session-usage" class="session-usage" hidden></div>
 </aside>
 <div id="sidebar-mask"></div>
 <div id="main">
@@ -999,6 +1002,28 @@ function renderSessionList() {
     empty.textContent = "暂无历史对话";
     list.appendChild(empty);
   }
+  renderSessionUsage();
+}
+
+/* ---- Token 用量显示：每条回答下方小字 + 侧栏会话累计 ---- */
+const fmtTokens = (n) => n >= 10000 ? (n / 10000).toFixed(1) + "万" : n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n);
+function renderSessionUsage() {
+  const el = document.getElementById("session-usage");
+  const tokens = activeSession()?.tokens;
+  if (el) {
+    el.hidden = !tokens;
+    if (tokens) el.textContent = `本会话累计 ${fmtTokens(tokens)} tokens`;
+  }
+}
+
+/** 把本轮 usage 渲染到回答气泡下方（renderMd 会重写气泡内容，须在其后调用） */
+function renderUsageMeta(botDiv, usage) {
+  if (!botDiv || !usage || !usage.totalTokens) return;
+  const meta = document.createElement("div");
+  meta.className = "msg-meta";
+  meta.textContent = `${fmtTokens(usage.totalTokens)} tokens` + (usage.costYuan !== undefined ? ` · ≈¥${usage.costYuan.toFixed(3)}` : "");
+  meta.title = `输入 ${usage.promptTokens} + 输出 ${usage.completionTokens} tokens`;
+  botDiv.appendChild(meta);
 }
 
 function newChat() {
@@ -1863,6 +1888,7 @@ async function ask(question, images) {
   const thinking = createThinkingCard(); // 立即出现，不等 API
   let botDiv = null;       // 当前流式回答的气泡
   let botText = "";
+  let turnUsage = null;    // 本轮 token 用量（usage 事件先于 answer 到达）
   chatAbort = new AbortController();
   try {
     const resp = await fetch("/api/chat", {
@@ -1950,10 +1976,19 @@ async function ask(question, images) {
           thinking.markGenerating();
           ensureBot();
           renderMd(botDiv, botText);
+          renderUsageMeta(botDiv, turnUsage);
+          // 累计到当前会话（随 sessionsState 持久化）
+          if (turnUsage?.totalTokens) {
+            const session = activeSession();
+            if (session) session.tokens = (session.tokens ?? 0) + turnUsage.totalTokens;
+          }
           thinking.dismiss();
           saveChatHistory();
+          renderSessionUsage();
           scrollDown();
           if (ttsOn && botText) speak(botText);
+        } else if (ev === "usage") {
+          turnUsage = data;
         } else if (ev === "error") {
           thinking.dismiss();
           showErrorCard(data.message);
@@ -1975,9 +2010,10 @@ async function ask(question, images) {
     // 收尾：光标气泡渲染已收到的内容、确保 Thinking Card 已收起
     thinking.dismiss();
     if (botDiv) {
-      if (botText) renderMd(botDiv, botText);
+      if (botText) { renderMd(botDiv, botText); renderUsageMeta(botDiv, turnUsage); }
       else botDiv.remove();
       saveChatHistory();
+      renderSessionUsage();
     }
     stopping = false;
     busy = false;

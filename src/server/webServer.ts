@@ -22,6 +22,7 @@
  *       qr      {url, dataUrl?}           支付二维码（data URL 图片）
  *       payform {html}                    自动提交的支付表单（前端渲染"前往支付"按钮，新窗口提交到学校支付平台）
  *       answer  {text}                    最终完整回答（前端校对用）
+ *       usage   {promptTokens,completionTokens,totalTokens,costYuan?} 本轮 token 用量（costYuan 仅在 .env 配了 LLM_PRICE_* 时出现）
  *       done    {}                        本轮结束
  *       error   {message}                 出错
  *   POST /api/chat/cancel → 中止当前问答并等待服务端完成清理
@@ -44,6 +45,7 @@ import {readFileSync} from "node:fs";
 import {join} from "node:path";
 import type {Agent} from "../harness/agentLoop";
 import type {ConfirmFn} from "../harness/toolRegistry";
+import type {TokenUsage} from "../harness/types";
 import {config} from "../config/env";
 import {SessionStore} from "./sessionStore";
 import type {LoginCredentials, TwoFactorHooks} from "../client/auth";
@@ -140,6 +142,14 @@ function extractAuthFailure(toolResultJson: string): string | undefined {
         return undefined;
     }
     return undefined;
+}
+
+/** 按 .env 单价（元/百万 token）估算本轮费用；单价没配齐就不显示费用 */
+function estimateCostYuan(usage: TokenUsage): number | undefined {
+    const pin = config.llm.priceIn;
+    const pout = config.llm.priceOut;
+    if (pin === undefined || pout === undefined) return undefined;
+    return (usage.promptTokens * pin + usage.completionTokens * pout) / 1_000_000;
 }
 
 function sseSend(res: ServerResponse, event: string, data: unknown): void {
@@ -490,6 +500,10 @@ export function createWebServer(
                 }
             }
             sseSend(res, "answer", {text: result.answer});
+            if (result.usage) {
+                const cost = estimateCostYuan(result.usage);
+                sseSend(res, "usage", {...result.usage, ...(cost !== undefined ? {costYuan: cost} : {})});
+            }
             sseSend(res, "done", {});
         } catch (e) {
             if (!chatAbort.signal.aborted) sseSend(res, "error", {message: (e as Error).message});

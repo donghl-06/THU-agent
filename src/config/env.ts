@@ -46,6 +46,15 @@ export const config = {
         get vision() {
             return process.env.LLM_VISION !== "0";
         },
+        /** 输入/输出单价（元/百万 token），可选；两个都配了才显示估算费用 */
+        get priceIn() {
+            const v = Number(process.env.LLM_PRICE_IN);
+            return Number.isFinite(v) && v > 0 ? v : undefined;
+        },
+        get priceOut() {
+            const v = Number(process.env.LLM_PRICE_OUT);
+            return Number.isFinite(v) && v > 0 ? v : undefined;
+        },
     },
     /** 超级鹰打码平台（预约滑块验证码用，单次约 0.01 元）。不预约可不填 */
     chaojiying: {

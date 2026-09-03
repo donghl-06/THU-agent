@@ -422,4 +422,23 @@ describe("Step 17 性能优化行为", () => {
         expect(toolResult.error.code).toBe("TOOL_CRASH");
         expect(r.answer).toContain("如实告知");
     });
+
+    it("LLM 多轮回报 usage 时按轮累计到 ask 结果；没有 usage 则缺省", async () => {
+        const script = [toolCallMsg("echo", {}), textMsg("完")];
+        const llmWithUsage: LlmClient = {
+            async chat(_m, _t, _s, onUsage) {
+                onUsage?.({promptTokens: 10, completionTokens: 5, totalTokens: 15});
+                return script.shift()!;
+            },
+        };
+        // 两轮（工具轮 + 回答轮）→ usage 累加
+        const agentB = new Agent([echoSkill], "系统", llmWithUsage);
+        const r2 = await agentB.ask("二问带工具");
+        expect(r2.usage).toEqual({promptTokens: 20, completionTokens: 10, totalTokens: 30});
+
+        // LLM 没回报 usage → 结果缺省该字段
+        const agentC = new Agent([], "系统", fakeLlm([textMsg("普通")]));
+        const r3 = await agentC.ask("三问");
+        expect(r3.usage).toBeUndefined();
+    });
 });

@@ -348,6 +348,26 @@ describe("Web 服务端", () => {
         expect(String(qr?.data.dataUrl ?? "")).toMatch(/^data:image\/png/);
     });
 
+    it("ask 返回 usage 时发 usage 事件", async () => {
+        const usageAgent = {
+            async ask() {
+                return {answer: "好", toolCalls: [], usage: {promptTokens: 100, completionTokens: 20, totalTokens: 120}};
+            },
+        } as unknown as Agent;
+        server = createWebServer(() => usageAgent, {requireLogin: false});
+        await new Promise<void>((r) => server!.listen(0, "127.0.0.1", r));
+        base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+        const resp = await fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question: "你好"}),
+        });
+        const events = await readSse(resp);
+        const usage = events.find((e) => e.event === "usage");
+        expect(usage?.data.totalTokens).toBe(120);
+        expect(usage?.data.promptTokens).toBe(100);
+    });
+
     it("工具结果带 payFormHtml 时发 payform 事件", async () => {
         const formSkill: Skill = {
             name: "pay_order",

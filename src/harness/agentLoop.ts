@@ -19,7 +19,7 @@
 import type {Skill} from "../skills/base/types";
 import {createLlmClient, type LlmClient} from "./llmClient";
 import {ToolRegistry, type ConfirmFn} from "./toolRegistry";
-import type {ChatMessage} from "./types";
+import type {ChatMessage, TokenUsage} from "./types";
 
 /** 单轮对话最多允许的工具调用轮数（防模型失控死循环） */
 const MAX_TOOL_ROUNDS = 10;
@@ -57,6 +57,8 @@ export interface AgentRunResult {
     answer: string;
     /** 本轮发生的工具调用记录（便于观察模型行为、排查问题） */
     toolCalls: {name: string; input: string; result: string}[];
+    /** 本轮 LLM token 用量合计（端点未返回 usage 时缺省） */
+    usage?: TokenUsage;
 }
 
 /** 工具执行事件（start/end 成对出现，end 带耗时与是否成功） */
@@ -141,6 +143,16 @@ export class Agent {
             : question;
         this.messages.push({role: "user", content});
         const toolCalls: AgentRunResult["toolCalls"] = [];
+        let usage: TokenUsage | undefined;
+        const onUsage = (u: TokenUsage) => {
+            usage = usage
+                ? {
+                    promptTokens: usage.promptTokens + u.promptTokens,
+                    completionTokens: usage.completionTokens + u.completionTokens,
+                    totalTokens: usage.totalTokens + u.totalTokens,
+                }
+                : u;
+        };
 
         try {
             for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
@@ -149,15 +161,15 @@ export class Agent {
                 // 支持流式 → 走流式；否则退回普通 chat
                 const view = this.viewForLlm();
                 const message = opts.onToken && this.llm.chatStream
-                    ? await this.llm.chatStream(view, this.registry.schemas(), opts.onToken, opts.signal)
-                    : await this.llm.chat(view, this.registry.schemas(), opts.signal);
+                    ? await this.llm.chatStream(view, this.registry.schemas(), opts.onToken, opts.signal, onUsage)
+                    : await this.llm.chat(view, this.registry.schemas(), opts.signal, onUsage);
                 opts.signal?.throwIfAborted();
                 this.messages.push(message);
 
                 if (!message.tool_calls?.length) {
                     // 模型的 assistant 消息永远是纯文本（parts 只出现在用户消息里）
                     const answer = typeof message.content === "string" ? message.content : "";
-                    return {answer, toolCalls};
+                    return usage ? {answer, toolCalls, usage} : {answer, toolCalls};
                 }
 
                 // 并行只用于纯读调用：写操作（requiresConfirmation）必须串行，

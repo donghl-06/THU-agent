@@ -11,21 +11,32 @@
  */
 import {config} from "../config/env";
 import "../utils/httpProxy"; // 全局 fetch 走 https_proxy（若设置）
-import type {ChatMessage, ChatResponse, ToolSchema} from "./types";
+import type {ChatMessage, ChatResponse, RawUsage, TokenUsage, ToolSchema} from "./types";
 
 const TIMEOUT_MS = 120_000;
 /** 网络层失败（非超时、非 HTTP 错误）时的重试次数——WSL/代理环境下偶发抖动 */
 const NETWORK_RETRY = 1;
 
+/** usage 统计回调：拿到一次 LLM 响应的 token 消耗（端点没返回就不回调） */
+export type UsageCallback = (usage: TokenUsage) => void;
+
+function normalizeUsage(raw: RawUsage): TokenUsage {
+    return {
+        promptTokens: Number(raw.prompt_tokens ?? 0),
+        completionTokens: Number(raw.completion_tokens ?? 0),
+        totalTokens: Number(raw.total_tokens ?? (raw.prompt_tokens ?? 0) + (raw.completion_tokens ?? 0)),
+    };
+}
+
 export interface LlmClient {
     /** signal：外部中止信号（可选，用户"停止生成"用），与内部超时信号合并 */
-    chat(messages: ChatMessage[], tools: ToolSchema[], signal?: AbortSignal): Promise<ChatMessage>;
+    chat(messages: ChatMessage[], tools: ToolSchema[], signal?: AbortSignal, onUsage?: UsageCallback): Promise<ChatMessage>;
     /**
      * 流式版本：onToken 收到每个内容 token；返回值与非流式一致
      * （tool_calls 在流里是增量碎片，内部拼好后整体返回）。
      * 可选方法——不支持流式的假 LLM 不实现它，Agent 会自动退回 chat。
      */
-    chatStream?(messages: ChatMessage[], tools: ToolSchema[], onToken: (token: string) => void, signal?: AbortSignal): Promise<ChatMessage>;
+    chatStream?(messages: ChatMessage[], tools: ToolSchema[], onToken: (token: string) => void, signal?: AbortSignal, onUsage?: UsageCallback): Promise<ChatMessage>;
 }
 
 /** 从 fetch 的 cause 链里挖出真正的底层原因（ECONNRESET/ENOTFOUND/…） */
@@ -46,22 +57,34 @@ export function createLlmClient(): LlmClient {
         // 外部中止信号与超时信号合并；外部中止不重试
         const timeoutSignal = AbortSignal.timeout(TIMEOUT_MS);
         const combined = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+        const send = (withUsageOption: boolean): Promise<Response> => fetch(`${config.llm.baseUrl}/chat/completions`, {
+            method: "POST",
+            signal: combined,
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${config.llm.apiKey}`,
+            },
+            body: JSON.stringify({
+                model: config.llm.model,
+                messages,
+                ...(tools.length > 0 ? {tools} : {}),
+                ...(stream ? {stream: true} : {}),
+                // 流式统计 usage 的 OpenAI 惯例开关；个别网关不认识该字段时去掉重试
+                ...(stream && withUsageOption ? {stream_options: {include_usage: true}} : {}),
+            }),
+        });
         for (let attempt = 0; attempt <= NETWORK_RETRY; attempt++) {
             try {
-                resp = await fetch(`${config.llm.baseUrl}/chat/completions`, {
-                    method: "POST",
-                    signal: combined,
-                    headers: {
-                        "Content-Type": "application/json",
-                        Authorization: `Bearer ${config.llm.apiKey}`,
-                    },
-                    body: JSON.stringify({
-                        model: config.llm.model,
-                        messages,
-                        ...(tools.length > 0 ? {tools} : {}),
-                        ...(stream ? {stream: true} : {}),
-                    }),
-                });
+                resp = await send(true);
+                if (!resp.ok && resp.status === 400 && stream) {
+                    const errBody = await resp.text();
+                    if (errBody.includes("stream_options")) {
+                        resp = await send(false); // 端点不支持该字段：去掉重发
+                    } else {
+                        // 错误体已消费，重建 Response 供下方统一报错
+                        resp = new Response(errBody, {status: 400, statusText: resp.statusText});
+                    }
+                }
                 break;
             } catch (e) {
                 if (signal?.aborted) throw e; // 用户中止：原样抛出，不归一化不重试
@@ -90,17 +113,18 @@ export function createLlmClient(): LlmClient {
     };
 
     return {
-        async chat(messages, tools, signal) {
+        async chat(messages, tools, signal, onUsage) {
             const resp = await post(messages, tools, false, signal);
-            const data = (await resp.json()) as ChatResponse;
+            const data = (await resp.json()) as ChatResponse & {usage?: RawUsage};
             const message = data.choices?.[0]?.message;
             if (!message) {
                 throw new Error("LLM 返回了空响应（没有 choices）。");
             }
+            if (data.usage && onUsage) onUsage(normalizeUsage(data.usage));
             return message;
         },
 
-        async chatStream(messages, tools, onToken, signal) {
+        async chatStream(messages, tools, onToken, signal, onUsage) {
             const resp = await post(messages, tools, true, signal);
             if (!resp.body) throw new Error("LLM 流式响应没有 body。");
 
@@ -108,6 +132,7 @@ export function createLlmClient(): LlmClient {
             // tool_calls 增量按 index 拼成完整调用
             let content = "";
             const toolCalls = new Map<number, {id: string; name: string; arguments: string}>();
+            let usage: RawUsage | undefined; // usage 块通常在流末尾（choices 为空）
             const reader = resp.body.getReader();
             const decoder = new TextDecoder();
             let buffer = "";
@@ -123,12 +148,14 @@ export function createLlmClient(): LlmClient {
                             tool_calls?: {index: number; id?: string; function?: {name?: string; arguments?: string}}[];
                         };
                     }[];
+                    usage?: RawUsage;
                 };
                 try {
                     chunk = JSON.parse(payload);
                 } catch {
                     return; // 忽略不完整/注释行
                 }
+                if (chunk.usage) usage = chunk.usage;
                 const delta = chunk.choices?.[0]?.delta;
                 if (!delta) return;
                 if (delta.content) {
@@ -156,6 +183,7 @@ export function createLlmClient(): LlmClient {
                 }
             }
             if (buffer.trim()) handleLine(buffer);
+            if (usage && onUsage) onUsage(normalizeUsage(usage));
 
             const calls = [...toolCalls.entries()]
                 .sort(([a], [b]) => a - b)
