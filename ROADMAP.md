@@ -569,7 +569,22 @@ THU-agent/                        ← 项目根（git 仓库）
                     校外 webvpn 场景待真链验证后再议。
                     单测 +4：本地假 usereg 站点全链路（RSA 密文用测试私钥
                     解密校验、错码换图重试、三连败报错、skill 降级）。
-                    ⚠ 真链验证待做：需校园网环境 + 超级鹰配置实测登录与解析。
+                    真链验证 ✅（2026-09-04，用户报错后逐层排查，登录+查询
+                    全通：套餐/余额/在线设备）。实测踩坑（全部记录在案）：
+                    ✗ 登录名是 emailName（邮箱前缀）不是学号——表单
+                      placeholder"账号(邮箱前缀)"证实；学号被服务端拒
+                      （"用户名或密码错误"）。装配层传 resolveUsername 回调，
+                      登录时经 getUserInfo 解析。
+                    ✗ 登录表单是 AJAX 提交（按钮 type="button"）：POST /login
+                      必须带 X-Requested-With + X-CSRF-Token 头，缺了 400
+                      （"Bad Request"页）。lib 的"裸 fetch validate"在 RN 里
+                      由系统自动带 cookie，Node 必须显式带 cookie+头。
+                    ✗ AJAX 重定向无 Location 头，目标在 X-Redirect 头
+                      （https://usereg.tsinghua.edu.cn/home）。
+                    ✗ validate 成功后必须二次确认登录态（GET /login 不再含
+                      验证码字段才算成功），假成功会导致首页解析报错。
+                    诊断脚本 scripts/debug-usereg.ts（--both 对比学号/邮箱名，
+                    onDebug 打印每步中间量，凭证脱敏），排障利器。
 [已完成] Step 23 主动式能力（从被动应答到主动 Agent）：
                   核心设计：LLM 只负责"创建任务"（走确认流），到点执行走
                   确定性代码路径直接调 skill.execute，不再烧 LLM。

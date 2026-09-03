@@ -21,6 +21,7 @@ function fakeUsereg(options: {
 }) {
     const requests: {path: string; body: string; decryptedPassword?: string}[] = [];
     let validateIndex = 0;
+    let sessionEstablished = false; // POST /login 成提交后置位，GET /login 据此返回已登录页
     const server: Server = createServer((req: IncomingMessage, res: ServerResponse) => {
         let body = "";
         req.on("data", (c) => { body += c; });
@@ -30,6 +31,10 @@ function fakeUsereg(options: {
                 requests.push({path, body, decryptedPassword: undefined});
                 if (path === "/login" && req.method === "GET") {
                     res.setHeader("content-type", "text/html; charset=utf-8");
+                    if (sessionEstablished) {
+                        res.end("<html><body>欢迎回来，校园网自助服务</body></html>");
+                        return;
+                    }
                     res.end(`<!DOCTYPE html><html><head><meta name="csrf-token" content="csrftoken123"></head>
 <body><form id="login-form"><input type="hidden" name="_csrf-8800" value="formcsrf456">
 <input type="text" id="loginform-username"><input type="password" id="loginform-password">
@@ -62,6 +67,7 @@ function fakeUsereg(options: {
                         res.end(JSON.stringify({success: okResult, message: okResult ? undefined : "账号或密码错误"}));
                     }
                 } else if (path === "/login" && req.method === "POST") {
+                    sessionEstablished = true;
                     res.setHeader("location", "/home");
                     res.writeHead(302);
                     res.end();
@@ -102,7 +108,7 @@ describe("UseregClient 全链路（假站点）", () => {
     it("验证码正确：完整登录并解析余额与在线设备，密码 RSA 密文可被服务端解出", async () => {
         const fake = fakeUsereg({publicKeyPem: publicKeyForPage, privateKeyPem, captchaAnswer: "abcd"});
         const base = await listen(fake.server);
-        const client = new UseregClient(solverEcho, "2024000000", "secret-pass", base);
+        const client = new UseregClient(solverEcho, "secret-pass", {baseUrl: base, username: "2024000000"});
         const status = await client.getStatus();
 
         expect(status.balance).toEqual({
@@ -131,7 +137,7 @@ describe("UseregClient 全链路（假站点）", () => {
         const base = await listen(fake.server);
         let call = 0;
         const wrongThenRight: NetworkCodeSolver = async () => (call++ === 0 ? "wrong" : "abcd");
-        const client = new UseregClient(wrongThenRight, "2024000000", "pw", base);
+        const client = new UseregClient(wrongThenRight, "pw", {baseUrl: base, username: "2024000000"});
         const status = await client.getStatus();
         expect(status.devices).toHaveLength(2);
         const validateCalls = fake.requests.filter((r) => r.path === "/site/validate-user");
@@ -142,7 +148,7 @@ describe("UseregClient 全链路（假站点）", () => {
     it("三次识别均失败：报登录失败并提示", async () => {
         const fake = fakeUsereg({publicKeyPem: publicKeyForPage, privateKeyPem, captchaAnswer: "abcd"});
         const base = await listen(fake.server);
-        const client = new UseregClient(async () => "bad", "2024000000", "pw", base);
+        const client = new UseregClient(async () => "bad", "pw", {baseUrl: base, username: "2024000000"});
         await expect(client.getStatus()).rejects.toThrow(/已重试 3 次/);
         await new Promise((r) => fake.server.close(r));
     });

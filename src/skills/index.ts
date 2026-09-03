@@ -25,7 +25,7 @@ import {createRechargeCampusCardSkill} from "./card/rechargeCampusCard";
 import {createGetNetworkStatusSkill} from "./network/getNetworkStatus";
 import {MyhomeClient} from "../client/myhome";
 import {createChaojiyingSolver, createChaojiyingCodeSolver} from "../client/captcha/chaojiying";
-import {UseregClient} from "../client/usereg";
+import {UseregClient, UseregAuthError} from "../client/usereg";
 import {config} from "../config/env";
 import type {LoginCredentials, TwoFactorHooks} from "../client/auth";
 import type {TaskScheduler} from "../tasks/scheduler";
@@ -70,11 +70,22 @@ export function createAllSkills(opts: SkillAssemblyOptions = {}): Skill[] {
     const thu = opts.thuClient ?? new ThuClient(opts.authHooks, opts.credentials);
     const sports = new SportsClient(opts.credentials);
     const captchaSolver = resolveCaptchaSolver(opts.captchaSolver);
-    // 校园网自助服务（usereg）：独立客户端 + 字符验证码识别（超级鹰），缺配置时技能内给出指引
+    // 校园网自助服务（usereg）：独立客户端 + 字符验证码识别（超级鹰），缺配置时技能内给出指引。
+    // 登录名是 info 邮箱前缀（emailName）而非学号（2026-09-04 真链实测：学号被拒、emailName 通过），
+    // 需要登录态后由 getUserInfo 解析，故传回调
     const usereg = new UseregClient(
         config.chaojiying.configured ? createChaojiyingCodeSolver() : undefined,
-        opts.credentials?.username ?? optionalThuCredential("username"),
         opts.credentials?.password ?? optionalThuCredential("password"),
+        {
+            resolveUsername: async () => {
+                await thu.login();
+                const info = await thu.getUserInfo();
+                if (!info.emailName) {
+                    throw new UseregAuthError("未能从 Info 获取邮箱前缀（emailName），无法登录校园网自助服务。");
+                }
+                return info.emailName;
+            },
+        },
     );
     if (opts.prewarm) {
         // 后台预热登录态，失败不影响启动（首个工具调用会重试登录）
