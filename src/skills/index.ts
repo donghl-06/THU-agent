@@ -22,8 +22,10 @@ import {createCancelLibraryBookingSkill} from "./library/cancelLibraryBooking";
 import {createRechargeElectricitySkill} from "./dorm/rechargeElectricity";
 import {createPaySportsOrderSkill} from "./sports/paySportsOrder";
 import {createRechargeCampusCardSkill} from "./card/rechargeCampusCard";
+import {createGetNetworkStatusSkill} from "./network/getNetworkStatus";
 import {MyhomeClient} from "../client/myhome";
-import {createChaojiyingSolver} from "../client/captcha/chaojiying";
+import {createChaojiyingSolver, createChaojiyingCodeSolver} from "../client/captcha/chaojiying";
+import {UseregClient} from "../client/usereg";
 import {config} from "../config/env";
 import type {LoginCredentials, TwoFactorHooks} from "../client/auth";
 
@@ -46,10 +48,25 @@ export function resolveCaptchaSolver(override?: CaptchaSolver): CaptchaSolver | 
     return override ?? (config.chaojiying.configured ? createChaojiyingSolver() : undefined);
 }
 
+/** .env 里可能没有 THU_USERNAME/PASSWORD（纯 Web UI 登录场景），缺失时不抛 */
+function optionalThuCredential(which: "username" | "password"): string | undefined {
+    try {
+        return config.thu[which];
+    } catch {
+        return undefined;
+    }
+}
+
 export function createAllSkills(opts: SkillAssemblyOptions = {}): Skill[] {
     const thu = opts.thuClient ?? new ThuClient(opts.authHooks, opts.credentials);
     const sports = new SportsClient(opts.credentials);
     const captchaSolver = resolveCaptchaSolver(opts.captchaSolver);
+    // 校园网自助服务（usereg）：独立客户端 + 字符验证码识别（超级鹰），缺配置时技能内给出指引
+    const usereg = new UseregClient(
+        config.chaojiying.configured ? createChaojiyingCodeSolver() : undefined,
+        opts.credentials?.username ?? optionalThuCredential("username"),
+        opts.credentials?.password ?? optionalThuCredential("password"),
+    );
     if (opts.prewarm) {
         // 后台预热登录态，失败不影响启动（首个工具调用会重试登录）
         void thu.login().catch(() => {});
@@ -66,6 +83,8 @@ export function createAllSkills(opts: SkillAssemblyOptions = {}): Skill[] {
         createGetLibraryRoomsSkill(thu),
         // Step 22a：宿舍卫生成绩（公示图 → vision 模型读，Step 15 时因纯文本模型搁置）
         createGetDormScoreSkill(thu),
+        // Step 22b：校园网余额/在线设备（usereg 直连 + 独立 cookie jar，Step 15 时因验证码搁置）
+        createGetNetworkStatusSkill(usereg),
         // Step 16：我的图书馆预约（取消场景前置查询）
         createGetMyLibraryBookingsSkill(thu),
         // 写操作：Harness 会在执行前向用户确认（requiresConfirmation）

@@ -542,7 +542,7 @@ THU-agent/                        ← 项目根（git 仓库）
                     服务。Agent 加 snapshotMessages/loadMessages。step18-web
                     传存储路径，webServer 测试默认不落盘（显式传 tmp 路径）。
                     单测 +3：重启恢复+新 system、图片剔除、destroy 清盘。
-[进行中] Step 22 复活两个被砍技能（Step 15 时砍掉，前置障碍现已被扫清）：
+[已完成] Step 22 复活两个被砍技能（Step 15 时砍掉，前置障碍现已被扫清）：
                   ① [已完成] get_dorm_score 宿舍卫生：ThuClient 包装
                     helper.getDormScore（实测确认 lib uFetch 对 image/*
                     Content-Type 返回 base64，公示图数据合法）；Skill 保持
@@ -554,10 +554,22 @@ THU-agent/                        ← 项目根（git 仓库）
                     单测 +5（skill 4 + agentLoop 带图 1）。
                     ⚠ 真链验证待做：需要 Web UI 登录后问"宿舍卫生成绩"，
                     确认 vision 模型能读公示图报分。
-                  ② get_network_status 校园网（usereg）：当时卡图形验证码；
-                    超级鹰通道已在体育预约跑通（复用）。UseregClient 独立
-                    cookie jar（m.myhome 教训）：验证码图 → 识别 → 登录 →
-                    余额/在线设备，识别失败换图重试 ≤3 次。
+                  ② [已完成] get_network_status 校园网（usereg）：新建
+                    src/client/usereg.ts 完全独立实现（lib 的 uFetch 全局
+                    jar 不分域名，usereg 的 ASP.NET 会话 cookie 会顶掉
+                    m.myhome 等会话——m.myhome 同款坑，故不走近 lib 通道）：
+                    手动 follow 重定向逐跳收 Set-Cookie 的独立 jar、
+                    node:crypto RSA/PKCS1 加密（替代 lib 的 jsencrypt）、
+                    无 cheerio 正则解析表格。登录链路与 lib network.ts 同源：
+                    /login 页取 csrf-token+#public 公钥+_csrf-8800 →
+                    /site/captcha 验证码 → 超级鹰字符识别（新增
+                    createChaojiyingCodeSolver，codetype 1902）→
+                    /site/validate-user → /login 表单；识别失败换图重试 ≤3。
+                    默认直连 usereg.tsinghua.edu.cn（USEREG_BASE_URL 可覆盖），
+                    校外 webvpn 场景待真链验证后再议。
+                    单测 +4：本地假 usereg 站点全链路（RSA 密文用测试私钥
+                    解密校验、错码换图重试、三连败报错、skill 降级）。
+                    ⚠ 真链验证待做：需校园网环境 + 超级鹰配置实测登录与解析。
 [计划中] Step 23 主动式能力（从被动应答到主动 Agent）：
                   核心设计：LLM 只负责"创建任务"（走确认流），到点执行走
                   确定性代码路径直接调 skill.execute，不再烧 LLM。
