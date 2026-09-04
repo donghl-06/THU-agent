@@ -2142,9 +2142,9 @@ q.addEventListener("keydown", (e) => {
     sendBtn.click();
   }
 });
-/* 初始只显示欢迎页，不自动恢复上次会话内容（历史会话在侧栏点开查看）——
-   未登录、刚登录、新建对话三种状态都落在同一个干净画面 */
-resetChatView();
+/* 启动时恢复当前会话的聊天记录与侧栏列表（2026-09-04 用户反馈：刷新不应丢记录）；
+   空会话自然落在欢迎页 */
+renderMessages(activeSession()?.messages ?? []);
 renderSessionList();
 q.focus();
 </script>
