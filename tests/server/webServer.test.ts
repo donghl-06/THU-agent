@@ -802,6 +802,76 @@ describe("Web 服务端", () => {
     });
 });
 
+describe("UI 访问口令（UI_TOKEN 鉴权）", () => {
+    let server: Server | undefined;
+    let base = "";
+    const savedToken = process.env.UI_TOKEN;
+
+    afterEach(async () => {
+        if (server) await new Promise((r) => server!.close(r));
+        server = undefined;
+        if (savedToken === undefined) delete process.env.UI_TOKEN;
+        else process.env.UI_TOKEN = savedToken;
+    });
+
+    async function startWithToken(): Promise<void> {
+        process.env.UI_TOKEN = "secret-pass";
+        server = createWebServer((confirm: ConfirmFn) =>
+            new Agent([echoSkill], "测试", fakeLlm([textMsg("x")]), async (call, skill) => confirm(call, skill)),
+            {requireLogin: false});
+        await new Promise<void>((r) => server!.listen(0, "127.0.0.1", r));
+        base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    }
+
+    it("启用口令：豁免清单放行，其余无 cookie 一律 403", async () => {
+        await startWithToken();
+        // 豁免：首页 / capabilities / 口令端点 / manifest
+        expect((await fetch(`${base}/`)).status).toBe(200);
+        expect((await fetch(`${base}/api/capabilities`)).status).toBe(200);
+        expect((await fetch(`${base}/manifest.webmanifest`)).status).toBe(404); // 404=过了守卫（无该路由处理不算 403）
+        // 拦截：其他 API 无 cookie → 403
+        expect((await fetch(`${base}/api/auth/status`)).status).toBe(403);
+        expect((await fetch(`${base}/api/chat`, {method: "POST", body: "{}"})).status).toBe(403);
+    });
+
+    it("口令正确种 cookie，之后放行；错误口令 403", async () => {
+        await startWithToken();
+        const bad = await fetch(`${base}/api/ui/auth`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({token: "wrong"}),
+        });
+        expect(bad.status).toBe(403);
+
+        const good = await fetch(`${base}/api/ui/auth`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({token: "secret-pass"}),
+        });
+        expect(good.status).toBe(200);
+        const setCookie = good.headers.get("set-cookie") ?? "";
+        expect(setCookie).toContain("ui_token=secret-pass");
+        expect(setCookie).toContain("SameSite=Strict");
+
+        const cookie = setCookie.split(";")[0];
+        const authed = await fetch(`${base}/api/auth/status`, {headers: {Cookie: cookie}});
+        expect(authed.status).toBe(200);
+    });
+
+    it("未配置口令：一切照旧（不启用鉴权）", async () => {
+        delete process.env.UI_TOKEN;
+        server = createWebServer((confirm: ConfirmFn) =>
+            new Agent([echoSkill], "测试", fakeLlm([textMsg("x")]), async (call, skill) => confirm(call, skill)),
+            {requireLogin: false});
+        await new Promise<void>((r) => server!.listen(0, "127.0.0.1", r));
+        base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+        expect((await fetch(`${base}/api/auth/status`)).status).toBe(200);
+        // 口令端点报告未启用
+        const auth = await fetch(`${base}/api/ui/auth`, {method: "POST", body: "{}"});
+        expect((await auth.json()).enabled).toBe(false);
+    });
+});
+
 describe("会话持久化（Step 21c）", () => {
     let server: Server | undefined;
     let base = "";

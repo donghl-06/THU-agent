@@ -56,6 +56,12 @@ export const config = {
             return Number.isFinite(v) && v > 0 ? v : undefined;
         },
     },
+    /** Web UI 访问口令（局域网开放时防同网他人使用）。未配置 = 不启用鉴权 */
+    ui: {
+        get token(): string {
+            return process.env.UI_TOKEN ?? "";
+        },
+    },
     /** 校历：学期第一教学周的周一日期（YYYY-MM-DD）。配置后 system prompt 注入教学周 */
     calendar: {
         get semesterStart(): string | undefined {

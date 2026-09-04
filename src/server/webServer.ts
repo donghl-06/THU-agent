@@ -10,6 +10,8 @@
  * 接口：
  *   GET  /              → 单页前端
  *   GET  /api/capabilities → {vision}  前端据此显隐图片上传入口
+ *   POST /api/ui/auth   → {token} → 正确则种 ui_token cookie（.env 配 UI_TOKEN 才启用鉴权；
+ *                          启用时豁免清单之外的所有请求都需携带该 cookie，否则 403）
  *   POST /api/chat      → {question, sessionId?, images?} → SSE 流，事件：
  *       （sessionId 标识前端会话，缺省/非法落到 "default"；每个会话一个
  *         Agent 各自延续上下文，但共享同一登录态——见 agentFactory 实现）
@@ -215,6 +217,46 @@ export function createWebServer(
     let titleLlmClient: LlmClient | undefined;
     /** 已生成过概括式标题的会话（每会话只烧一次轻量调用） */
     const titledSessions = new Set<string>();
+
+    // ===== Web UI 访问口令（.env 配 UI_TOKEN 才启用；局域网开放时防同网他人使用）=====
+    // 豁免清单：首页（要加载页面才能输口令）、capabilities（启动器/打包冒烟的探活端点，
+    // 只暴露 vision 布尔值）、manifest 与图标（无敏感）。其余一律 403。
+    const uiAuthEnabled = (): boolean => config.ui.token.length > 0;
+    const cookieOf = (req: IncomingMessage, name: string): string | undefined => {
+        const header = req.headers.cookie;
+        if (!header) return undefined;
+        for (const pair of header.split(";")) {
+            const eq = pair.indexOf("=");
+            if (eq > 0 && pair.slice(0, eq).trim() === name) return pair.slice(eq + 1).trim();
+        }
+        return undefined;
+    };
+    const uiAuthorized = (req: IncomingMessage): boolean => {
+        if (!uiAuthEnabled()) return true;
+        return cookieOf(req, "ui_token") === config.ui.token;
+    };
+    const handleUiAuth = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+        if (!uiAuthEnabled()) {
+            res.writeHead(200, {"Content-Type": "application/json"}).end(JSON.stringify({enabled: false}));
+            return;
+        }
+        let parsed: {token?: unknown};
+        try {
+            parsed = JSON.parse(await readBody(req)) as {token?: unknown};
+        } catch {
+            res.writeHead(400).end("bad json");
+            return;
+        }
+        if (parsed.token !== config.ui.token) {
+            res.writeHead(403, {"Content-Type": "application/json"}).end(JSON.stringify({ok: false}));
+            return;
+        }
+        // 口令种成持久 cookie：前端输一次即可，浏览器对所有请求自动携带（SameSite 防 CSRF）
+        res.writeHead(200, {
+            "Content-Type": "application/json",
+            "Set-Cookie": `ui_token=${config.ui.token}; Path=/; Max-Age=31536000; SameSite=Strict`,
+        }).end(JSON.stringify({ok: true}));
+    };
 
     // 多会话：前端每个会话一个 Agent（各自 messages 延续上下文，互不串味）。
     // 登录态仍全局共享——agentFactory 侧复用同一 ThuClient，登录一次全会话可用。
@@ -761,8 +803,19 @@ export function createWebServer(
                 res.end(JSON.stringify({vision: config.llm.vision}));
                 return;
             }
+            // UI 口令守卫：豁免清单之外的一切请求，未携带正确口令 cookie 时 403
+            // （前端以 403 区别于清华未登录的 401，据此弹出"输入访问口令"遮罩）
+            const uiAuthExempt =
+                (req.method === "POST" && url.pathname === "/api/ui/auth") ||
+                (req.method === "GET" && url.pathname === "/manifest.webmanifest") ||
+                (req.method === "GET" && url.pathname.startsWith("/icons/"));
+            if (!uiAuthExempt && !uiAuthorized(req)) {
+                res.writeHead(403, {"Content-Type": "application/json"}).end(JSON.stringify({uiAuth: true}));
+                return;
+            }
             if (req.method === "GET" && url.pathname === "/api/auth/status") return handleAuthStatus(res);
             if (req.method === "POST" && url.pathname === "/api/auth/login") return handleAuthLogin(req, res);
+            if (req.method === "POST" && url.pathname === "/api/ui/auth") return handleUiAuth(req, res);
             if (req.method === "POST" && url.pathname === "/api/auth/logout") return handleAuthLogout(res);
             if (req.method === "POST" && url.pathname === "/api/chat/cancel") return handleChatCancel(res);
             if (req.method === "POST" && url.pathname === "/api/session/destroy") return handleSessionDestroy(req, res);

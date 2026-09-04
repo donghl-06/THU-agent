@@ -371,6 +371,15 @@
   .cal-card .cal-sub { font-size: 12px; color: var(--muted); margin-top: 3px; }
   .cal-card button { margin-top: 10px; padding: 7px 16px; border: none; border-radius: 8px; background: var(--primary); color: #fff; font-size: 13px; cursor: pointer; }
   .cal-card button:hover { background: var(--primary-strong); }
+  /* UI 访问口令遮罩（.env 配置 UI_TOKEN 后局域网访问需先输入一次） */
+  #ui-auth-mask { position: fixed; inset: 0; z-index: 60; background: var(--bg); display: grid; place-items: center; }
+  #ui-auth-mask[hidden] { display: none; }
+  .ui-auth-card { width: min(320px, 88vw); background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 24px 22px; display: flex; flex-direction: column; gap: 12px; }
+  .ui-auth-title { font-size: 15px; font-weight: 600; }
+  #ui-token-input { padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--inset); color: var(--text); font-size: 14px; outline: none; }
+  #ui-token-input:focus { border-color: var(--primary); }
+  #ui-token-ok { padding: 10px; border: none; border-radius: 9px; background: var(--primary); color: #fff; font-size: 14px; cursor: pointer; }
+  .ui-auth-err { font-size: 12px; color: var(--err); min-height: 16px; }
   /* Composer：卡片式输入区（文档十二） */
   #composer-wrap { padding: 12px max(24px, calc((100% - 1040px) / 2)) 20px; }
   .quick-chips { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 2px 8px; }
@@ -668,6 +677,14 @@ if(__exports != exports)module.exports = exports;return module.exports}));
   </div>
 </div>
 <div id="toasts"></div>
+<div id="ui-auth-mask" hidden>
+  <div class="ui-auth-card">
+    <div class="ui-auth-title">🔒 输入访问口令</div>
+    <input id="ui-token-input" type="password" placeholder="访问口令（.env 里的 UI_TOKEN）" autocomplete="off">
+    <button id="ui-token-ok" type="button">进入</button>
+    <div id="ui-auth-err" class="ui-auth-err"></div>
+  </div>
+</div>
 <button id="scroll-btn" type="button" title="回到底部" hidden>↓</button>
 <div id="composer-wrap">
   <div id="quick-chips" class="quick-chips" hidden></div>
@@ -1978,6 +1995,46 @@ authSubmit.onclick = () => { if (authPhase === "code") void submitAuthCode(); el
 authCode.addEventListener("keydown", (e) => {
   if (e.key === "Enter") void submitAuthCode();
 });
+
+/* ---- UI 访问口令（.env 配 UI_TOKEN 后，局域网访问需先输一次；正确后种 cookie 一年有效） ---- */
+const uiAuthMask = document.getElementById("ui-auth-mask");
+const uiTokenInput = document.getElementById("ui-token-input");
+const uiAuthErr = document.getElementById("ui-auth-err");
+async function checkUiAuth() {
+  try {
+    const resp = await fetch("/api/auth/status");
+    if (resp.status === 403) {
+      uiAuthMask.hidden = false;
+      uiTokenInput.focus();
+      return false;
+    }
+  } catch { /* 网络错误不挡页面 */ }
+  return true;
+}
+async function submitUiToken() {
+  const token = uiTokenInput.value;
+  if (!token) { uiAuthErr.textContent = "请输入口令"; return; }
+  uiAuthErr.textContent = "";
+  try {
+    const resp = await fetch("/api/ui/auth", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({token}),
+    });
+    if (resp.ok) {
+      location.reload(); // cookie 已种，刷新走正常初始化
+      return;
+    }
+    uiAuthErr.textContent = "口令不正确";
+  } catch (e) {
+    uiAuthErr.textContent = "请求失败：" + e.message;
+  }
+}
+document.getElementById("ui-token-ok").onclick = submitUiToken;
+uiTokenInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") submitUiToken();
+});
+checkUiAuth();
 
 fetch("/api/auth/status").then((resp) => resp.json()).then((data) => {
   authenticated = data.authenticated === true;

@@ -84,6 +84,8 @@ ${exitInstructions}
 
 清华账号和验证码不会写入文件。
 程序只监听本机 127.0.0.1，不会对局域网开放。
+如需在局域网内（如手机）访问：在 .env 里配置 UI_TOKEN=自定义口令，
+然后同一 WiFi 的设备访问 http://<本机IP>:3457，输入该口令即可。
 `);
 
 console.log(`Windows 发布包已生成：${release}`);
