@@ -72,6 +72,7 @@ wait $NODE_PID
 await writeFile(join(release, "README.txt"), `清华小助手（macOS 便携版）
 
 1. 将本文件夹中的 .env.example 复制为 .env。
+   （以点开头的文件在访达中默认隐藏，按 Cmd+Shift+. 即可显示。）
 2. 打开 .env，至少填写 LLM_API_KEY；按需填写 LLM_BASE_URL、LLM_MODEL。
 3. 双击"清华小助手.command"（首次若被 Gatekeeper 拦截：右键该文件 → 打开 → 确认；
    或在"系统设置 → 隐私与安全性"里允许）。程序会自动启动服务并打开浏览器。

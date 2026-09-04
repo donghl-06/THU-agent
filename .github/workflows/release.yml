@@ -27,6 +27,7 @@ jobs:
       - run: pnpm package:mac
       - uses: actions/upload-artifact@v4
         with:
+          include-hidden-files: true # .env.example 是点开头文件，默认会被排除
           name: QingLing-macOS-arm64
           path: release/
 
@@ -52,6 +53,7 @@ jobs:
           cp /tmp/node-x64/bin/node "release/清华小助手-macOS/runtime/node"
       - uses: actions/upload-artifact@v4
         with:
+          include-hidden-files: true # .env.example 是点开头文件，默认会被排除
           name: QingLing-macOS-x64
           path: release/
 
@@ -69,6 +71,7 @@ jobs:
       - run: pnpm package:win
       - uses: actions/upload-artifact@v4
         with:
+          include-hidden-files: true # .env.example 是点开头文件，默认会被排除
           name: QingLing-Windows-EXE
           path: release/
 

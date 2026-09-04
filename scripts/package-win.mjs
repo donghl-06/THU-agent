@@ -80,6 +80,7 @@ const exitInstructions = hasTrayLauncher
 await writeFile(join(release, "README.txt"), `清华小助手（Windows 便携版）
 
 1. 将本文件夹中的 .env.example 复制为 .env。
+   （以点开头的文件在 macOS 访达中默认隐藏，按 Cmd+Shift+. 显示；Windows 资源管理器直接可见。）
 2. 打开 .env，填写 LLM_API_KEY；按需填写 LLM_BASE_URL、LLM_MODEL。清华账号也可以直接在网页右上角登录时填写。
 3. 双击“清华小助手.exe”，程序会自动启动服务并打开浏览器。
 4. 在网页右上角点击“登录”，输入清华 Info 学号、密码和二次验证码。
