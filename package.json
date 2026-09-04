@@ -19,9 +19,13 @@
     "benchmark": "OPENSSL_CONF=${PWD}/openssl.cnf tsx eval/benchmark.ts",
     "build": "node scripts/build-release.mjs",
     "package:win": "node scripts/package-win.mjs",
+    "package:win:exe": "node scripts/package-win.mjs",
+    "package:win:mcp": "node scripts/package-mcp-win.mjs",
+    "package:win:all": "node scripts/package-all-win.mjs",
     "gen:icons": "node scripts/gen-icons.mjs",
     "package:mac": "node scripts/package-mac.mjs",
-    "web": "tsx scripts/step18-web.ts"
+    "web": "tsx scripts/step18-web.ts",
+    "mcp": "tsx scripts/mcp-server.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

@@ -5,7 +5,7 @@ import {dirname, join, resolve} from "node:path";
 import {fileURLToPath} from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const release = join(root, "release", "清华小助手");
+const release = join(root, "release", "清华小助手-EXE");
 const app = join(release, "app");
 const runtime = join(release, "runtime");
 const launcherProject = join(root, "packaging", "WindowsLauncher", "WindowsLauncher.csproj");
@@ -13,7 +13,7 @@ const launcherPublish = join(root, "packaging", "WindowsLauncher", "bin", "Relea
 const seaLauncher = join(root, "packaging", "sea-launcher.cjs");
 const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 
-await rm(join(root, "release"), {recursive: true, force: true});
+await rm(release, {recursive: true, force: true});
 await mkdir(runtime, {recursive: true});
 
 execFileSync(pnpmCommand, ["run", "build"], {
@@ -27,6 +27,9 @@ execFileSync(pnpmCommand, ["--filter", ".", "deploy", "--prod", "--legacy", app]
     ...(process.platform === "win32" ? {shell: true} : {}),
 });
 await cp(join(root, "dist"), join(app, "dist"), {recursive: true});
+// EXE 包是独立的网页聊天模式，不携带 MCP 连接入口。
+await rm(join(app, "dist", "scripts", "mcp-server.cjs"), {force: true});
+await rm(join(app, "dist", "scripts", "mcp-login.cjs"), {force: true});
 await cp(join(root, "openssl.cnf"), join(release, "openssl.cnf"));
 await cp(join(root, ".env.example"), join(release, ".env.example"));
 await cp(process.execPath, join(runtime, "node.exe"));
@@ -77,7 +80,7 @@ const exitInstructions = hasTrayLauncher
 await writeFile(join(release, "README.txt"), `清华小助手（Windows 便携版）
 
 1. 将本文件夹中的 .env.example 复制为 .env。
-2. 打开 .env，至少填写 LLM_API_KEY；按需填写 LLM_BASE_URL、LLM_MODEL。
+2. 打开 .env，填写 LLM_API_KEY；按需填写 LLM_BASE_URL、LLM_MODEL。清华账号也可以直接在网页右上角登录时填写。
 3. 双击“清华小助手.exe”，程序会自动启动服务并打开浏览器。
 4. 在网页右上角点击“登录”，输入清华 Info 学号、密码和二次验证码。
 ${exitInstructions}

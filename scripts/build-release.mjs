@@ -8,12 +8,17 @@ const dist = join(root, "dist");
 
 await rm(dist, {recursive: true, force: true});
 await build({
-    entryPoints: [join(root, "scripts", "step18-web.ts")],
+    entryPoints: [
+        join(root, "scripts", "step18-web.ts"),
+        join(root, "scripts", "mcp-server.ts"),
+        join(root, "scripts", "mcp-login.ts"),
+    ],
     bundle: true,
-    outfile: join(dist, "scripts", "step18-web.cjs"),
+    outdir: join(dist, "scripts"),
     platform: "node",
     format: "cjs",
     target: "node22",
+    outExtension: {".js": ".cjs"},
     keepNames: true,
     sourcemap: false,
     logLevel: "warning",
