@@ -21,6 +21,7 @@
  *       auth    {phase,...}                二次认证交互（前端弹窗）
  *       qr      {url, dataUrl?}           支付二维码（data URL 图片）
  *       payform {html}                    自动提交的支付表单（前端渲染"前往支付"按钮，新窗口提交到学校支付平台）
+ *       calendar {title,filename,icsContent} 预约成功的日历卡片（前端渲染"下载日历"按钮）
  *       answer  {text}                    最终完整回答（前端校对用）
  *       usage   {promptTokens,completionTokens,totalTokens,costYuan?} 本轮 token 用量（costYuan 仅在 .env 配了 LLM_PRICE_* 时出现）
  *       done    {}                        本轮结束
@@ -52,6 +53,7 @@ import type {TokenUsage} from "../harness/types";
 import {config} from "../config/env";
 import {SessionStore} from "./sessionStore";
 import {NotificationHub} from "./notificationHub";
+import {extractCalendarEvent} from "./calendar";
 import {taskSessionContext} from "../tasks/sessionContext";
 import type {TaskScheduler} from "../tasks/scheduler";
 import type {LoginCredentials, TwoFactorHooks} from "../client/auth";
@@ -500,7 +502,8 @@ export function createWebServer(
                 .map((toolCall) => extractAuthFailure(toolCall.result))
                 .find((message): message is string => Boolean(message));
             if (authFailure) sseSend(res, "auth", {phase: "error", message: authFailure});
-            // 工具结果里有支付链接的，生成二维码推给前端；有支付表单的，推原始 HTML 让前端出"前往支付"按钮
+            // 工具结果里有支付链接的，生成二维码推给前端；有支付表单的，推原始 HTML 让前端出"前往支付"按钮；
+            // 预约成功的，推现成的 .ics 文本让前端出"加入日历"按钮
             for (const t of result.toolCalls) {
                 const payUrl = extractPayUrl(t.result);
                 if (payUrl) {
@@ -510,6 +513,10 @@ export function createWebServer(
                 const payFormHtml = extractPayFormHtml(t.result);
                 if (payFormHtml) {
                     sseSend(res, "payform", {html: payFormHtml});
+                }
+                const cal = extractCalendarEvent(t.name, t.result);
+                if (cal) {
+                    sseSend(res, "calendar", {title: cal.title, filename: cal.filename, icsContent: cal.icsContent});
                 }
             }
             sseSend(res, "answer", {text: result.answer});

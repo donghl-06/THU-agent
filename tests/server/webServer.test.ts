@@ -371,6 +371,36 @@ describe("Web 服务端", () => {
         expect(usage?.data.promptTokens).toBe(100);
     });
 
+    it("预约成功的工具结果发 calendar 事件（含现成 ics 文本）", async () => {
+        const bookSkill: Skill = {
+            name: "book_sports_field",
+            description: "假预约，仅测试用",
+            inputSchema: {type: "object", properties: {}},
+            async execute() {
+                return ok({
+                    venue: "气膜馆羽毛球", field: "羽03",
+                    date: "2026-09-06", time: "06:00-07:30",
+                    orderGenerated: false, freeOrder: true,
+                    message: "预约成功。",
+                });
+            },
+        };
+        await start([toolCallMsg("book_sports_field", {}), textMsg("订好了")], [bookSkill]);
+        const resp = await fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question: "约场地"}),
+        });
+        const events = await readSse(resp);
+        const cal = events.find((e) => e.event === "calendar");
+        expect(cal?.data.title).toBe("气膜馆羽毛球（羽03）");
+        expect(String(cal?.data.filename)).toMatch(/\.ics$/);
+        const ics = String(cal?.data.icsContent);
+        expect(ics).toContain("BEGIN:VCALENDAR");
+        expect(ics).toContain("DTSTART:20260906T060000");
+        expect(ics).toContain("TRIGGER:-PT15M");
+    });
+
     it("skill 能读到当前会话 id（任务归属用）", async () => {
         let seenSession: string | undefined;
         const sessionSkill: Skill = {

@@ -352,6 +352,11 @@
   .pay-card { align-self: flex-start; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; text-align: center; max-width: 320px; }
   .pay-card button { padding: 10px 24px; border: none; border-radius: 9px; background: var(--primary); color: #fff; font-size: 14px; cursor: pointer; }
   .pay-card .tip { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .cal-card { align-self: flex-start; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; max-width: 360px; }
+  .cal-card .cal-title { font-size: 14px; font-weight: 600; }
+  .cal-card .cal-sub { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .cal-card button { margin-top: 10px; padding: 7px 16px; border: none; border-radius: 8px; background: var(--primary); color: #fff; font-size: 13px; cursor: pointer; }
+  .cal-card button:hover { background: var(--primary-strong); }
   /* Composer：卡片式输入区（文档十二） */
   #composer-wrap { padding: 12px max(24px, calc((100% - 1040px) / 2)) 20px; }
   .quick-chips { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 2px 8px; }
@@ -1552,6 +1557,35 @@ function showPayForm(data) {
   scrollDown();
 }
 
+/* 预约成功的日历卡片：点击下载 .ics（文本由后端生成，直接 Blob 保存） */
+function showCalendarCard(data) {
+  const div = document.createElement("div");
+  div.className = "cal-card";
+  const title = document.createElement("div");
+  title.className = "cal-title";
+  title.textContent = "📅 " + data.title;
+  const sub = document.createElement("div");
+  sub.className = "cal-sub";
+  sub.textContent = "下载后导入手机/电脑日历，到点自动提醒";
+  const btn = document.createElement("button");
+  btn.textContent = "下载日历 (.ics)";
+  btn.onclick = () => {
+    const blob = new Blob([data.icsContent], {type: "text/calendar;charset=utf-8"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = data.filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast("日历文件已下载", "ok");
+  };
+  div.append(title, sub, btn);
+  chat.appendChild(div);
+  scrollDown();
+}
+
 /* ---- 确认弹窗 ---- */
 let confirmResolver = null;
 function showConfirm(data) {
@@ -2020,6 +2054,9 @@ async function ask(question, images) {
           showQr(data);
         } else if (ev === "payform") {
           showPayForm(data);
+        } else if (ev === "calendar") {
+          sfx.confirm();
+          showCalendarCard(data);
         } else if (ev === "answer") {
           // 最终回答校对：以完整 answer 为准，并渲染 Markdown
           botText = data.text;

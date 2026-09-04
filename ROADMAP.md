@@ -622,4 +622,16 @@ THU-agent/                        ← 项目根（git 仓库）
                     周"（开学前提示尚未开学；>20 周提示考试周或假期）；
                     step10/step18 两处 SYSTEM_PROMPT 统一换用。单测 6 个。
                   ③ 快捷指令：输入框上方常驻常用问法胶囊，点按即发送（纯前端）。
-[下一步] 远期：多用户 App（本机凭证模式）见上文；.ics 日历导出待用户单独确认
+[已完成] 日历导出一期（2026-09-04，用户确认后实施）：
+                  预约成功 → SSE calendar 事件 → 前端"下载日历 (.ics)"按钮，
+                  导入系统日历自动带 15 分钟前提醒（补上"订上了但人会忘"的最后一环）。
+                  架构：src/server/calendar.ts 的 extractCalendarEvent + buildIcs
+                  在后端生成现成 ics 文本（可单测），前端只做 Blob 下载；
+                  挂在 webServer 现有 toolCalls 遍历里（extractPayUrl 同款模式）。
+                  覆盖三个预约技能：book_sports_field / book_library_room
+                  （具体时段，floating local time）+ book_library_seat
+                  （上游无起止时间 → VALUE=DATE 全天事件，签到提醒写进描述）。
+                  待支付订单也出按钮，描述里注明"【待支付】"。
+                  单测 +10（提取 4 + ics 生成 5 + webServer SSE 1）。
+[下一步] 远期：多用户 App（本机凭证模式）见上文；日历二期（我的预约批量导出、
+                  抢场成功通知带日历卡片）待议
