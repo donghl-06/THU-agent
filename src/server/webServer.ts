@@ -31,6 +31,7 @@
  *   GET  /api/notifications → {notifications} 任务执行通知（drain 即消费，前端 30s 轮询）
  *   GET  /api/tasks         → {tasks} 定时任务列表
  *   POST /api/tasks/cancel  → {id} 取消定时任务
+ *   POST /api/session/title → {sessionId} → {title|null} 概括式会话标题（每会话只生成一次）
  *   POST /api/confirm   → {id, approved} 应答确认请求
  *   POST /api/auth/login  → {username, password} → SSE 登录流
  *   GET  /api/auth/status → {authenticated}
@@ -48,12 +49,15 @@ import {randomUUID} from "node:crypto";
 import {readFileSync} from "node:fs";
 import {join} from "node:path";
 import type {Agent} from "../harness/agentLoop";
+import type {LlmClient} from "../harness/llmClient";
+import {createLlmClient} from "../harness/llmClient";
 import type {ConfirmFn} from "../harness/toolRegistry";
 import type {TokenUsage} from "../harness/types";
 import {config} from "../config/env";
 import {SessionStore} from "./sessionStore";
 import {NotificationHub} from "./notificationHub";
 import {extractCalendarEvent} from "./calendar";
+import {generateTitle} from "./titleGen";
 import {taskSessionContext} from "../tasks/sessionContext";
 import type {TaskScheduler} from "../tasks/scheduler";
 import type {LoginCredentials, TwoFactorHooks} from "../client/auth";
@@ -188,6 +192,8 @@ export interface WebServerOptions {
     scheduler?: TaskScheduler;
     /** 通知中心（Step 23）。提供时暴露 /api/notifications 轮询端点 */
     notificationHub?: NotificationHub;
+    /** 会话标题生成的 LLM（测试注入假实例）；缺省时首次使用才懒创建真实客户端 */
+    titleLlm?: LlmClient;
 }
 
 /**
@@ -205,6 +211,10 @@ export function createWebServer(
     const store = opts.sessionStorePath ? new SessionStore(opts.sessionStorePath) : undefined;
     const scheduler = opts.scheduler;
     const hub = opts.notificationHub;
+    /** 标题生成的 LLM：懒创建（未配 LLM_API_KEY 的环境只要不触发就不报错） */
+    let titleLlmClient: LlmClient | undefined;
+    /** 已生成过概括式标题的会话（每会话只烧一次轻量调用） */
+    const titledSessions = new Set<string>();
 
     // 多会话：前端每个会话一个 Agent（各自 messages 延续上下文，互不串味）。
     // 登录态仍全局共享——agentFactory 侧复用同一 ThuClient，登录一次全会话可用。
@@ -625,6 +635,31 @@ export function createWebServer(
         res.writeHead(200, {"Content-Type": "application/json"}).end(JSON.stringify({cancelled: task.id}));
     };
 
+    /** 概括式会话标题：首轮回答后前端调用，每会话只生成一次 */
+    const handleSessionTitle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+        if (requireLogin && !authenticated) {
+            res.writeHead(401).end("not authenticated");
+            return;
+        }
+        let parsed: {sessionId?: unknown};
+        try {
+            parsed = JSON.parse(await readBody(req)) as {sessionId?: unknown};
+        } catch {
+            res.writeHead(400).end("bad json");
+            return;
+        }
+        const sid = normalizeSessionId(parsed.sessionId);
+        const agent = agents.get(sid);
+        if (!agent || titledSessions.has(sid)) {
+            res.writeHead(200, {"Content-Type": "application/json"}).end(JSON.stringify({title: null}));
+            return;
+        }
+        titledSessions.add(sid);
+        titleLlmClient ??= opts.titleLlm ?? createLlmClient();
+        const title = await generateTitle(titleLlmClient, agent.snapshotMessages());
+        res.writeHead(200, {"Content-Type": "application/json"}).end(JSON.stringify({title: title ?? null}));
+    };
+
     const handleAuthMethod = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
         let parsed: {id?: string; method?: unknown};
         try {
@@ -734,6 +769,7 @@ export function createWebServer(
             if (req.method === "GET" && url.pathname === "/api/notifications") return handleNotifications(res);
             if (req.method === "GET" && url.pathname === "/api/tasks") return handleTaskList(res);
             if (req.method === "POST" && url.pathname === "/api/tasks/cancel") return handleTaskCancel(req, res);
+            if (req.method === "POST" && url.pathname === "/api/session/title") return handleSessionTitle(req, res);
             if (req.method === "POST" && url.pathname === "/api/chat") return handleChat(req, res);
             if (req.method === "POST" && url.pathname === "/api/confirm") return handleConfirm(req, res);
             if (req.method === "POST" && url.pathname === "/api/auth/method") return handleAuthMethod(req, res);

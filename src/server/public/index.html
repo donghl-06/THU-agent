@@ -1039,6 +1039,31 @@ function renderUsageMeta(botDiv, usage) {
   botDiv.appendChild(meta);
 }
 
+/* ---- 会话标题：首轮回答后由后端 LLM 生成概括式标题（如"你好"→"打招呼"）；
+   失败保持"首条消息截取"的兜底标题。每会话只生成一次（标志随会话持久化） ---- */
+let titleGenerating = false;
+function maybeGenerateTitle() {
+  const session = activeSession();
+  if (!session || session.titleLlm || titleGenerating) return;
+  session.titleLlm = true;
+  titleGenerating = true;
+  persistSessions();
+  fetch("/api/session/title", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({sessionId: sessionsState.activeId}),
+  }).then((resp) => resp.ok ? resp.json() : null)
+    .then((data) => {
+      if (data?.title) {
+        session.title = data.title;
+        persistSessions();
+        renderSessionList();
+      }
+    })
+    .catch(() => {})
+    .finally(() => { titleGenerating = false; });
+}
+
 function newChat() {
   if (busy) { toast("请等待当前回答完成", "err"); return; }
   if (!chat.querySelector(".msg")) { toast("已经是新对话了"); closeSidebarMobile(); return; }
@@ -2072,6 +2097,7 @@ async function ask(question, images) {
           thinking.dismiss();
           saveChatHistory();
           renderSessionUsage();
+          maybeGenerateTitle();
           scrollDown();
           if (ttsOn && botText) speak(botText);
         } else if (ev === "usage") {

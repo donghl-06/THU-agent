@@ -371,6 +371,57 @@ describe("Web 服务端", () => {
         expect(usage?.data.promptTokens).toBe(100);
     });
 
+    it("会话标题端点：首轮对话后生成一次，重复调用不再生成", async () => {
+        const titleLlm = fakeLlm([textMsg("打招呼")]);
+        let titleCalls = 0;
+        const titleSpy: LlmClient = {
+            async chat() {
+                titleCalls += 1;
+                return {role: "assistant", content: "打招呼"} as ChatMessage;
+            },
+        };
+        void titleLlm;
+        server = createWebServer((confirm: ConfirmFn) =>
+                new Agent([echoSkill], "测试", fakeLlm([textMsg("你好呀！")]), async (call, skill) => confirm(call, skill)),
+            {requireLogin: false, titleLlm: titleSpy});
+        await new Promise<void>((r) => server!.listen(0, "127.0.0.1", r));
+        base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+        // 先完成一轮对话（创建会话 Agent）
+        const chat = await fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question: "你好", sessionId: "s_title"}),
+        });
+        await readSse(chat);
+
+        // 会话不存在 → title null
+        const miss = await fetch(`${base}/api/session/title`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({sessionId: "s_absent"}),
+        });
+        expect((await miss.json()).title).toBeNull();
+
+        // 首次生成
+        const first = await fetch(`${base}/api/session/title`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({sessionId: "s_title"}),
+        });
+        expect((await first.json()).title).toBe("打招呼");
+        expect(titleCalls).toBe(1);
+
+        // 防重复：第二次不再烧 LLM
+        const second = await fetch(`${base}/api/session/title`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({sessionId: "s_title"}),
+        });
+        expect((await second.json()).title).toBeNull();
+        expect(titleCalls).toBe(1);
+    });
+
     it("预约成功的工具结果发 calendar 事件（含现成 ics 文本）", async () => {
         const bookSkill: Skill = {
             name: "book_sports_field",
