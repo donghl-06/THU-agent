@@ -54,6 +54,7 @@ let thuClient: ThuClient | undefined;
 // 定时执行发生时用户通常已登录过—— SportsClient 按需自行登录）
 let sportsCredentials: LoginCredentials | undefined;
 const notificationHub = new NotificationHub();
+const authSessionPath = join(scriptDirectory, "..", "data", "auth.json");
 
 // 定时抢场执行器：确定性代码路径直接调 book_sports_field 的 execute（不再经过 LLM）
 const scheduler = new TaskScheduler(
@@ -88,7 +89,10 @@ scheduler.start();
 
 const server = createWebServer(
     (confirm: ConfirmFn, authHooks, credentials?: LoginCredentials) => {
-        thuClient ??= new ThuClient(authHooks, credentials);
+        thuClient ??= new ThuClient(authHooks, credentials, authSessionPath);
+        // 用户主动点"登录" = 强制走真实认证（覆盖可能过期的持久会话）；
+        // 首次问答等懒创建场景无 credentials，不清登录态
+        if (credentials) thuClient.logout();
         sportsCredentials = credentials ?? sportsCredentials;
         return new Agent(
             createAllSkills({
@@ -108,6 +112,7 @@ const server = createWebServer(
         port: PORT,
         indexHtmlPath,
         sessionStorePath: join(scriptDirectory, "..", "data", "sessions.json"),
+        authSessionPath,
         scheduler,
         notificationHub,
     },

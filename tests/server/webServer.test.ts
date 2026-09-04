@@ -6,9 +6,10 @@
 import {afterEach, describe, expect, it} from "vitest";
 import type {AddressInfo} from "node:net";
 import type {Server} from "node:http";
-import {readFileSync} from "node:fs";
+import {readFileSync, writeFileSync, existsSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
+import {randomUUID} from "node:crypto";
 import {Agent} from "../../src/harness/agentLoop";
 import type {LlmClient} from "../../src/harness/llmClient";
 import type {ChatMessage} from "../../src/harness/types";
@@ -897,6 +898,64 @@ describe("UI 访问口令（UI_TOKEN 鉴权）", () => {
         // 口令端点报告未启用
         const auth = await fetch(`${base}/api/ui/auth`, {method: "POST", body: "{}"});
         expect((await auth.json()).enabled).toBe(false);
+    });
+});
+
+describe("登录会话持久化（webServer 集成）", () => {
+    let server: Server | undefined;
+    let base = "";
+    let authFile = "";
+
+    afterEach(async () => {
+        if (server) await new Promise((r) => server!.close(r));
+        server = undefined;
+        if (authFile) {
+            const fs = await import("node:fs");
+            fs.rmSync(authFile, {force: true});
+            authFile = "";
+        }
+    });
+
+    it("有存档时启动即视为已登录；logout 清除存档并回到未登录", async () => {
+        // 伪造一份非空存档
+        authFile = join(tmpdir(), `thu-auth-integration-${randomUUID().slice(0, 8)}.json`);
+        writeFileSync(authFile, JSON.stringify({SFSESSION: "fake-session"}));
+
+        server = createWebServer((confirm: ConfirmFn) =>
+            new Agent([echoSkill], "测试", fakeLlm([textMsg("x")]), async (call, skill) => confirm(call, skill)),
+            {requireLogin: true, authSessionPath: authFile});
+        await new Promise<void>((r) => server!.listen(0, "127.0.0.1", r));
+        base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+        // 重启（新实例）后无需重新登录：requireLogin 模式下 chat 不再 401
+        const chat = await fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question: "你好"}),
+        });
+        expect(chat.status).toBe(200);
+        await chat.text();
+
+        // 登出：清标志 + 删存档
+        const logout = await fetch(`${base}/api/auth/logout`, {method: "POST"});
+        expect(logout.status).toBe(200);
+        expect(existsSync(authFile)).toBe(false);
+        const status = await fetch(`${base}/api/auth/status`);
+        expect((await status.json()).authenticated).toBe(false);
+    });
+
+    it("无存档时启动保持未登录（requireLogin 下 chat 401）", async () => {
+        server = createWebServer((confirm: ConfirmFn) =>
+            new Agent([echoSkill], "测试", fakeLlm([textMsg("x")]), async (call, skill) => confirm(call, skill)),
+            {requireLogin: true, authSessionPath: join(tmpdir(), `thu-auth-absent-${randomUUID().slice(0, 8)}.json`)});
+        await new Promise<void>((r) => server!.listen(0, "127.0.0.1", r));
+        base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+        const resp = await fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question: "你好"}),
+        });
+        expect(resp.status).toBe(401);
     });
 });
 

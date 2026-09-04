@@ -60,6 +60,7 @@ import {SessionStore} from "./sessionStore";
 import {NotificationHub} from "./notificationHub";
 import {extractCalendarEvent} from "./calendar";
 import {generateTitle} from "./titleGen";
+import {AuthSessionStore} from "../client/authPersist";
 import {taskSessionContext} from "../tasks/sessionContext";
 import type {TaskScheduler} from "../tasks/scheduler";
 import type {LoginCredentials, TwoFactorHooks} from "../client/auth";
@@ -196,6 +197,8 @@ export interface WebServerOptions {
     notificationHub?: NotificationHub;
     /** 会话标题生成的 LLM（测试注入假实例）；缺省时首次使用才懒创建真实客户端 */
     titleLlm?: LlmClient;
+    /** Info 登录会话存档路径：提供时服务重启自动恢复登录态（cookie 失效则回落正常登录流） */
+    authSessionPath?: string;
 }
 
 /**
@@ -225,6 +228,7 @@ export function createWebServer(
     const store = opts.sessionStorePath ? new SessionStore(opts.sessionStorePath) : undefined;
     const scheduler = opts.scheduler;
     const hub = opts.notificationHub;
+    const authPersist = opts.authSessionPath ? new AuthSessionStore(opts.authSessionPath) : undefined;
     /** 标题生成的 LLM：懒创建（未配 LLM_API_KEY 的环境只要不触发就不报错） */
     let titleLlmClient: LlmClient | undefined;
     /** 已生成过概括式标题的会话（每会话只烧一次轻量调用） */
@@ -278,6 +282,10 @@ export function createWebServer(
     /** 会话 Agent 上限（LRU 淘汰最久未用的，防长驻进程泄漏） */
     const MAX_SESSION_AGENTS = 50;
     let authenticated = false;
+    // 登录会话存档：有存档则启动即视为已登录（ThuClient 侧同步灌回 cookie，见 factory）
+    if (authPersist?.has()) {
+        authenticated = true;
+    }
     /** 当前轮的确认桥（busy 互斥保证只有一轮在跑） */
     let currentConfirm: ConfirmFn = async () => false;
     const delegatingConfirm: ConfirmFn = (call, skill) => currentConfirm(call, skill);
@@ -442,6 +450,7 @@ export function createWebServer(
             authenticated = true;
             // 默认会话直接复用登录建的 Agent；其余会话按需新建（共享同一登录态）
             agents.set(DEFAULT_SESSION, loginAgent);
+            authPersist?.save(); // 快照会话 cookie，服务重启免重新登录
             if (!authSuccessSent) sseSend(res, "auth", {phase: "success"});
             sseSend(res, "done", {});
         } catch (e) {
@@ -469,6 +478,7 @@ export function createWebServer(
         }
         agents.clear();
         authenticated = false;
+        authPersist?.clear(); // 登出清会话存档
         res.writeHead(200, {"Content-Type": "application/json"});
         res.end(JSON.stringify({authenticated: false}));
     };
