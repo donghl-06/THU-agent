@@ -1,5 +1,6 @@
 import {cp, mkdir, rm, writeFile} from "node:fs/promises";
-import {execFileSync} from "node:child_process";
+import {execFileSync, spawn} from "node:child_process";
+import net from "node:net";
 import {dirname, join, resolve} from "node:path";
 import {fileURLToPath} from "node:url";
 
@@ -86,3 +87,47 @@ ${exitInstructions}
 `);
 
 console.log(`Windows 发布包已生成：${release}`);
+
+// ===== 冒烟验证：用打包产物自己起一次服务，探活 /api/capabilities =====
+// 启动器就靠这个端点判断"服务就绪"，这里跑通了才报打包成功——
+// 骨架契约（入口文件、capabilities 端点等）被无意破坏时当场暴露，而不是发出去才发现。
+const findFreePort = (start, count) => new Promise((resolvePort, rejectPort) => {
+    let port = start;
+    const tryNext = () => {
+        if (port >= start + count) return rejectPort(new Error("找不到可用端口"));
+        const listener = net.createServer();
+        listener.once("error", () => {
+            listener.close();
+            port += 1;
+            tryNext();
+        });
+        listener.listen(port, "127.0.0.1", () => listener.close(() => resolvePort(port)));
+    };
+    tryNext();
+});
+
+console.log("冒烟验证：用打包产物启动一次本地服务……");
+const smokePort = await findFreePort(39457, 20);
+const smoke = spawn(join(runtime, "node.exe"), [join(app, "dist", "scripts", "step18-web.cjs")], {
+    cwd: release,
+    env: {...process.env, PORT: String(smokePort), HOST: "127.0.0.1", OPENSSL_CONF: join(release, "openssl.cnf")},
+    stdio: ["ignore", "pipe", "pipe"],
+});
+let smokeOutput = "";
+smoke.stdout.on("data", (chunk) => { smokeOutput += chunk; });
+smoke.stderr.on("data", (chunk) => { smokeOutput += chunk; });
+let smokeOk = false;
+for (let i = 0; i < 60; i += 1) {
+    if (smoke.exitCode !== null) break; // 进程已退出，等不等都一样
+    try {
+        const resp = await fetch(`http://127.0.0.1:${smokePort}/api/capabilities`);
+        if (resp.ok) { smokeOk = true; break; }
+    } catch { /* 还没起好，继续等 */ }
+    await new Promise((r) => setTimeout(r, 250));
+}
+smoke.kill();
+if (!smokeOk) {
+    console.error(`冒烟验证失败：打包产物未能启动本地服务（端口 ${smokePort}）。\n进程输出：\n${smokeOutput.slice(0, 2000)}`);
+    process.exit(1);
+}
+console.log(`冒烟验证通过：/api/capabilities 响应正常（探活端口 ${smokePort}）。`);
