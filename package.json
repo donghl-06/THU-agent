@@ -19,6 +19,7 @@
     "benchmark": "OPENSSL_CONF=${PWD}/openssl.cnf tsx eval/benchmark.ts",
     "build": "node scripts/build-release.mjs",
     "package:win": "node scripts/package-win.mjs",
+    "gen:icons": "node scripts/gen-icons.mjs",
     "web": "tsx scripts/step18-web.ts"
   },
   "devDependencies": {

@@ -1,4 +1,4 @@
-import {copyFile, mkdir, rm} from "node:fs/promises";
+import {copyFile, cp, mkdir, rm} from "node:fs/promises";
 import {build} from "esbuild";
 import {dirname, join} from "node:path";
 import {fileURLToPath} from "node:url";
@@ -20,8 +20,10 @@ await build({
 });
 
 await mkdir(join(dist, "src", "server", "public"), {recursive: true});
-await copyFile(
-    join(root, "src", "server", "public", "index.html"),
-    join(dist, "src", "server", "public", "index.html"),
+// 前端静态资源整目录带走：index.html + manifest.webmanifest + icons/（PWA 图标）
+await cp(
+    join(root, "src", "server", "public"),
+    join(dist, "src", "server", "public"),
+    {recursive: true},
 );
 await copyFile(join(root, "openssl.cnf"), join(dist, "openssl.cnf"));

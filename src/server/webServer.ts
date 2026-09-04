@@ -49,7 +49,7 @@
 import {createServer, type IncomingMessage, type ServerResponse, type Server} from "node:http";
 import {randomUUID} from "node:crypto";
 import {readFileSync} from "node:fs";
-import {join} from "node:path";
+import {dirname, join} from "node:path";
 import type {Agent} from "../harness/agentLoop";
 import type {LlmClient} from "../harness/llmClient";
 import {createLlmClient} from "../harness/llmClient";
@@ -210,6 +210,18 @@ export function createWebServer(
     const requireLogin = opts.requireLogin ?? true;
     const indexPath = opts.indexHtmlPath ?? join(process.cwd(), "src", "server", "public", "index.html");
     const indexHtml = readFileSync(indexPath, "utf8");
+    // PWA 静态资源（与 index.html 同目录）：读不到（如测试注入临时 HTML）时对应路由 404
+    const readOptional = (p: string): Buffer | undefined => {
+        try {
+            return readFileSync(p);
+        } catch {
+            return undefined;
+        }
+    };
+    const publicDir = dirname(indexPath);
+    const manifest = readOptional(join(publicDir, "manifest.webmanifest"));
+    const icon192 = readOptional(join(publicDir, "icons", "icon-192.png"));
+    const icon512 = readOptional(join(publicDir, "icons", "icon-512.png"));
     const store = opts.sessionStorePath ? new SessionStore(opts.sessionStorePath) : undefined;
     const scheduler = opts.scheduler;
     const hub = opts.notificationHub;
@@ -801,6 +813,21 @@ export function createWebServer(
             if (req.method === "GET" && url.pathname === "/api/capabilities") {
                 res.writeHead(200, {"Content-Type": "application/json"});
                 res.end(JSON.stringify({vision: config.llm.vision}));
+                return;
+            }
+            if (req.method === "GET" && url.pathname === "/manifest.webmanifest" && manifest) {
+                res.writeHead(200, {"Content-Type": "application/manifest+json"});
+                res.end(manifest);
+                return;
+            }
+            if (req.method === "GET" && url.pathname === "/icons/icon-192.png" && icon192) {
+                res.writeHead(200, {"Content-Type": "image/png"});
+                res.end(icon192);
+                return;
+            }
+            if (req.method === "GET" && url.pathname === "/icons/icon-512.png" && icon512) {
+                res.writeHead(200, {"Content-Type": "image/png"});
+                res.end(icon512);
                 return;
             }
             // UI 口令守卫：豁免清单之外的一切请求，未携带正确口令 cookie 时 403

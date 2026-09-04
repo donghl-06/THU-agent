@@ -825,13 +825,29 @@ describe("UI 访问口令（UI_TOKEN 鉴权）", () => {
 
     it("启用口令：豁免清单放行，其余无 cookie 一律 403", async () => {
         await startWithToken();
-        // 豁免：首页 / capabilities / 口令端点 / manifest
+        // 豁免：首页 / capabilities / 口令端点 / manifest / 图标
         expect((await fetch(`${base}/`)).status).toBe(200);
         expect((await fetch(`${base}/api/capabilities`)).status).toBe(200);
-        expect((await fetch(`${base}/manifest.webmanifest`)).status).toBe(404); // 404=过了守卫（无该路由处理不算 403）
+        expect((await fetch(`${base}/manifest.webmanifest`)).status).toBe(200);
+        expect((await fetch(`${base}/icons/icon-192.png`)).status).toBe(200);
         // 拦截：其他 API 无 cookie → 403
         expect((await fetch(`${base}/api/auth/status`)).status).toBe(403);
         expect((await fetch(`${base}/api/chat`, {method: "POST", body: "{}"})).status).toBe(403);
+    });
+
+    it("PWA 静态资源：manifest 与图标可访问且类型正确", async () => {
+        await startWithToken();
+        const manifest = await fetch(`${base}/manifest.webmanifest`);
+        expect(manifest.status).toBe(200);
+        expect(manifest.headers.get("content-type")).toContain("application/manifest+json");
+        const manifestJson = (await manifest.json()) as {name?: string; icons?: unknown[]};
+        expect(manifestJson.name).toContain("清灵");
+        expect(manifestJson.icons).toHaveLength(2);
+        const icon = await fetch(`${base}/icons/icon-512.png`);
+        expect(icon.status).toBe(200);
+        expect(icon.headers.get("content-type")).toBe("image/png");
+        // 未提供资源文件的路由 404（如测试注入临时 HTML 时）
+        expect((await fetch(`${base}/icons/icon-absent.png`)).status).toBe(404);
     });
 
     it("口令正确种 cookie，之后放行；错误口令 403", async () => {
