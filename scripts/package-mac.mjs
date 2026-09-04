@@ -6,7 +6,7 @@
  * 末尾同款冒烟验证：用打出来的产物起服务探活 /api/capabilities。
  *
  * 运行：pnpm package:mac
- * 产物：release/清华小助手/（压缩整个文件夹分发）
+ * 产物：release/清华小助手-macOS/（压缩整个文件夹分发）
  */
 import {chmod, cp, mkdir, rm, writeFile} from "node:fs/promises";
 import {execFileSync, spawn} from "node:child_process";
@@ -15,22 +15,25 @@ import {dirname, join, resolve} from "node:path";
 import {fileURLToPath} from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const release = join(root, "release", "清华小助手");
+const release = join(root, "release", "清华小助手-macOS");
 const app = join(release, "app");
 const runtime = join(release, "runtime");
 const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 
 if (process.platform !== "darwin") {
-    console.error("package:mac 只能在 macOS 上运行（Node 二进制与启动器都随打包机平台）。Windows 用户请用 pnpm package:win。");
+    console.error("package:mac 只能在 macOS 上运行（Node 二进制与启动器都随打包机平台）。Windows 用户请用 pnpm package:win:exe。");
     process.exit(1);
 }
 
-await rm(join(root, "release"), {recursive: true, force: true});
+await rm(release, {recursive: true, force: true});
 await mkdir(runtime, {recursive: true});
 
 execFileSync(pnpmCommand, ["run", "build"], {cwd: root, stdio: "inherit"});
 execFileSync(pnpmCommand, ["--filter", ".", "deploy", "--prod", "--legacy", app], {cwd: root, stdio: "inherit"});
 await cp(join(root, "dist"), join(app, "dist"), {recursive: true});
+// macOS 包与 Windows 网页包一样，只提供聊天界面，不携带 MCP 连接入口。
+await rm(join(app, "dist", "scripts", "mcp-server.cjs"), {force: true});
+await rm(join(app, "dist", "scripts", "mcp-login.cjs"), {force: true});
 await cp(join(root, "openssl.cnf"), join(release, "openssl.cnf"));
 await cp(join(root, ".env.example"), join(release, ".env.example"));
 await cp(process.execPath, join(runtime, "node"));
