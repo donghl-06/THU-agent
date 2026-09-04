@@ -17,10 +17,8 @@ jobs:
     name: macOS（Apple Silicon / M 系列）
     runs-on: macos-latest # arm64
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4 # 版本读 package.json 的 packageManager 字段（单一事实来源）
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -36,10 +34,8 @@ jobs:
     name: macOS（Intel）
     runs-on: macos-latest # 在 arm64 机器上构建，运行时换官方 x64 版 Node
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4 # 版本读 package.json 的 packageManager 字段（单一事实来源）
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -63,10 +59,8 @@ jobs:
     name: Windows
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4 # 版本读 package.json 的 packageManager 字段（单一事实来源）
       - uses: actions/setup-node@v4
         with:
           node-version: 22

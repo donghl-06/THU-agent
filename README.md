@@ -126,7 +126,7 @@ pnpm package:win:mcp
 由 GitHub 的云机器自动打出三个便携包——
 
 | 产物 | 云机器 | 说明 |
-|---|---|---|
+| --- | --- | --- |
 | `QingLing-macOS-arm64` | macOS（M 系列芯片） | Apple Silicon 原生 |
 | `QingLing-macOS-x64` | macOS（运行时换官方 Intel 版 Node） | Intel Mac 原生 |
 | `QingLing-Windows-EXE` | Windows | 网页聊天 EXE 包 |
