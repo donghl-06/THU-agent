@@ -85,6 +85,44 @@ async function readSse(resp: Response): Promise<{event: string; data: Record<str
     return events;
 }
 
+/**
+ * 读 SSE 流，遇到 confirm 事件时立即按给定结果应答（事件驱动，无盲轮询竞态）。
+ * 其余行为与 readSse 相同。
+ */
+async function readSseAnsweringConfirms(
+    base: string,
+    resp: Response,
+    approved: boolean,
+): Promise<{event: string; data: Record<string, unknown>}[]> {
+    const events: {event: string; data: Record<string, unknown>}[] = [];
+    const reader = resp.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+        const {done, value} = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, {stream: true});
+        let idx;
+        while ((idx = buffer.indexOf("\n\n")) !== -1) {
+            const block = buffer.slice(0, idx);
+            buffer = buffer.slice(idx + 2);
+            const event = /^event: (.*)$/m.exec(block)?.[1];
+            const dataStr = /^data: (.*)$/m.exec(block)?.[1];
+            if (!event || !dataStr) continue;
+            const data = JSON.parse(dataStr) as Record<string, unknown>;
+            events.push({event, data});
+            if (event === "confirm" && typeof data.id === "string") {
+                void fetch(`${base}/api/confirm`, {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({id: data.id, approved}),
+                }).catch(() => {});
+            }
+        }
+    }
+    return events;
+}
+
 describe("Web 服务端", () => {
     let server: Server | undefined;
     let base = "";
@@ -286,20 +324,8 @@ describe("Web 服务端", () => {
             body: JSON.stringify({question: "充 10 块"}),
         });
 
-        // 读到 confirm 事件后应答同意
-        const eventsPromise = readSse(resp);
-        for (let i = 0; i < 50 && !executed; i++) {
-            await new Promise((r) => setTimeout(r, 100));
-            // 从服务端的 pendingConfirms 拿不到（封装内），改为轮询 /api/confirm 404→200
-            // 简化：直接尝试用递增 id 应答——confirm 事件的 id 是 cf_1
-            const ack = await fetch(`${base}/api/confirm`, {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({id: "cf_1", approved: true}),
-            });
-            if (ack.status === 200) break;
-        }
-        const events = await eventsPromise;
+        // 事件驱动：读到 confirm 事件即应答同意（不依赖固定 id 与轮询时序）
+        const events = await readSseAnsweringConfirms(base, resp, true);
         expect(executed).toBe(true);
         expect(events.some((e) => e.event === "confirm" && e.data.name === "recharge")).toBe(true);
         expect(events.some((e) => e.event === "answer")).toBe(true);
@@ -314,17 +340,7 @@ describe("Web 服务端", () => {
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({question: "充 10 块"}),
         });
-        const eventsPromise = readSse(resp);
-        for (let i = 0; i < 50; i++) {
-            const ack = await fetch(`${base}/api/confirm`, {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({id: "cf_1", approved: false}),
-            });
-            if (ack.status === 200) break;
-            await new Promise((r) => setTimeout(r, 100));
-        }
-        await eventsPromise;
+        await readSseAnsweringConfirms(base, resp, false);
         expect(executed).toBe(false);
     });
 
@@ -335,17 +351,7 @@ describe("Web 服务端", () => {
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({question: "充电费"}),
         });
-        const eventsPromise = readSse(resp);
-        for (let i = 0; i < 50; i++) {
-            const ack = await fetch(`${base}/api/confirm`, {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({id: "cf_1", approved: true}),
-            });
-            if (ack.status === 200) break;
-            await new Promise((r) => setTimeout(r, 100));
-        }
-        const events = await eventsPromise;
+        const events = await readSseAnsweringConfirms(base, resp, true);
         const qr = events.find((e) => e.event === "qr");
         expect(qr?.data.url).toBe("https://qr.alipay.com/fake-test-code");
         expect(String(qr?.data.dataUrl ?? "")).toMatch(/^data:image\/png/);
@@ -538,46 +544,52 @@ describe("Web 服务端", () => {
     });
 
     it("进行中再来一问返回 409", async () => {
-        // 用一个会等确认的写操作把第一轮卡住
+        // 用一个会等确认的写操作把第一问卡在确认挂起；
+        // 读到 confirm 事件（确定性窗口）后：先发第二问验证 409，再同意放行第一问
         await start([toolCallMsg("recharge", {amountYuan: 10}), textMsg("充好了")], [paySkill]);
         const first = await fetch(`${base}/api/chat`, {
             method: "POST",
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({question: "第一问"}),
         });
-        const firstEvents = readSse(first);
-        // 等第一轮进入确认挂起（confirm 事件已发出）
-        for (let i = 0; i < 50; i++) {
-            const probe = await fetch(`${base}/api/confirm`, {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({id: "cf_1", approved: true}),
-            });
-            if (probe.status === 200) {
-                // 已被这个探测应答了——说明确认确实挂起过；重新发起一轮来测 409 不可行，
-                // 直接验证第一轮完成即可
-                break;
-            }
-            // 确认还没挂上时，第二轮应被 409 拒绝
-            const second = await fetch(`${base}/api/chat`, {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({question: "第二问"}),
-            });
-            if (second.status === 409) {
-                expect(second.status).toBe(409);
-                // 放行第一轮
+        const reader = first.body!.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let secondStatus = 0;
+        let sawAnswer = false;
+        let sawConfirm = false;
+        for (;;) {
+            const {done, value} = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, {stream: true});
+            let idx;
+            while ((idx = buffer.indexOf("\n\n")) !== -1) {
+                const block = buffer.slice(0, idx);
+                buffer = buffer.slice(idx + 2);
+                const event = /^event: (.*)$/m.exec(block)?.[1];
+                const dataStr = /^data: (.*)$/m.exec(block)?.[1];
+                if (event === "answer") sawAnswer = true;
+                if (event !== "confirm" || sawConfirm || !dataStr) continue;
+                sawConfirm = true;
+                const id = (JSON.parse(dataStr) as {id?: string}).id;
+                // 第一问仍挂起：第二问必须被 409 拒绝
+                const second = await fetch(`${base}/api/chat`, {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({question: "第二问"}),
+                });
+                secondStatus = second.status;
+                await second.text();
+                // 放行第一问
                 await fetch(`${base}/api/confirm`, {
                     method: "POST",
                     headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify({id: "cf_1", approved: true}),
+                    body: JSON.stringify({id, approved: true}),
                 });
-                await firstEvents;
-                return;
             }
-            await new Promise((r) => setTimeout(r, 100));
         }
-        await firstEvents;
+        expect(secondStatus).toBe(409);
+        expect(sawAnswer).toBe(true);
     }, 20000);
 
     it("停止生成：客户端断开 → 中止信号传到 LLM 且 busy 释放", async () => {
