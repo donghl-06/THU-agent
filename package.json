@@ -20,6 +20,7 @@
     "build": "node scripts/build-release.mjs",
     "package:win": "node scripts/package-win.mjs",
     "gen:icons": "node scripts/gen-icons.mjs",
+    "package:mac": "node scripts/package-mac.mjs",
     "web": "tsx scripts/step18-web.ts"
   },
   "devDependencies": {
