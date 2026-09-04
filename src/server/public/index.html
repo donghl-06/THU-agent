@@ -72,6 +72,14 @@
     width: 256px; flex: none; display: flex; flex-direction: column; gap: 10px;
     padding: 12px 10px; background: var(--bg-soft); border-right: 1px solid var(--border-soft);
   }
+  .sidebar-top { display: flex; gap: 6px; align-items: stretch; flex: none; }
+  .sidebar-top #new-chat { flex: 1; min-width: 0; }
+  #collapse-sidebar {
+    flex: none; width: 38px; border: 1px solid var(--border); border-radius: var(--r-md);
+    background: transparent; color: var(--text-2); cursor: pointer;
+    display: grid; place-items: center; transition: border-color 0.15s, color 0.15s, background 0.15s;
+  }
+  #collapse-sidebar:hover { border-color: var(--primary); color: var(--text); background: var(--primary-light); }
   #new-chat {
     display: flex; align-items: center; gap: 8px; padding: 10px 12px;
     border: 1px solid var(--border); border-radius: var(--r-md);
@@ -100,6 +108,11 @@
   #sidebar-mask { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); z-index: 25; display: none; }
   #sidebar-mask.show { display: block; }
   #menu-btn { display: none; }
+  /* 桌面端收起侧栏：主区占满整行；收起后左上角 menu-btn 兼做展开开关 */
+  @media (min-width: 769px) {
+    body.sidebar-collapsed #sidebar { display: none; }
+    body.sidebar-collapsed #menu-btn { display: inline-flex; }
+  }
   @media (max-width: 768px) {
     #sidebar {
       position: fixed; top: 0; bottom: 0; left: 0; z-index: 30; width: 270px;
@@ -107,6 +120,7 @@
     }
     #sidebar.open { transform: none; box-shadow: var(--shadow-2); }
     #menu-btn { display: inline-flex; }
+    #collapse-sidebar { display: none; } /* 移动端收起=关抽屉，该按钮无意义 */
   }
   @media (min-width: 769px) { #sidebar-mask { display: none !important; } }
   body {
@@ -613,7 +627,10 @@ if(__exports != exports)module.exports = exports;return module.exports}));
 </head>
 <body>
 <aside id="sidebar">
-  <button id="new-chat" type="button"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>新建对话</button>
+  <div class="sidebar-top">
+    <button id="new-chat" type="button"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>新建对话</button>
+    <button id="collapse-sidebar" class="iconbtn" type="button" title="收起侧栏"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m11 17-5-5 5-5"/><path d="m18 17-5-5 5-5"/></svg></button>
+  </div>
   <div id="session-list"></div>
   <div id="session-usage" class="session-usage" hidden></div>
 </aside>
@@ -983,9 +1000,30 @@ function closeSidebarMobile() {
   sidebarMask.classList.remove("show");
 }
 document.getElementById("menu-btn").onclick = () => {
-  const open = sidebar.classList.toggle("open");
-  sidebarMask.classList.toggle("show", open);
+  if (window.matchMedia("(max-width: 768px)").matches) {
+    const open = sidebar.classList.toggle("open");
+    sidebarMask.classList.toggle("show", open);
+    return;
+  }
+  // 桌面端：menu-btn 兼做侧栏展开开关（侧栏收起后它才会出现）
+  sidebarCollapsed = false;
+  store.set("sidebar-collapsed", "0");
+  applySidebarCollapsed();
 };
+
+/* ---- 侧栏收起/展开（桌面端）：状态 localStorage 持久化；移动端仍是抽屉 ---- */
+const collapseBtn = document.getElementById("collapse-sidebar");
+let sidebarCollapsed = store.get("sidebar-collapsed", "0") === "1";
+function applySidebarCollapsed() {
+  // 仅桌面生效（≤768px 是抽屉布局，不受 collapsed 影响）
+  document.body.classList.toggle("sidebar-collapsed", sidebarCollapsed);
+}
+collapseBtn.onclick = () => {
+  sidebarCollapsed = true;
+  store.set("sidebar-collapsed", "1");
+  applySidebarCollapsed();
+};
+applySidebarCollapsed();
 sidebarMask.onclick = closeSidebarMobile;
 
 function renderSessionList() {
