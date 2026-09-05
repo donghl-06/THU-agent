@@ -20,6 +20,7 @@ await build({
     target: "node22",
     outExtension: {".js": ".cjs"},
     keepNames: true,
+    legalComments: "eof",
     sourcemap: false,
     logLevel: "warning",
 });
