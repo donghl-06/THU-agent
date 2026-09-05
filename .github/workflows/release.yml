@@ -87,10 +87,23 @@ jobs:
       - name: 压缩并上传到 Release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
+          set -euo pipefail
           cd artifacts
           for d in */; do (cd "$d" && zip -qr "../${d%/}.zip" .); done
           gh release create "$GITHUB_REF_NAME" \
             --title "清灵 $GITHUB_REF_NAME" \
-            --generate-notes \
-            *.zip
+            --generate-notes
+          for archive in *.zip; do
+            for attempt in 1 2 3; do
+              if gh release upload "$GITHUB_REF_NAME" "$archive" --clobber; then
+                break
+              fi
+              if [ "$attempt" -eq 3 ]; then
+                echo "::error::Failed to upload $archive after 3 attempts"
+                exit 1
+              fi
+              sleep $((attempt * 5))
+            done
+          done
