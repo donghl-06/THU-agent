@@ -838,6 +838,8 @@ const authMethodLabels = {
   mobile: {icon: "📱", label: "短信验证码", hint: "向已绑定手机号发送验证码"},
   wechat: {icon: "💬", label: "微信验证", hint: "使用清华身份认证关联的微信"},
 };
+let messageSerial = 0;
+const newMessageId = () => `m_${Date.now().toString(36)}_${(++messageSerial).toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 
 /* 智能滚动：贴底时自动跟随；用户上翻则停止强滚并显示"回到底部" */
 let followScroll = true;
@@ -871,6 +873,7 @@ function addMsg(role, text) {
   const div = document.createElement("div");
   div.className = "msg " + role;
   div.textContent = text;
+  div.dataset.messageId = newMessageId();
   chat.appendChild(div);
   saveChatHistory();
   updateWelcome();
@@ -882,6 +885,7 @@ function addMsg(role, text) {
 function addUserMsg(text, images) {
   const div = document.createElement("div");
   div.className = "msg user";
+  div.dataset.messageId = newMessageId();
   for (const url of images ?? []) {
     const img = document.createElement("img");
     img.className = "att";
@@ -940,15 +944,29 @@ themeBtn.onclick = () => {
 };
 
 /* ---- 多会话历史：新建 / 切换 / 删除，localStorage 持久化 ---- */
-let sessionsState = (() => {
+function parseSessionsState(raw) {
   let state = null;
   try {
-    const raw = store.get(SESSIONS_KEY, "");
     if (raw) state = JSON.parse(raw);
   } catch { /* 数据损坏则重建 */ }
-  if (!state || !Array.isArray(state.sessions) || typeof state.activeId !== "string") {
-    state = {sessions: [], activeId: newSessionId()};
+  if (!state || !Array.isArray(state.sessions)) {
+    return {sessions: [], activeId: newSessionId(), deletedSessionIds: []};
   }
+  state.deletedSessionIds = Array.isArray(state.deletedSessionIds)
+    ? state.deletedSessionIds.filter((id) => typeof id === "string" && id)
+    : [];
+  state.sessions = state.sessions
+    .filter((s) => s && typeof s.id === "string" && s.id)
+    .filter((s) => !state.deletedSessionIds.includes(s.id))
+    .map((s) => ({...s, messages: Array.isArray(s.messages) ? s.messages : []}));
+  if (typeof state.activeId !== "string" || !state.sessions.some((s) => s.id === state.activeId)) {
+    state.activeId = state.sessions[0]?.id ?? newSessionId();
+  }
+  return state;
+}
+
+function readSessionsState() {
+  const state = parseSessionsState(store.get(SESSIONS_KEY, ""));
   // 旧版单会话数据自动迁移为第一个会话
   if (state.sessions.length === 0) {
     try {
@@ -958,13 +976,140 @@ let sessionsState = (() => {
       }
     } catch { /* 忽略损坏的旧数据 */ }
   }
-  if (!state.sessions.some((s) => s.id === state.activeId)) {
-    state.activeId = state.sessions[0]?.id ?? state.activeId;
-  }
   return state;
-})();
+}
 
-function persistSessions() {
+let sessionsState = readSessionsState();
+
+/* 旧数据没有消息 ID；用“内容指纹 + 同内容出现次数”生成稳定 ID，
+   避免以前按数组下标生成时，一追加消息就导致旧记录被误判成同一条。 */
+function legacyMessageId(record, sessionId, occurrence) {
+  const key = `${record.role}\u0000${record.text ?? ""}\u0000${record.imageCount ?? 0}`;
+  let hash = 2166136261;
+  for (let i = 0; i < key.length; i++) {
+    hash ^= key.codePointAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${sessionId}:legacy:${(hash >>> 0).toString(36)}:${occurrence}`;
+}
+
+function normalizeMessageRecords(records, sessionId) {
+  const byId = new Map();
+  const occurrences = new Map();
+  for (const source of records ?? []) {
+    if (!source || (source.role !== "user" && source.role !== "bot")) continue;
+    if (typeof source.text !== "string") continue;
+    // 流式回答刚创建时可能是空字符串；这类占位消息不属于聊天历史。
+    if (source.role === "bot" && !source.text) continue;
+    if (source.role === "user" && !source.text && !Number(source.imageCount)) continue;
+
+    const contentKey = `${source.role}\u0000${source.text}\u0000${source.imageCount ?? 0}`;
+    const occurrence = (occurrences.get(contentKey) ?? 0) + 1;
+    occurrences.set(contentKey, occurrence);
+
+    const rawId = typeof source.id === "string" && source.id ? source.id : "";
+    const legacyPrefix = `${sessionId}:legacy:`;
+    // 迁移上一版按数组下标生成的 legacy ID。这个格式在消息追加后会整体错位，
+    // 不能继续当作稳定 ID 使用；新格式是 legacy:{内容指纹}:{出现次数}。
+    const oldIndexedLegacyId = rawId.startsWith(legacyPrefix)
+      && !/^[0-9a-z]+:[1-9][0-9]*$/.test(rawId.slice(legacyPrefix.length));
+    const id = rawId && !oldIndexedLegacyId
+      ? rawId
+      : legacyMessageId(source, sessionId, occurrence);
+    // 同一快照内若已存在重复 ID，保留后写入的版本；这是上一版合并可能留下的脏数据。
+    byId.set(id, {...source, id});
+  }
+  return [...byId.values()];
+}
+
+/**
+ * 多标签页会同时持有自己的 sessionsState 快照。保存前必须与 localStorage 的最新值合并，
+ * 否则后保存的旧快照会把另一个标签页刚写入的消息整段覆盖掉。
+ *
+ * 这里不用简单的“concat + 按 ID 去重”：那会把分叉的两个追加段随机拼在一起，
+ * 也可能让旧的半成品回答覆盖最终回答。按最长公共子序列合并可以保留双方共同历史，
+ * 再把双方各自追加的消息插到共同前缀之后；同一 ID 冲突时取较新快照里的版本。
+ */
+function mergeMessageRecords(older, newer, sessionId) {
+  const a = normalizeMessageRecords(older, sessionId);
+  const b = normalizeMessageRecords(newer, sessionId);
+  const dp = Array.from({length: a.length + 1}, () => new Array(b.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i--) {
+    for (let j = b.length - 1; j >= 0; j--) {
+      dp[i][j] = a[i].id === b[j].id
+        ? dp[i + 1][j + 1] + 1
+        : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+
+  const merged = [];
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i].id === b[j].id) {
+      merged.push(b[j]); // older/newer 已在调用处排序；同 ID 时保留较新内容。
+      i++;
+      j++;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      merged.push(a[i]);
+      i++;
+    } else {
+      merged.push(b[j]);
+      j++;
+    }
+  }
+  merged.push(...a.slice(i), ...b.slice(j));
+  return merged.slice(-MAX_SAVED_MESSAGES);
+}
+
+function mergeSessionsState(local, remote) {
+  const deletedSessionIds = [...new Set([
+    ...(local.deletedSessionIds ?? []),
+    ...(remote.deletedSessionIds ?? []),
+  ])];
+  const merged = {
+    activeId: local.activeId,
+    deletedSessionIds,
+    sessions: local.sessions
+      .filter((s) => !deletedSessionIds.includes(s.id))
+      .map((s) => ({...s, messages: [...(s.messages ?? [])]})),
+  };
+  const byId = new Map(merged.sessions.map((s) => [s.id, s]));
+  for (const remoteSession of remote.sessions) {
+    if (deletedSessionIds.includes(remoteSession.id)) continue;
+    const localSession = byId.get(remoteSession.id);
+    if (!localSession) {
+      const copied = {...remoteSession, messages: [...(remoteSession.messages ?? [])]};
+      merged.sessions.push(copied);
+      byId.set(copied.id, copied);
+      continue;
+    }
+
+    const localAt = Number(localSession.updatedAt ?? localSession.createdAt ?? 0);
+    const remoteAt = Number(remoteSession.updatedAt ?? remoteSession.createdAt ?? 0);
+    const localIsNewer = localAt > remoteAt;
+    localSession.messages = mergeMessageRecords(
+      localIsNewer ? remoteSession.messages : localSession.messages,
+      localIsNewer ? localSession.messages : remoteSession.messages,
+      localSession.id,
+    );
+    localSession.title = localSession.title && localSession.title !== "新对话"
+      ? localSession.title
+      : remoteSession.title;
+    localSession.titleLlm = Boolean(localSession.titleLlm || remoteSession.titleLlm);
+    localSession.tokens = Math.max(Number(localSession.tokens ?? 0), Number(remoteSession.tokens ?? 0));
+    localSession.createdAt = Math.min(Number(localSession.createdAt ?? Infinity), Number(remoteSession.createdAt ?? Infinity));
+    if (!Number.isFinite(localSession.createdAt)) delete localSession.createdAt;
+    localSession.updatedAt = Math.max(localAt, remoteAt);
+  }
+  if (!merged.sessions.some((s) => s.id === merged.activeId)) {
+    merged.activeId = merged.sessions[0]?.id ?? merged.activeId;
+  }
+  return merged;
+}
+
+function persistSessions(replace = false) {
+  if (!replace) sessionsState = mergeSessionsState(sessionsState, readSessionsState());
   // 会话数超限时淘汰最旧的非活跃会话
   while (sessionsState.sessions.length > MAX_SESSIONS) {
     const idx = sessionsState.sessions.findIndex((s) => s.id !== sessionsState.activeId);
@@ -988,7 +1133,9 @@ function saveChatHistory() {
         .join(""))
         .slice(0, MAX_SAVED_TEXT_LENGTH),
       imageCount: node.querySelectorAll("img.att").length,
+      id: node.dataset.messageId || newMessageId(),
     }))
+    .filter((record) => record.role === "bot" ? !!record.text : !!record.text || record.imageCount > 0)
     .slice(-MAX_SAVED_MESSAGES);
   let session = activeSession();
   if (!session) {
@@ -996,6 +1143,7 @@ function saveChatHistory() {
     sessionsState.sessions.push(session);
   }
   session.messages = records;
+  session.updatedAt = Date.now();
   if (session.title === "新对话") {
     const derived = deriveTitle(records);
     if (derived !== "新对话") session.title = derived;
@@ -1006,14 +1154,16 @@ function saveChatHistory() {
 
 function renderMessages(records) {
   if (!authenticated) return;
-  for (const record of records ?? []) {
-    if (!record || (record.role !== "user" && record.role !== "bot") || typeof record.text !== "string") continue;
+  // 渲染时也要走同一套稳定 ID 迁移；否则旧数据一旦被显示再保存，
+  // 又会落回“按下标生成 ID”的旧问题。
+  normalizeMessageRecords(records ?? [], sessionsState.activeId).forEach((record) => {
     const div = document.createElement("div");
     div.className = "msg " + record.role;
+    div.dataset.messageId = record.id;
     if (record.role === "bot") {
       renderMd(div, record.text); // AI 消息按 Markdown 恢复
       chat.appendChild(div);
-      continue;
+      return;
     }
     if (Number.isInteger(record.imageCount) && record.imageCount > 0) {
       const attachment = document.createElement("span");
@@ -1023,7 +1173,7 @@ function renderMessages(records) {
     }
     div.appendChild(document.createTextNode(record.text));
     chat.appendChild(div);
-  }
+  });
   updateWelcome();
   scrollDown();
 }
@@ -1037,8 +1187,12 @@ function resetChatView() {
 
 function clearChatHistory() {
   resetChatView();
-  sessionsState = {sessions: [], activeId: newSessionId()};
-  persistSessions();
+  const deletedSessionIds = [...new Set([
+    ...(sessionsState.deletedSessionIds ?? []),
+    ...sessionsState.sessions.map((s) => s.id),
+  ])];
+  sessionsState = {sessions: [], activeId: newSessionId(), deletedSessionIds};
+  persistSessions(true);
   renderSessionList();
   // 后端各会话的上下文一并销毁（logout 时服务端已清，这里兜底覆盖其他调用方）
   fetch("/api/session/destroy", {
@@ -1056,6 +1210,11 @@ function hideHistoryForLogout() {
 }
 
 function showHistoryAfterLogin() {
+  // 登录期间可能没有收到/处理完 storage 事件；恢复视图前强制合并一次最新本地数据。
+  sessionsState = mergeSessionsState(sessionsState, readSessionsState());
+  if (!sessionsState.sessions.some((s) => s.id === sessionsState.activeId)) {
+    sessionsState.activeId = sessionsState.sessions[0]?.id ?? sessionsState.activeId;
+  }
   resetChatView();
   renderMessages(activeSession()?.messages ?? []);
   renderSessionList();
@@ -1193,6 +1352,24 @@ function renderSessionList() {
   renderSessionUsage();
 }
 
+/** 跨标签页同步：另一个标签页写入 localStorage 后，本页合并且当前页不在生成中时重渲染。 */
+function syncSessionsFromStorage(event) {
+  if (event.key !== SESSIONS_KEY || event.newValue == null) return;
+  const localActiveId = sessionsState.activeId;
+  const remote = parseSessionsState(event.newValue);
+  sessionsState = mergeSessionsState(sessionsState, remote);
+  if (!sessionsState.sessions.some((s) => s.id === localActiveId)) {
+    sessionsState.activeId = sessionsState.sessions[0]?.id ?? localActiveId;
+  }
+  renderSessionList();
+  // 生成中的 DOM 不能被重渲染覆盖；最终 saveChatHistory 会再与最新 localStorage 合并。
+  if (!busy && authenticated) {
+    resetChatView();
+    renderMessages(activeSession()?.messages ?? []);
+  }
+}
+window.addEventListener("storage", syncSessionsFromStorage);
+
 /* ---- Token 用量显示：每条回答下方小字 + 侧栏会话累计 ---- */
 const fmtTokens = (n) => n >= 10000 ? (n / 10000).toFixed(1) + "万" : n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n);
 function renderSessionUsage() {
@@ -1290,6 +1467,7 @@ function requestDeleteSession(id) {
     const wasActive = sessionsState.sessions[idx].id === sessionsState.activeId;
     const deletedId = sessionsState.sessions[idx].id;
     sessionsState.sessions.splice(idx, 1);
+    sessionsState.deletedSessionIds = [...new Set([...(sessionsState.deletedSessionIds ?? []), deletedId])];
     // 后端对应会话的上下文一并销毁，防止"删掉的会话"在服务端复活
     fetch("/api/session/destroy", {
       method: "POST",
@@ -1301,7 +1479,7 @@ function requestDeleteSession(id) {
       resetChatView();
       renderMessages(activeSession()?.messages ?? []);
     }
-    persistSessions();
+    persistSessions(true);
     renderSessionList();
     toast("对话已删除", "ok");
   };
@@ -2232,7 +2410,7 @@ function appendNotificationToSession(n) {
     sessionsState.sessions.push(session);
   }
   if (!authenticated) {
-    session.messages.push({role: "bot", text});
+    session.messages.push({role: "bot", text, id: newMessageId()});
     persistSessions();
     return;
   }
