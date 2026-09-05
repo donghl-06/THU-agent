@@ -62,4 +62,29 @@ describe("Web UI 请求状态", () => {
         expect(html).toContain('session.messages.push({role: "bot", text})');
         expect(html).toContain("void pollNotifications();");
     });
+
+    it("退出登录保留聊天记录，重新登录后可继续查看", () => {
+        const logout = /async function logout\(\) \{([\s\S]*?)\n\}/.exec(html)?.[1] ?? "";
+        expect(logout).toContain('fetch("/api/auth/logout"');
+        expect(logout).toContain("saveChatHistory()");
+        expect(logout).toContain("hideHistoryForLogout()");
+        expect(logout).not.toContain("clearChatHistory()");
+        expect(logout).toContain("历史对话已隐藏");
+    });
+
+    it("未登录时锁定历史渲染，登录后恢复当前会话消息", () => {
+        const renderMessages = /function renderMessages\(records\) \{([\s\S]*?)\n\}/.exec(html)?.[1] ?? "";
+        expect(renderMessages).toContain("if (!authenticated) return");
+
+        const renderSessionList = /function renderSessionList\(\) \{([\s\S]*?)\n\}/.exec(html)?.[1] ?? "";
+        expect(renderSessionList).toContain("if (!authenticated)");
+        expect(renderSessionList).toContain("登录后可查看历史对话");
+
+        const switchSession = /function switchSession\(id\) \{([\s\S]*?)\n\}/.exec(html)?.[1] ?? "";
+        expect(switchSession).toContain("if (!authenticated)");
+
+        expect(html).toContain("function showHistoryAfterLogin()");
+        expect(html).toContain("renderMessages(activeSession()?.messages ?? [])");
+        expect(html).toContain("if (authenticated) showHistoryAfterLogin()");
+    });
 });

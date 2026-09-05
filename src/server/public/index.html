@@ -697,7 +697,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
   <div id="welcome" hidden>
     <div class="w-spark">✦</div>
     <h1 class="w-title">今天想让清灵帮你做什么？</h1>
-    <p class="w-sub" id="w-login-hint">你好，我是清灵——课程、日程、场馆、图书馆和校园服务，都可以问我。</p>
+    <p class="w-sub" id="w-login-hint">当前未登录清华 Info。点击右上角“登录”后，即可查看历史对话并使用校园服务。</p>
     <div class="w-grid">
       <button class="w-card" type="button" data-q="我今天有什么课？"><span class="w-ico">📚</span><span>查今天的课表</span></button>
       <button class="w-card" type="button" data-q="今晚哪里可以打羽毛球？"><span class="w-ico">🏃</span><span>查场馆空位</span></button>
@@ -1005,6 +1005,7 @@ function saveChatHistory() {
 }
 
 function renderMessages(records) {
+  if (!authenticated) return;
   for (const record of records ?? []) {
     if (!record || (record.role !== "user" && record.role !== "bot") || typeof record.text !== "string") continue;
     const div = document.createElement("div");
@@ -1045,6 +1046,20 @@ function clearChatHistory() {
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({all: true}),
   }).catch(() => {});
+}
+
+/** 登录态只控制历史是否可见；logout 不删除数据，login 后恢复原 activeId 并重渲染。 */
+function hideHistoryForLogout() {
+  resetChatView();
+  renderSessionList();
+  updateWelcome();
+}
+
+function showHistoryAfterLogin() {
+  resetChatView();
+  renderMessages(activeSession()?.messages ?? []);
+  renderSessionList();
+  updateWelcome();
 }
 
 /* ---- 会话栏交互：新建 / 切换 / 删除 ---- */
@@ -1143,6 +1158,14 @@ sidebarResizer.addEventListener("keydown", (event) => {
 function renderSessionList() {
   const list = document.getElementById("session-list");
   list.replaceChildren();
+  if (!authenticated) {
+    const locked = document.createElement("div");
+    locked.className = "session-empty";
+    locked.textContent = "登录后可查看历史对话";
+    list.appendChild(locked);
+    renderSessionUsage();
+    return;
+  }
   const sorted = [...sessionsState.sessions].sort((a, b) => b.createdAt - a.createdAt);
   for (const s of sorted) {
     const item = document.createElement("div");
@@ -1176,7 +1199,7 @@ function renderSessionUsage() {
   const el = document.getElementById("session-usage");
   const tokens = activeSession()?.tokens;
   if (el) {
-    el.hidden = !tokens;
+    el.hidden = !authenticated || !tokens;
     if (tokens) el.textContent = `本会话累计 ${fmtTokens(tokens)} tokens`;
   }
 }
@@ -1232,6 +1255,10 @@ function newChat() {
 
 function switchSession(id) {
   closeSidebarMobile();
+  if (!authenticated) {
+    toast("请先登录清华 Info，再查看历史对话", "err");
+    return;
+  }
   if (id === sessionsState.activeId) return;
   if (busy) { toast("请等待当前回答完成", "err"); return; }
   saveChatHistory(); // 当前 DOM 归档
@@ -1860,13 +1887,13 @@ async function logout() {
   if (busy || loginInFlight) return;
   const resp = await fetch("/api/auth/logout", {method: "POST"}).catch(() => null);
   if (resp?.ok) {
+    saveChatHistory();
     authenticated = false;
     updateLoginButton();
-    clearChatHistory();
+    hideHistoryForLogout();
     pendingImages = [];
     renderThumbs();
-    toast("已退出登录，清灵已断开校园服务", "ok");
-    updateWelcome();
+    toast("已退出登录；历史对话已隐藏，重新登录后可查看", "ok");
   }
 }
 
@@ -1996,8 +2023,7 @@ function handleAuthEvent(data) {
       updateLoginButton();
       if (newlyAuthenticated) {
         toast("✓ 清灵已连接你的清华 Info", "ok");
-        // 刚登录的用户从干净的欢迎页开始（UI 需求：登录后展示"今天想让清灵帮你做什么"）
-        resetChatView();
+        showHistoryAfterLogin();
       }
     }
     setAuthMessage("认证成功，正在继续查询…");
@@ -2189,10 +2215,12 @@ if ("serviceWorker" in navigator && window.isSecureContext) {
 fetch("/api/auth/status").then((resp) => resp.json()).then((data) => {
   authenticated = data.authenticated === true;
   updateLoginButton();
-  updateWelcome();
+  if (authenticated) showHistoryAfterLogin();
+  else hideHistoryForLogout();
 }).catch(() => {
+  authenticated = false;
   updateLoginButton();
-  updateWelcome();
+  hideHistoryForLogout();
 });
 
 /* ---- 任务通知轮询（Step 23）：提醒/抢场结果到点由服务端推入队列，这里 30s 取走 ---- */
@@ -2202,6 +2230,11 @@ function appendNotificationToSession(n) {
   if (!session) {
     session = {id: n.sessionId, title: n.title.slice(0, 18), createdAt: Date.now(), messages: []};
     sessionsState.sessions.push(session);
+  }
+  if (!authenticated) {
+    session.messages.push({role: "bot", text});
+    persistSessions();
+    return;
   }
   if (session.id === sessionsState.activeId) {
     addMsg("bot", text);
