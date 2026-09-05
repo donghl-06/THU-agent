@@ -73,8 +73,10 @@
   }
   /* 会话侧栏（多会话管理） */
   #sidebar {
-    width: 256px; flex: none; display: flex; flex-direction: column; gap: 10px;
+    --sidebar-width: 256px;
+    width: var(--sidebar-width); flex: none; display: flex; flex-direction: column; gap: 10px;
     padding: 12px 10px; background: var(--bg-soft); border-right: 1px solid var(--border-soft);
+    position: relative;
   }
   .sidebar-top { display: flex; gap: 6px; align-items: stretch; flex: none; }
   .sidebar-top #new-chat { flex: 1; min-width: 0; }
@@ -111,6 +113,17 @@
   .session-empty { padding: 12px 10px; font-size: var(--fs-xs); color: var(--muted); }
   #sidebar-mask { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); z-index: 25; display: none; }
   #sidebar-mask.show { display: block; }
+  #sidebar-resizer {
+    position: absolute; top: 0; right: -4px; width: 8px; height: 100%; z-index: 5;
+    cursor: col-resize; touch-action: none; outline: none;
+  }
+  #sidebar-resizer::before {
+    content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px;
+    background: var(--border); opacity: 0.75; transition: background 0.15s, opacity 0.15s, transform 0.15s;
+  }
+  #sidebar-resizer:hover::before,
+  #sidebar-resizer:focus-visible::before,
+  #sidebar-resizer:focus-within::before { background: var(--primary); opacity: 1; transform: scaleX(1.5); }
   #menu-btn { display: none; }
   /* 桌面端收起侧栏：主区占满整行；收起后左上角 menu-btn 兼做展开开关 */
   @media (min-width: 769px) {
@@ -125,6 +138,7 @@
     #sidebar.open { transform: none; box-shadow: var(--shadow-2); }
     #menu-btn { display: inline-flex; }
     #collapse-sidebar { display: none; } /* 移动端收起=关抽屉，该按钮无意义 */
+    #sidebar-resizer { display: none; }
   }
   @media (min-width: 769px) { #sidebar-mask { display: none !important; } }
   body {
@@ -132,6 +146,7 @@
     background: var(--bg); color: var(--text);
     display: flex; flex-direction: row; height: 100vh;
   }
+  body.sidebar-resizing { cursor: col-resize; user-select: none; }
   #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   /* 顶部极淡清华紫 glow，让页面不再是一整块死黑（文档二十七） */
   body::before {
@@ -646,6 +661,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
   </div>
   <div id="session-list"></div>
   <div id="session-usage" class="session-usage" hidden></div>
+  <div id="sidebar-resizer" role="separator" aria-orientation="vertical" aria-label="调节会话侧栏宽度" title="拖拽调节侧栏宽度"></div>
 </aside>
 <div id="sidebar-mask"></div>
 <div id="main">
@@ -1046,6 +1062,65 @@ collapseBtn.onclick = () => {
 };
 applySidebarCollapsed();
 sidebarMask.onclick = closeSidebarMobile;
+
+/* ---- 桌面端侧栏宽度拖拽：localStorage 持久化；移动端抽屉保持固定宽度 ---- */
+const sidebarResizer = document.getElementById("sidebar-resizer");
+const SIDEBAR_MIN_WIDTH = 220;
+const SIDEBAR_DEFAULT_WIDTH = 256;
+const SIDEBAR_MAX_WIDTH = 420;
+const savedSidebarWidth = Number.parseInt(store.get("sidebar-width", ""), 10);
+let sidebarWidth = Number.isFinite(savedSidebarWidth)
+  ? clampSidebarWidth(savedSidebarWidth)
+  : SIDEBAR_DEFAULT_WIDTH;
+let sidebarResizing = false;
+
+function clampSidebarWidth(width) {
+  const viewportLimit = Math.floor(window.innerWidth * 0.4);
+  const maxWidth = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, viewportLimit));
+  return Math.min(maxWidth, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
+}
+
+function applySidebarWidth(width) {
+  sidebarWidth = clampSidebarWidth(width);
+  sidebar.style.setProperty("--sidebar-width", `${sidebarWidth}px`);
+}
+
+function finishSidebarResize(event) {
+  if (!sidebarResizing) return;
+  sidebarResizing = false;
+  document.body.classList.remove("sidebar-resizing");
+  store.set("sidebar-width", String(sidebarWidth));
+  if (event?.pointerId !== undefined && sidebarResizer.hasPointerCapture(event.pointerId)) {
+    sidebarResizer.releasePointerCapture(event.pointerId);
+  }
+}
+
+applySidebarWidth(sidebarWidth);
+sidebarResizer.addEventListener("pointerdown", (event) => {
+  if (event.button !== 0 || window.matchMedia("(max-width: 768px)").matches) return;
+  event.preventDefault();
+  sidebarResizing = true;
+  sidebarResizer.setPointerCapture(event.pointerId);
+  document.body.classList.add("sidebar-resizing");
+});
+sidebarResizer.addEventListener("pointermove", (event) => {
+  if (!sidebarResizing || event.buttons !== 1) return;
+  const rect = sidebar.getBoundingClientRect();
+  applySidebarWidth(event.clientX - rect.left);
+});
+sidebarResizer.addEventListener("pointerup", finishSidebarResize);
+sidebarResizer.addEventListener("pointercancel", finishSidebarResize);
+sidebarResizer.addEventListener("lostpointercapture", finishSidebarResize);
+window.addEventListener("resize", () => {
+  if (!window.matchMedia("(max-width: 768px)").matches) applySidebarWidth(sidebarWidth);
+});
+sidebarResizer.addEventListener("keydown", (event) => {
+  if (window.matchMedia("(max-width: 768px)").matches) return;
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+  event.preventDefault();
+  applySidebarWidth(sidebarWidth + (event.key === "ArrowRight" ? 16 : -16));
+  store.set("sidebar-width", String(sidebarWidth));
+});
 
 function renderSessionList() {
   const list = document.getElementById("session-list");
