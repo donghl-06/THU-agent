@@ -7,6 +7,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -85,7 +86,10 @@ internal static class Program
             ContextMenuStrip = CreateMenu(child, port.Value)
         })
         {
-            tray.DoubleClick += (sender, e) => OpenBrowser(port.Value);
+            tray.MouseClick += (sender, e) =>
+            {
+                if (e.Button == MouseButtons.Left) OpenBrowser(port.Value);
+            };
             child.EnableRaisingEvents = true;
             child.Exited += (sender, e) => Application.Exit();
 
@@ -104,7 +108,7 @@ internal static class Program
             }
 
             StartLauncherEventLoop(child, port.Value);
-            OpenBrowser(port.Value);
+            OpenBrowser(port.Value, false);
             Application.Run();
             tray.Visible = false;
             NotifyShutdown(port.Value);
@@ -158,8 +162,6 @@ internal static class Program
         menu.Padding = new Padding(Scale(8, scale));
         menu.ShowImageMargin = false;
         menu.Renderer = new QingLingMenuRenderer(scale);
-        menu.Items.Add("打开清灵", null, (sender, e) => OpenBrowser(port));
-        menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("退出", null, (sender, e) =>
         {
             Application.Exit();
@@ -410,14 +412,74 @@ internal static class Program
         catch (TaskCanceledException) { return false; }
     }
 
-    private static void OpenBrowser(int port)
+    private static void OpenBrowser(int port, bool allowExistingWindow = true)
     {
+        if (allowExistingWindow && ActivateExistingQingLingWindow()) return;
+
         Process.Start(new ProcessStartInfo
         {
             FileName = "http://127.0.0.1:" + port + "/",
             UseShellExecute = true
         });
     }
+
+    private static bool ActivateExistingQingLingWindow()
+    {
+        const string pageTitle = "清灵 QingLing - 清华校园智能助手";
+        var match = IntPtr.Zero;
+        EnumWindows((handle, state) =>
+        {
+            if (!IsWindowVisible(handle)) return true;
+            var title = GetWindowTitle(handle);
+            // 浏览器会在网页标题后追加浏览器名；资源管理器文件夹“清灵-EXE”
+            // 只是在本地目录名里包含“清灵”，不能被误认成网页窗口。
+            if (title.StartsWith(pageTitle, StringComparison.Ordinal))
+            {
+                match = handle;
+                return false;
+            }
+            return true;
+        }, IntPtr.Zero);
+
+        if (match == IntPtr.Zero) return false;
+
+        // 最小化时先恢复；保持最大化状态时只做置前，避免把窗口误还原成普通大小。
+        if (IsIconic(match)) ShowWindow(match, 9); // SW_RESTORE
+        SetForegroundWindow(match);
+        return true;
+    }
+
+    private static string GetWindowTitle(IntPtr handle)
+    {
+        var length = GetWindowTextLength(handle);
+        if (length <= 0) return "";
+        var builder = new StringBuilder(length + 1);
+        GetWindowText(handle, builder, builder.Capacity);
+        return builder.ToString();
+    }
+
+    private delegate bool EnumWindowsProc(IntPtr handle, IntPtr state);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr state);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetWindowText(IntPtr handle, StringBuilder text, int capacity);
+
+    [DllImport("user32.dll")]
+    private static extern int GetWindowTextLength(IntPtr handle);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr handle);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsIconic(IntPtr handle);
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr handle, int command);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr handle);
 
     private static void StopServer(Process child)
     {

@@ -54,6 +54,8 @@ export type AgentTask = ReminderTask | MonitorTask | BookingTask;
 export interface TaskNotification {
     id: string;
     taskId: string;
+    /** 任务创建时所属会话；提醒消息要回写到这个会话 */
+    sessionId?: string;
     title: string;
     message: string;
     at: number;

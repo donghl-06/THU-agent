@@ -2196,12 +2196,29 @@ fetch("/api/auth/status").then((resp) => resp.json()).then((data) => {
 });
 
 /* ---- 任务通知轮询（Step 23）：提醒/抢场结果到点由服务端推入队列，这里 30s 取走 ---- */
+function appendNotificationToSession(n) {
+  const text = `⏰ ${n.title}：${n.message}`;
+  let session = sessionsState.sessions.find((s) => s.id === n.sessionId);
+  if (!session) {
+    session = {id: n.sessionId, title: n.title.slice(0, 18), createdAt: Date.now(), messages: []};
+    sessionsState.sessions.push(session);
+  }
+  if (session.id === sessionsState.activeId) {
+    addMsg("bot", text);
+    return;
+  }
+  session.messages.push({role: "bot", text});
+  persistSessions();
+  renderSessionList();
+}
+
 async function pollNotifications() {
   try {
     const resp = await fetch("/api/notifications");
     if (!resp.ok) return;
     const data = await resp.json();
     for (const n of data.notifications ?? []) {
+      if (n.sessionId) appendNotificationToSession(n);
       toast(`⏰ ${n.title}：${n.message}`, "ok");
       sfx.confirm();
       if ("Notification" in window && Notification.permission === "granted") {
@@ -2211,6 +2228,7 @@ async function pollNotifications() {
   } catch { /* 网络抖动下一轮再取 */ }
 }
 setInterval(pollNotifications, 30000);
+void pollNotifications();
 // 浏览器系统通知需要用户手势授权：首次点击时静默请求一次
 document.addEventListener("click", () => {
   if ("Notification" in window && Notification.permission === "default") {

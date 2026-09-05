@@ -132,6 +132,12 @@ export class Agent {
         this.messages.splice(0, this.messages.length, ...messages);
     }
 
+    /** 追加一条无需经过 LLM 的助手提示（定时提醒/任务结果回写会话用） */
+    appendAssistantMessage(content: string): void {
+        if (!content) return;
+        this.messages.push({role: "assistant", content});
+    }
+
     /** 问一个问题，拿到最终回答。多轮对话通过 messages 数组自然延续 */
     async ask(question: string, opts: AskOptions = {}): Promise<AgentRunResult> {
         const messageCheckpoint = this.messages.length;
