@@ -87,4 +87,74 @@ describe("Web UI 请求状态", () => {
         expect(html).toContain("renderMessages(activeSession()?.messages ?? [])");
         expect(html).toContain("if (authenticated) showHistoryAfterLogin()");
     });
+
+    it("多标签页写入本地会话时先合并最新记录，避免旧快照覆盖新消息", () => {
+        expect(html).toContain("function mergeSessionsState(local, remote)");
+        expect(html).toContain("function mergeMessageRecords(");
+        expect(html).toContain("function normalizeMessageRecords(records, sessionId)");
+        expect(html).toContain("function legacyMessageId(record, sessionId, occurrence)");
+        expect(html).toContain("id: node.dataset.messageId || newMessageId()");
+        expect(html).toContain("function readSessionsState()");
+
+        const persistSessions = /function persistSessions\(replace = false\) \{([\s\S]*?)\n\}/.exec(html)?.[1] ?? "";
+        expect(persistSessions).toContain("mergeSessionsState(sessionsState, readSessionsState())");
+
+        expect(html).toContain("function syncSessionsFromStorage(event)");
+        expect(html).toContain('window.addEventListener("storage", syncSessionsFromStorage)');
+        expect(html).toContain("if (!busy && authenticated)");
+        expect(html).toContain("div.dataset.messageId = newMessageId();");
+        expect(html).toContain("normalizeMessageRecords(records ?? [], sessionsState.activeId)");
+        expect(html).toContain("div.dataset.messageId = record.id;");
+        expect(html).toContain("deletedSessionIds");
+        expect(html).toContain("persistSessions(true)");
+    });
+
+    it("多标签页消息合并保留双端追加并让完整回答覆盖半成品", () => {
+        const functionSource = [
+            /function legacyMessageId\(record, sessionId, occurrence\) \{[\s\S]*?\n\}/.exec(html)?.[0],
+            /function normalizeMessageRecords\(records, sessionId\) \{[\s\S]*?\n\}/.exec(html)?.[0],
+            /function mergeMessageRecords\(older, newer, sessionId\) \{[\s\S]*?\n\}/.exec(html)?.[0],
+        ].join("\n");
+        const mergeMessageRecords = new Function(
+            "MAX_SAVED_MESSAGES",
+            `${functionSource}; return mergeMessageRecords;`,
+        )(100);
+
+        const commonPrefix = [
+            {id: "u1", role: "user", text: "第一个问题"},
+            {id: "a1", role: "bot", text: "第一个回答"},
+        ];
+        const commonSuffix = [
+            {id: "u3", role: "user", text: "共同的问题"},
+            {id: "a3", role: "bot", text: "共同的回答"},
+        ];
+        const tabA = [...commonPrefix, {id: "ua", role: "user", text: "A 页新增"}, {id: "aa", role: "bot", text: "A 页回答"}, ...commonSuffix];
+        const tabB = [...commonPrefix, {id: "ub", role: "user", text: "B 页新增"}, {id: "ab", role: "bot", text: "B 页回答"}, ...commonSuffix];
+        const mergedBranches = mergeMessageRecords(tabA, tabB, "s_test");
+        expect(mergedBranches.map((m: {text: string}) => m.text)).toEqual([
+            "第一个问题",
+            "第一个回答",
+            "A 页新增",
+            "A 页回答",
+            "B 页新增",
+            "B 页回答",
+            "共同的问题",
+            "共同的回答",
+        ]);
+
+        const partial = [{id: "stream", role: "bot", text: "部分"}];
+        const complete = [{id: "stream", role: "bot", text: "这是完整回答"}];
+        expect(mergeMessageRecords(partial, complete, "s_test")[0].text).toBe("这是完整回答");
+
+        const legacyA = [{role: "user", text: "旧问题"}, {role: "bot", text: "旧回答"}];
+        const legacyB = [...legacyA, {role: "user", text: "新增问题"}, {role: "bot", text: "新增回答"}];
+        expect(mergeMessageRecords(legacyA, legacyB, "s_test")).toHaveLength(4);
+
+        // 上一版曾写入“按数组下标”的旧 ID；不同内容不能因为下标相同而被合并掉。
+        const indexedA = [{id: "s_test:legacy:0", role: "user", text: "第一条"}];
+        const indexedB = [{id: "s_test:legacy:0", role: "user", text: "另一条"}];
+        expect(mergeMessageRecords(indexedA, indexedB, "s_test")).toHaveLength(2);
+
+        expect(mergeMessageRecords([{role: "bot", text: ""}], [], "s_test")).toHaveLength(0);
+    });
 });
