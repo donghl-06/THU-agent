@@ -97,13 +97,13 @@ pnpm package:win:exe
 
 命令会在 `release/清灵-EXE/` 生成网页聊天发布目录，内置 Node.js 和生产依赖，用户无需安装
 Node.js、pnpm 或 Git。将 `.env.example` 复制为同目录下的 `.env` 并填写 `LLM_API_KEY`
-等模型配置后，双击 `清灵.exe` 即可自动启动本地服务并打开浏览器。程序退出入口
-使用 .NET 8 SDK 打包时，程序退出入口位于 Windows 任务栏托盘图标的右键菜单中。
+等模型配置后，双击 `清灵.exe` 即可自动启动本地服务并打开浏览器。程序退出入口位于
+Windows 任务栏托盘图标的右键菜单中。
 
-如果打包机额外安装了 .NET 8 SDK，脚本会优先生成带托盘菜单的启动器；没有 SDK 时会
-自动使用 Node.js SEA 生成启动 EXE；该备用启动器不提供托盘菜单，退出时可在任务管理器
-中结束“清灵”目录下的 Node.js 进程。无论采用哪条路径，普通用户都不需要安装
-.NET 或 Node.js。
+打包脚本会优先生成带托盘菜单的启动器：安装 .NET 8 SDK 时使用自包含 .NET 8 版本；
+没有 SDK 的 Windows 打包机则使用系统自带的 .NET Framework 4.x 编译器。只有在极旧的
+Windows 环境找不到上述编译器时，才会退回 Node.js SEA 启动器。无论采用哪条路径，
+普通用户都不需要安装 .NET 或 Node.js。
 
 ### Codex MCP 独立连接包
 
