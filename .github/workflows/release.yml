@@ -1,5 +1,5 @@
 # 自动出便携包：推送 v* 版本标签（或手动触发）时，
-# 云机器并行打出 macOS 双架构（arm64/x64）与 Windows 三个包。
+# 云机器并行打出 macOS 双架构（arm64/x64）、Windows 网页版与 Windows MCP 版。
 # 产物出现在：① 本次运行的 Artifacts 区（保留 90 天）
 #            ② 推标签时的 Releases 页（永久，公开仓库任何人可下载）
 name: 发布便携包
@@ -75,10 +75,28 @@ jobs:
           name: QingLing-Windows-EXE
           path: release/
 
+  build-win-mcp:
+    name: Windows MCP
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4 # 版本读 package.json 的 packageManager 字段（单一事实来源）
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm package:win:mcp
+      - uses: actions/upload-artifact@v4
+        with:
+          include-hidden-files: true # .env.example 是点开头文件，默认会被排除
+          name: QingLing-Windows-MCP
+          path: release/
+
   release:
     name: 发布到 Releases
     if: startsWith(github.ref, 'refs/tags/v') # 手动触发时跳过（只出 Artifacts）
-    needs: [build-mac-arm64, build-mac-x64, build-win]
+    needs: [build-mac-arm64, build-mac-x64, build-win, build-win-mcp]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

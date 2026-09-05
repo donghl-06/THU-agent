@@ -1,6 +1,6 @@
 {
   "name": "thu-assistant",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "THU Assistant Agent — 清华校园生活 LLM Agent",
   "private": true,
   "type": "module",

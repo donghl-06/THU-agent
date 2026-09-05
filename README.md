@@ -123,18 +123,19 @@ pnpm package:win:mcp
 ### 自动打包（GitHub Actions）
 
 仓库内置了云打包流水线（`.github/workflows/release.yml`）：无需本机装任何环境，
-由 GitHub 的云机器自动打出三个便携包——
+由 GitHub 的云机器自动打出四个便携包——
 
 | 产物 | 云机器 | 说明 |
 | --- | --- | --- |
 | `QingLing-macOS-arm64` | macOS（M 系列芯片） | Apple Silicon 原生 |
 | `QingLing-macOS-x64` | macOS（运行时换官方 Intel 版 Node） | Intel Mac 原生 |
 | `QingLing-Windows-EXE` | Windows | 网页聊天 EXE 包 |
+| `QingLing-Windows-MCP` | Windows | Codex / Claude Desktop 等 Agent 的 MCP 连接包 |
 
 **触发方式（二选一）**：
 
 1. **发版本（推荐）**：本地执行 `git tag v0.2.0 && git push origin v0.2.0`——
-   三个包并行打出后自动压缩，发布到仓库的 **Releases** 页面（永久保留，任何人可下载）；
+   四个包并行打出后自动压缩，发布到仓库的 **Releases** 页面（永久保留，任何人可下载）；
 2. **手动试跑**：GitHub 仓库页 → Actions → 选"发布便携包" → Run workflow——
    只出产物（Artifacts，保留 90 天，需登录 GitHub 下载），不发布 Release。
 
