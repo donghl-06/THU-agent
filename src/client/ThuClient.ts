@@ -18,6 +18,7 @@ import {InfoHelper} from "@thu-info/lib";
 import {CardRechargeType} from "@thu-info/lib/dist/models/card/recharge";
 import {config} from "../config/env";
 import {setupAuth, type LoginCredentials, type TwoFactorHooks} from "./auth";
+import {AuthSessionStore} from "./authPersist";
 import {normalizeError, ThuError} from "./errors";
 
 /** login() 遇到网络类错误时的最大尝试次数（含首次） */
@@ -36,12 +37,22 @@ export class ThuClient {
     /** 元数据缓存（key → {value, expireAt}），进程内有效 */
     private readonly metaCache = new Map<string, {value: unknown; expireAt: number}>();
 
-    constructor(hooks: TwoFactorHooks = {}, credentials?: LoginCredentials) {
+    constructor(hooks: TwoFactorHooks = {}, credentials?: LoginCredentials, authSessionPath?: string) {
         this.hooks = hooks;
         this.credentials = credentials;
         this.helper = new InfoHelper();
         setupAuth(this.helper, hooks, credentials?.fingerprint);
+        // 登录会话持久化：有存档则灌回 cookie 并视为已登录，服务重启免重新登录；
+        // cookie 失效时 skill 报登录失效，重新登录一次自然续上
+        if (authSessionPath) {
+            this.authStore = new AuthSessionStore(authSessionPath);
+            if (this.authStore.restore()) {
+                this.loggedIn = true;
+            }
+        }
     }
+
+    private readonly authStore?: AuthSessionStore;
 
     /**
      * 登录（幂等且并发安全：并发调用共享同一次登录）。网络类错误自动重试，认证类错误直接抛出。
@@ -54,6 +65,11 @@ export class ThuClient {
         return this.loginInflight;
     }
 
+    /** 清除登录标志：用户主动点"登录"时强制走真实认证（覆盖可能过期的持久会话） */
+    logout(): void {
+        this.loggedIn = false;
+    }
+
     private async doLogin(): Promise<void> {
         let lastError: ThuError | undefined;
         for (let attempt = 1; attempt <= LOGIN_MAX_ATTEMPTS; attempt++) {
@@ -63,6 +79,7 @@ export class ThuClient {
                     password: this.credentials?.password ?? config.thu.password,
                 });
                 this.loggedIn = true;
+                this.authStore?.save(); // 快照会话 cookie，重启免登录
                 this.hooks.onLoginSuccess?.();
                 return;
             } catch (e) {
@@ -170,6 +187,11 @@ export class ThuClient {
     /** 获取宿舍电费余额与更新时间（上游可能返回 remainder=null + "暂时无法查询"） */
     async getEleRemainder(): ReturnType<InfoHelper["getEleRemainder"]> {
         return this.call(() => this.helper.getEleRemainder());
+    }
+
+    /** 获取宿舍卫生成绩公示图（uFetch 对 image/* 返回 base64，交给 vision 模型读） */
+    async getDormScore(): ReturnType<InfoHelper["getDormScore"]> {
+        return this.call(() => this.helper.getDormScore());
     }
 
     /** 获取宿舍电费缴费记录（[账号, 订单号, 时间, 渠道, 金额, 状态][] 元组） */

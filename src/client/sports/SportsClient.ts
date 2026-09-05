@@ -38,7 +38,10 @@ const LOGIN_EXPIRED_CODE = 1130002;
 const API_TIMEOUT_MS = 30_000;
 /** 限流重试：次数与基础退避（毫秒，线性递增） */
 const RATE_LIMIT_MAX_RETRIES = 3;
-const RATE_LIMIT_BACKOFF_MS = 1500;
+const RATE_LIMIT_BACKOFF_MS = 4000;
+/** 限流防护：全局最小请求间隔。服务端有分钟级滚动窗口限流（2026-08-31 实测：
+ *  瞬时几十请求超窗后，轻则所有查询返回"成功+空数据"，重则直接报"数据不存在"） */
+const MIN_REQUEST_INTERVAL_MS = 300;
 
 export interface SportsScene {
     uuid: string;
@@ -223,9 +226,26 @@ export class SportsClient {
     private accessToken = "";
     /** 进行中的登录 Promise，防并发重复登录（与 lib 的 outstandingLoginPromise 同思路） */
     private loginPromise: Promise<void> | undefined;
+    /** 位置级联缓存（sceneUuid → ROOM 节点）：场景房间结构天级不变，进程内复用，
+     *  每次场地查询可省 4+N 个请求（限流防护，2026-08-31） */
+    private readonly roomsCache = new Map<string, ChooseNode[]>();
+    /** 请求节流闸门：所有 API 请求在此串行排队，保证最小间隔（限流防护） */
+    private throttleGate: Promise<void> = Promise.resolve();
+    private lastRequestAt = 0;
 
     constructor(credentials?: LoginCredentials) {
         this.credentials = credentials;
+    }
+
+    /** 过一道最小间隔闸（串行排队），把瞬时并发摊平以避开服务端滚动窗口限流 */
+    private async throttle(): Promise<void> {
+        const gate = this.throttleGate.then(async () => {
+            const wait = this.lastRequestAt + MIN_REQUEST_INTERVAL_MS - Date.now();
+            if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+            this.lastRequestAt = Date.now();
+        });
+        this.throttleGate = gate;
+        await gate;
     }
 
     /** 登录（幂等）。完整链：SSO → 直连 ID 登录 → 回调 → uniToken → accessToken */
@@ -355,9 +375,10 @@ export class SportsClient {
         }
     }
 
-    /** 统一 API 入口：确保已登录 + token 过期自动重登一次 + 限流退避重试 + 网络抖动重试 + 错误归一化 */
+    /** 统一 API 入口：登录保活 + 最小间隔节流 + token 过期自动重登一次 + 限流退避重试 + 网络抖动重试 + 错误归一化 */
     private async api<T>(path: string, opts?: {method?: "GET" | "POST"; body?: unknown}): Promise<T> {
         await this.login();
+        await this.throttle();
         let result = (await this.requestWithNetworkRetry(path, opts)) as SportsApiResponse<T>;
         if (result.errorCode === LOGIN_EXPIRED_CODE) {
             this.accessToken = "";
@@ -604,8 +625,11 @@ export class SportsClient {
         await this.api<unknown>("/resv/order/cancel", {method: "POST", body: {uuid: orderUuid}});
     }
 
-    /** 场景的位置级联：校区 → 楼栋 → 楼层 → 房间，返回全部 ROOM 节点 */
+    /** 场景的位置级联：校区 → 楼栋 → 楼层 → 房间，返回全部 ROOM 节点。
+     *  结果进程内缓存（房间结构天级不变），失败不缓存，下次重查 */
     private async listRooms(sceneUuid: string): Promise<ChooseNode[]> {
+        const cached = this.roomsCache.get(sceneUuid);
+        if (cached) return cached;
         let nodes = await this.api<ChooseNode[]>(
             `/api/site/choose?sceneUuid=${sceneUuid}&siteType=CAMPUS&siteUuid=`,
         ) ?? [];
@@ -619,6 +643,7 @@ export class SportsClient {
             }
             nodes = next;
         }
+        if (nodes.length > 0) this.roomsCache.set(sceneUuid, nodes);
         return nodes;
     }
 
@@ -626,10 +651,15 @@ export class SportsClient {
      * 某场景某天的场地列表（含每块场地的可约状态）。
      * 服务端要求按"房间"维度查询（classTypeEnum=ROOM + classTypeUuid），
      * 否则返回空列表——先走位置级联拿到全部房间，再逐房间查询合并。
+     *
+     * sceneUseType 两轮查询：球类是团体场地模式（SPORT_GROUP）；游泳馆等
+     * 个人票务场馆在团体视角下恒定返回空，必须用个人模式（SPORT_PERSON）
+     * 重查（2026-09-02 用户抓包实锤，8-31"有位报满"的真正根因）。
+     * 球类第一轮就有数据，不会多花请求。
      */
     async getFieldPage(sceneUuid: string, date: string): Promise<SportsField[]> {
         const rooms = await this.listRooms(sceneUuid);
-        const perRoom = await Promise.all(rooms.map((room) =>
+        const query = (sceneUseType: string) => Promise.all(rooms.map((room) =>
             this.api<SportsField[]>("/api/reserve/current/page", {
                 method: "POST",
                 body: {
@@ -641,12 +671,14 @@ export class SportsClient {
                     classTypeEnum: "ROOM",
                     classTypeUuid: room.uuid,
                     reserveDate: date,
-                    sceneUseType: "SPORT_GROUP",
+                    sceneUseType,
                     pageSize: 999,
                     pageNum: 1,
                 },
             }),
         ));
+        let perRoom = await query("SPORT_GROUP");
+        if (perRoom.flat().length === 0) perRoom = await query("SPORT_PERSON");
         return perRoom.flat().map((f) => ({
             uuid: f.uuid,
             siteName: f.siteName,

@@ -1,0 +1,96 @@
+# 自动出便携包：推送 v* 版本标签（或手动触发）时，
+# 云机器并行打出 macOS 双架构（arm64/x64）与 Windows 三个包。
+# 产物出现在：① 本次运行的 Artifacts 区（保留 90 天）
+#            ② 推标签时的 Releases 页（永久，公开仓库任何人可下载）
+name: 发布便携包
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: # 允许在 Actions 页面手动触发（只出 Artifacts，不发 Release）
+
+permissions:
+  contents: write # 发 Release 需要
+
+jobs:
+  build-mac-arm64:
+    name: macOS（Apple Silicon / M 系列）
+    runs-on: macos-latest # arm64
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4 # 版本读 package.json 的 packageManager 字段（单一事实来源）
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm package:mac
+      - uses: actions/upload-artifact@v4
+        with:
+          include-hidden-files: true # .env.example 是点开头文件，默认会被排除
+          name: QingLing-macOS-arm64
+          path: release/
+
+  build-mac-x64:
+    name: macOS（Intel）
+    runs-on: macos-latest # 在 arm64 机器上构建，运行时换官方 x64 版 Node
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4 # 版本读 package.json 的 packageManager 字段（单一事实来源）
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm package:mac
+      # 用同版本官方 Intel(x64) Node 替换运行时 → 包可在 Intel Mac 原生运行
+      - name: 替换运行时为 x64 版 Node
+        run: |
+          NODE_VERSION=$(node -p "process.versions.node")
+          curl -fsSL "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-darwin-x64.tar.gz" -o /tmp/node-x64.tgz
+          mkdir -p /tmp/node-x64
+          tar -xzf /tmp/node-x64.tgz -C /tmp/node-x64 --strip-components=1
+          cp /tmp/node-x64/bin/node "release/清灵-macOS/runtime/node"
+      - uses: actions/upload-artifact@v4
+        with:
+          include-hidden-files: true # .env.example 是点开头文件，默认会被排除
+          name: QingLing-macOS-x64
+          path: release/
+
+  build-win:
+    name: Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4 # 版本读 package.json 的 packageManager 字段（单一事实来源）
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm package:win
+      - uses: actions/upload-artifact@v4
+        with:
+          include-hidden-files: true # .env.example 是点开头文件，默认会被排除
+          name: QingLing-Windows-EXE
+          path: release/
+
+  release:
+    name: 发布到 Releases
+    if: startsWith(github.ref, 'refs/tags/v') # 手动触发时跳过（只出 Artifacts）
+    needs: [build-mac-arm64, build-mac-x64, build-win]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: 压缩并上传到 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd artifacts
+          for d in */; do (cd "$d" && zip -qr "../${d%/}.zip" .); done
+          gh release create "$GITHUB_REF_NAME" \
+            --title "清灵 $GITHUB_REF_NAME" \
+            --generate-notes \
+            *.zip

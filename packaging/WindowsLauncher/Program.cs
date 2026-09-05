@@ -20,8 +20,8 @@ internal static class Program
         if (!File.Exists(nodePath) || !File.Exists(scriptPath) || !File.Exists(opensslPath))
         {
             MessageBox.Show(
-                "程序文件不完整，请重新解压完整的清华小助手发布包。",
-                "清华小助手",
+                "程序文件不完整，请重新解压完整的清灵发布包。",
+                "清灵",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
             return;
@@ -32,7 +32,7 @@ internal static class Program
         {
             MessageBox.Show(
                 "找不到可用的本地端口，请关闭其他程序后重试。",
-                "清华小助手",
+                "清灵",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
             return;
@@ -42,7 +42,7 @@ internal static class Program
         using var tray = new NotifyIcon
         {
             Icon = System.Drawing.SystemIcons.Application,
-            Text = "清华小助手",
+            Text = "清灵",
             Visible = true,
             ContextMenuStrip = CreateMenu(child, port.Value)
         };
@@ -53,7 +53,7 @@ internal static class Program
             tray.Visible = false;
             MessageBox.Show(
                 "本地服务启动失败，请检查 .env 配置和程序目录中的日志。",
-                "清华小助手",
+                "清灵",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
             return;
@@ -85,7 +85,7 @@ internal static class Program
     private static ContextMenuStrip CreateMenu(Process child, int port)
     {
         var menu = new ContextMenuStrip();
-        menu.Items.Add("打开清华小助手", null, (_, _) => OpenBrowser(port));
+        menu.Items.Add("打开清灵", null, (_, _) => OpenBrowser(port));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("退出", null, (_, _) =>
         {

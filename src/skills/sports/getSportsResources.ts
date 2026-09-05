@@ -17,6 +17,7 @@ import type {SportsClient, SportsField} from "../../client/sports/SportsClient";
 import {ThuError} from "../../client/errors";
 import {fail, ok, type Skill, type SkillResult} from "../base/types";
 import {formatDate, parseDate} from "../base/dateUtils";
+import {matchScenes} from "./sceneMatch";
 
 export interface SportsTimeSession {
     /** 时段，如 "19:00-20:00" */
@@ -93,21 +94,22 @@ export function createGetSportsResourcesSkill(client: SportsSource): Skill {
         name: "get_sports_resources",
         description:
             "查询体育场馆在指定日期（默认今天）各时段的场地空余情况。" +
-            "resourceName 支持关键词匹配场景（如“羽毛球”会同时查气膜馆、综体、西体的羽毛球场；" +
-            "“乒乓球”“网球”“篮球”“台球”“游泳”等均可）。",
+            "resourceName 必填，支持关键词匹配场景（如“羽毛球”会同时查气膜馆、综体、西体的羽毛球场；" +
+            "“乒乓球”“网球”“篮球”“台球”“游泳”等均可）。体育平台对请求频率有严格限制，" +
+            "禁止不带关键词一次查询全部场馆（会触发限流导致查不到数据）。",
         inputSchema: {
             type: "object",
             properties: {
                 resourceName: {
                     type: "string",
-                    description: "场馆项目关键词，如“羽毛球”“气膜馆”；省略时查询全部场景",
+                    description: "场馆项目关键词，如“羽毛球”“气膜馆”。必填：平台限制请求频率，禁止一次查询全部场馆",
                 },
                 date: {
                     type: "string",
                     description: "要查询的日期，格式 YYYY-MM-DD；省略时表示今天",
                 },
             },
-            required: [],
+            required: ["resourceName"],
         },
 
         async execute(input: unknown): Promise<SkillResult<SportsResourcesData>> {
@@ -125,16 +127,26 @@ export function createGetSportsResourcesSkill(client: SportsSource): Skill {
             const dateStr = formatDate(target);
 
             try {
-                // 场景关键词匹配（省略时查全部）
+                // 场景关键词匹配。必须带关键词：全场景扫描一次要发几百个请求，
+                // 必触发平台滚动窗口限流（2026-08-31 实测），后续查询会拿到空数据。
+                // 精确匹配为空时启用模糊匹配：平台场景名有错别字（"北体兵乓球"），
+                // 严格子串会让"乒乓球"永远查不到（2026-09-02 用户实测）
                 const scenes = await client.listScenes();
                 const keyword = typeof raw.resourceName === "string" ? raw.resourceName.trim() : "";
-                const matched = keyword === ""
-                    ? scenes
-                    : scenes.filter((s) => s.sceneName.includes(keyword));
+                if (keyword === "") {
+                    return fail(
+                        "INVALID_INPUT",
+                        "请指明要查询的场馆项目（如：羽毛球、游泳、乒乓球）。" +
+                        "平台限制请求频率，不支持一次查询全部场馆。",
+                    );
+                }
+                const {exact, fuzzy} = matchScenes(scenes, keyword);
+                const matched = exact.length > 0 ? exact : fuzzy;
                 if (matched.length === 0) {
                     return fail(
                         "INVALID_INPUT",
-                        `找不到与“${keyword}”匹配的场馆。可选：${scenes.map((s) => s.sceneName).join("、")}`,
+                        `找不到与“${keyword}”匹配的场馆。可选：${scenes.map((s) => s.sceneName).join("、")}。` +
+                        "请从以上名称中选用后重试，不要自行推测失败原因。",
                     );
                 }
 
@@ -159,11 +171,23 @@ export function createGetSportsResourcesSkill(client: SportsSource): Skill {
                     sessions: fieldLists[i] === null ? [] : aggregateSessions(fieldLists[i]),
                 }));
 
-                // 收集不可约原因：整个场景没有任何可订场次时给出解释
+                // 收集不可约原因：整个场景没有任何可订场次时给出解释。
+                // 注意严格区分三种情况，绝不能把"查不到数据"说成"订满"（2026-08-31 游泳馆误报教训）：
+                // ① fields === null → 查询失败（已进 failedScenes）
+                // ② fields.length === 0 → 场景下没有查到任何场地，原因未知（接口变化/未排期/无权限）
+                // ③ 有场地但 sessions 全空 → 才是真的"订满或锁场"（或全 N 用服务端原因）
                 const closedReasons = new Set<string>(failedScenes);
+                let emptyDataScenes = 0;
                 venues.forEach((venue, i) => {
                     const fields = fieldLists[i];
                     if (fields === null || venue.sessions.length > 0) return;
+                    if (fields.length === 0) {
+                        emptyDataScenes++;
+                        closedReasons.add(
+                            `${venue.name}（未查到任何场地数据，原因不明——可能暂未开放预约、平台限流或系统接口变化，请以体育平台页面为准）`,
+                        );
+                        return;
+                    }
                     // 场地整体状态为 N（未开放/表单缺失等）→ 用服务端给的原因；
                     // 状态正常但场次全满/锁场 → 如实说明
                     const allClosed = fields.every((f) => f.reserveStatus?.reserveStatus !== "Y");
@@ -178,7 +202,10 @@ export function createGetSportsResourcesSkill(client: SportsSource): Skill {
                     date: dateStr,
                     venues,
                     ...(closedReasons.size > 0
-                        ? {note: `以下场景暂无可约时段或查询失败：${[...closedReasons].join("、")}`}
+                        ? {note: `以下场景暂无可约时段或查询失败：${[...closedReasons].join("、")}` +
+                            (emptyDataScenes >= 2
+                                ? "。多个场景均未查到数据，大概率是触发了平台限流，建议 1-2 分钟后再重试一次。"
+                                : "")}
                         : {}),
                 });
             } catch (e) {

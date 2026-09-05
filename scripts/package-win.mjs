@@ -1,121 +1,38 @@
-import {createHash} from "node:crypto";
-import {createReadStream} from "node:fs";
-import {cp, mkdir, readFile, readdir, rm, writeFile} from "node:fs/promises";
-import {execFileSync} from "node:child_process";
-import {basename, dirname, join, relative, resolve} from "node:path";
+import {cp, mkdir, rm, writeFile} from "node:fs/promises";
+import {execFileSync, spawn} from "node:child_process";
+import net from "node:net";
+import {dirname, join, resolve} from "node:path";
 import {fileURLToPath} from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const packageManifest = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
-const releaseRoot = join(root, "release");
-const releaseName = `清华小助手-v${packageManifest.version}-win-x64`;
-const release = join(releaseRoot, releaseName);
-const archive = join(releaseRoot, `${releaseName}.zip`);
-const checksumFile = `${archive}.sha256.txt`;
+const release = join(root, "release", "清灵-EXE");
 const app = join(release, "app");
 const runtime = join(release, "runtime");
-const licenses = join(release, "licenses");
 const launcherProject = join(root, "packaging", "WindowsLauncher", "WindowsLauncher.csproj");
 const launcherPublish = join(root, "packaging", "WindowsLauncher", "bin", "Release", "net8.0-windows", "win-x64", "publish");
 const seaLauncher = join(root, "packaging", "sea-launcher.cjs");
 const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 
-function runPnpm(args, options = {}) {
-    return execFileSync(pnpmCommand, args, {
-        cwd: root,
-        stdio: "inherit",
-        ...(process.platform === "win32" ? {shell: true} : {}),
-        ...options,
-    });
-}
-
-function safeFileName(value) {
-    return value.replace(/^@/, "").replace(/[\\/:*?"<>|@]/g, "_");
-}
-
-function powerShellLiteral(value) {
-    return `'${value.replaceAll("'", "''")}'`;
-}
-
-async function copyDependencyLicenses() {
-    const reportText = execFileSync(pnpmCommand, ["licenses", "list", "--prod", "--json"], {
-        cwd: root,
-        encoding: "utf8",
-        ...(process.platform === "win32" ? {shell: true} : {}),
-    });
-    const report = JSON.parse(reportText);
-    const notices = [
-        "THIRD-PARTY SOFTWARE NOTICES",
-        "",
-        `Node.js ${process.versions.node} runtime: https://github.com/nodejs/node/blob/v${process.versions.node}/LICENSE`,
-        "",
-        "Bundled JavaScript dependencies:",
-        "",
-    ];
-    const seen = new Set();
-
-    for (const [declaredLicense, packages] of Object.entries(report)) {
-        for (const dependency of packages) {
-            for (const packagePath of dependency.paths ?? []) {
-                const manifestPath = join(packagePath, "package.json");
-                const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-                const identity = `${manifest.name}@${manifest.version}`;
-                if (seen.has(identity)) continue;
-                seen.add(identity);
-
-                const targetDirectory = join(licenses, safeFileName(identity));
-                await mkdir(targetDirectory, {recursive: true});
-                await cp(manifestPath, join(targetDirectory, "package.json"));
-
-                const entries = await readdir(packagePath, {withFileTypes: true});
-                let legalFiles = entries
-                    .filter((entry) => entry.isFile() && /^(licen[cs]e|copying|notice)(\..*)?$/i.test(entry.name))
-                    .map((entry) => entry.name);
-                const readme = entries.find((entry) => entry.isFile() && /^readme(\..*)?$/i.test(entry.name));
-                if (legalFiles.length === 0 && readme) legalFiles = [readme.name];
-                for (const fileName of legalFiles) {
-                    await cp(join(packagePath, fileName), join(targetDirectory, fileName));
-                }
-
-                const license = manifest.license ?? dependency.license ?? declaredLicense;
-                const homepage = manifest.homepage ?? dependency.homepage ?? "未提供";
-                const copiedFiles = ["package.json", ...legalFiles]
-                    .map((fileName) => relative(release, join(targetDirectory, fileName)).replaceAll("\\", "/"))
-                    .join(", ");
-                notices.push(`${identity} | ${license} | ${homepage}`);
-                notices.push(`  Files: ${copiedFiles}`);
-            }
-        }
-    }
-
-    await writeFile(join(release, "THIRD_PARTY_NOTICES.txt"), `${notices.join("\r\n")}\r\n`);
-}
-
-async function sha256(filePath) {
-    const hash = createHash("sha256");
-    await new Promise((resolvePromise, rejectPromise) => {
-        const stream = createReadStream(filePath);
-        stream.on("data", (chunk) => hash.update(chunk));
-        stream.on("end", resolvePromise);
-        stream.on("error", rejectPromise);
-    });
-    return hash.digest("hex");
-}
-
-await mkdir(releaseRoot, {recursive: true});
 await rm(release, {recursive: true, force: true});
-await rm(archive, {force: true});
-await rm(checksumFile, {force: true});
-await mkdir(app, {recursive: true});
 await mkdir(runtime, {recursive: true});
-await mkdir(licenses, {recursive: true});
 
-runPnpm(["run", "build"]);
+execFileSync(pnpmCommand, ["run", "build"], {
+    cwd: root,
+    stdio: "inherit",
+    ...(process.platform === "win32" ? {shell: true} : {}),
+});
+execFileSync(pnpmCommand, ["--filter", ".", "deploy", "--prod", "--legacy", app], {
+    cwd: root,
+    stdio: "inherit",
+    ...(process.platform === "win32" ? {shell: true} : {}),
+});
 await cp(join(root, "dist"), join(app, "dist"), {recursive: true});
+// EXE 包是独立的网页聊天模式，不携带 MCP 连接入口。
+await rm(join(app, "dist", "scripts", "mcp-server.cjs"), {force: true});
+await rm(join(app, "dist", "scripts", "mcp-login.cjs"), {force: true});
 await cp(join(root, "openssl.cnf"), join(release, "openssl.cnf"));
 await cp(join(root, ".env.example"), join(release, ".env.example"));
 await cp(process.execPath, join(runtime, "node.exe"));
-await copyDependencyLicenses();
 
 let dotnetSdk = "";
 let hasTrayLauncher = false;
@@ -133,12 +50,12 @@ if (dotnetSdk.trim()) {
         "-p:DebugType=None",
         "-o", launcherPublish,
     ], {cwd: root, stdio: "inherit"});
-    await cp(join(launcherPublish, "清华小助手.exe"), join(release, "清华小助手.exe"));
+    await cp(join(launcherPublish, "清灵.exe"), join(release, "清灵.exe"));
     hasTrayLauncher = true;
 } else {
     const seaConfig = join(release, "sea-config.json");
     const seaBlob = join(release, "sea-prep.blob");
-    const launcherExe = join(release, "清华小助手.exe");
+    const launcherExe = join(release, "清灵.exe");
     await writeFile(seaConfig, JSON.stringify({
         main: seaLauncher,
         output: seaBlob,
@@ -157,35 +74,66 @@ if (dotnetSdk.trim()) {
     await rm(seaConfig, {force: true});
     await rm(seaBlob, {force: true});
 }
-
 const exitInstructions = hasTrayLauncher
-    ? "5. 退出程序请右键任务栏托盘中的清华小助手图标，选择“退出”。"
+    ? "5. 退出程序请右键任务栏托盘中的清灵图标，选择“退出”。"
     : "5. 当前启动器不含托盘菜单；退出程序时，请在任务管理器中结束本目录下的 Node.js 进程。";
-await writeFile(join(release, "README.txt"), `清华小助手（Windows 便携版）
+await writeFile(join(release, "README.txt"), `清灵（Windows 便携版）
 
 1. 将本文件夹中的 .env.example 复制为 .env。
-2. 打开 .env，至少填写 LLM_API_KEY；按需填写 LLM_BASE_URL、LLM_MODEL。
-3. 双击“清华小助手.exe”，程序会自动启动服务并打开浏览器。
+   （以点开头的文件在 macOS 访达中默认隐藏，按 Cmd+Shift+. 显示；Windows 资源管理器直接可见。）
+2. 打开 .env，填写 LLM_API_KEY；按需填写 LLM_BASE_URL、LLM_MODEL。清华账号也可以直接在网页右上角登录时填写。
+3. 双击“清灵.exe”，程序会自动启动服务并打开浏览器。
 4. 在网页右上角点击“登录”，输入清华 Info 学号、密码和二次验证码。
 ${exitInstructions}
 
 清华账号和验证码不会写入文件。
 程序只监听本机 127.0.0.1，不会对局域网开放。
-请勿将填写过真实密钥的 .env 文件上传或转发给他人。
-第三方依赖声明见 THIRD_PARTY_NOTICES.txt 和 licenses 文件夹。
+如需在局域网内（如手机）访问：在 .env 里配置 UI_TOKEN=自定义口令，
+然后同一 WiFi 的设备访问 http://<本机IP>:3457，输入该口令即可。
 `);
 
-execFileSync("powershell.exe", [
-    "-NoProfile",
-    "-NonInteractive",
-    "-Command",
-    `$ProgressPreference = 'SilentlyContinue'; Compress-Archive -LiteralPath ${powerShellLiteral(release)} -DestinationPath ${powerShellLiteral(archive)} -CompressionLevel Optimal -Force`,
-], {
-    stdio: "inherit",
-});
-const archiveHash = await sha256(archive);
-await writeFile(checksumFile, `${archiveHash} *${basename(archive)}\r\n`);
+console.log(`Windows 发布包已生成：${release}`);
 
-console.log(`Windows 发布目录：${release}`);
-console.log(`GitHub Release 压缩包：${archive}`);
-console.log(`SHA-256 校验文件：${checksumFile}`);
+// ===== 冒烟验证：用打包产物自己起一次服务，探活 /api/capabilities =====
+// 启动器就靠这个端点判断"服务就绪"，这里跑通了才报打包成功——
+// 骨架契约（入口文件、capabilities 端点等）被无意破坏时当场暴露，而不是发出去才发现。
+const findFreePort = (start, count) => new Promise((resolvePort, rejectPort) => {
+    let port = start;
+    const tryNext = () => {
+        if (port >= start + count) return rejectPort(new Error("找不到可用端口"));
+        const listener = net.createServer();
+        listener.once("error", () => {
+            listener.close();
+            port += 1;
+            tryNext();
+        });
+        listener.listen(port, "127.0.0.1", () => listener.close(() => resolvePort(port)));
+    };
+    tryNext();
+});
+
+console.log("冒烟验证：用打包产物启动一次本地服务……");
+const smokePort = await findFreePort(39457, 20);
+const smoke = spawn(join(runtime, "node.exe"), [join(app, "dist", "scripts", "step18-web.cjs")], {
+    cwd: release,
+    env: {...process.env, PORT: String(smokePort), HOST: "127.0.0.1", OPENSSL_CONF: join(release, "openssl.cnf")},
+    stdio: ["ignore", "pipe", "pipe"],
+});
+let smokeOutput = "";
+smoke.stdout.on("data", (chunk) => { smokeOutput += chunk; });
+smoke.stderr.on("data", (chunk) => { smokeOutput += chunk; });
+let smokeOk = false;
+for (let i = 0; i < 60; i += 1) {
+    if (smoke.exitCode !== null) break; // 进程已退出，等不等都一样
+    try {
+        const resp = await fetch(`http://127.0.0.1:${smokePort}/api/capabilities`);
+        if (resp.ok) { smokeOk = true; break; }
+    } catch { /* 还没起好，继续等 */ }
+    await new Promise((r) => setTimeout(r, 250));
+}
+smoke.kill();
+if (!smokeOk) {
+    console.error(`冒烟验证失败：打包产物未能启动本地服务（端口 ${smokePort}）。\n进程输出：\n${smokeOutput.slice(0, 2000)}`);
+    process.exit(1);
+}
+console.log(`冒烟验证通过：/api/capabilities 响应正常（探活端口 ${smokePort}）。`);

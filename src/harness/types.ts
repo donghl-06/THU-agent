@@ -39,3 +39,17 @@ export interface ToolSchema {
 export interface ChatResponse {
     choices: {message: ChatMessage}[];
 }
+
+/** token 用量（OpenAI usage 字段子集，流式需 stream_options.include_usage 才返回） */
+export interface TokenUsage {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+}
+
+/** 线上的 usage 字段（snake_case） */
+export interface RawUsage {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+}

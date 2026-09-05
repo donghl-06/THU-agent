@@ -3,58 +3,419 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>清华小助手</title>
+<title>清灵 QingLing - 清华校园智能助手</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<meta name="theme-color" content="#18181b">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%2317131a'/><g fill='%239a44ae'><ellipse cx='16' cy='9' rx='3.4' ry='5.2'/><ellipse cx='16' cy='9' rx='3.4' ry='5.2' transform='rotate(72 16 16)'/><ellipse cx='16' cy='9' rx='3.4' ry='5.2' transform='rotate(144 16 16)'/><ellipse cx='16' cy='9' rx='3.4' ry='5.2' transform='rotate(216 16 16)'/><ellipse cx='16' cy='9' rx='3.4' ry='5.2' transform='rotate(288 16 16)'/></g><circle cx='16' cy='16' r='2.6' fill='%23e9d5ff'/></svg>">
 <style>
-  :root {
-    --bg: #f5f6f8; --card: #ffffff; --text: #1a1a1a; --muted: #888;
-    --primary: #660874; --primary-light: #f3e8f5; --border: #e4e4e7;
-    --ok: #16a34a; --err: #dc2626; --tool: #0369a1;
+  /* ===== Design Tokens · 深色为默认主题（清华紫 #82318E 作强调） ===== */
+  :root, :root[data-theme="dark"] {
+    color-scheme: dark;
+    /* 表面层次 */
+    --bg: #111113;            /* 页面底 */
+    --bg-soft: #18181b;       /* Header / 输入区 */
+    --card: #1e1e22;          /* AI 消息卡片 */
+    --card-hover: #26262b;
+    --inset: #0c0c0e;         /* 内嵌区域（缩略图底等） */
+    /* 文字 */
+    --text: #ececf1;
+    --text-2: #a6a6b0;        /* 次级 */
+    --muted: #73737d;
+    /* 线 */
+    --border: #2c2c33;
+    --border-soft: #232329;
+    /* 品牌清华紫 */
+    --primary: #8f3fa3;       /* 交互主色 */
+    --primary-strong: #82318e;
+    --primary-bright: #c79ad3;/* 深底上的紫文字 */
+    --primary-soft: #a855f7;  /* glow / 高光 */
+    --primary-light: rgba(143, 63, 163, 0.16);
+    --grad-user: linear-gradient(135deg, #7c2f8e, #9a44ae);
+    --ring: rgba(168, 85, 247, 0.20);
+    /* 语义色 */
+    --ok: #34d399;
+    --err: #f87171;
+    --tool: #6ea8fe;
+    /* 圆角 / 阴影 / 字号 */
+    --r-sm: 8px; --r-md: 12px; --r-lg: 16px; --r-xl: 20px;
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35);
+    --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.40);
+    --glow-color: rgba(130, 49, 142, 0.13);
+    --fs-body: 15px; --fs-sm: 13px; --fs-xs: 12px;
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #18181b; --card: #27272a; --text: #e4e4e7; --muted: #71717a;
-      --primary: #c084fc; --primary-light: #3b2144; --border: #3f3f46;
-      --tool: #7dd3fc;
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg: #f6f6f8;
+    --bg-soft: #ffffff;
+    --card: #ffffff;
+    --card-hover: #f2f2f5;
+    --inset: #ededf0;
+    --text: #1b1b20;
+    --text-2: #55555f;
+    --muted: #8a8a94;
+    --border: #e3e3e9;
+    --border-soft: #ebebf0;
+    --primary: #82318e;
+    --primary-strong: #6d2879;
+    --primary-bright: #8f3fa3;
+    --primary-soft: #a855f7;
+    --primary-light: #f5ebf7;
+    --grad-user: linear-gradient(135deg, #82318e, #a13fb5);
+    --ring: rgba(130, 49, 142, 0.18);
+    --ok: #16a34a;
+    --err: #dc2626;
+    --tool: #0369a1;
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.06);
+    --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.10);
+    --glow-color: rgba(130, 49, 142, 0.06);
+  }
+  /* 会话侧栏（多会话管理） */
+  #sidebar {
+    width: 256px; flex: none; display: flex; flex-direction: column; gap: 10px;
+    padding: 12px 10px; background: var(--bg-soft); border-right: 1px solid var(--border-soft);
+  }
+  .sidebar-top { display: flex; gap: 6px; align-items: stretch; flex: none; }
+  .sidebar-top #new-chat { flex: 1; min-width: 0; }
+  #collapse-sidebar {
+    flex: none; width: 38px; border: 1px solid var(--border); border-radius: var(--r-md);
+    background: transparent; color: var(--text-2); cursor: pointer;
+    display: grid; place-items: center; transition: border-color 0.15s, color 0.15s, background 0.15s;
+  }
+  #collapse-sidebar:hover { border-color: var(--primary); color: var(--text); background: var(--primary-light); }
+  #new-chat {
+    display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+    border: 1px solid var(--border); border-radius: var(--r-md);
+    background: transparent; color: var(--text); font-size: var(--fs-sm);
+    cursor: pointer; text-align: left; transition: border-color 0.15s, background 0.15s;
+  }
+  #new-chat:hover { border-color: var(--primary); background: var(--primary-light); }
+  #session-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+  .session-usage { flex: none; padding: 8px 10px; font-size: var(--fs-xs); color: var(--muted); border-top: 1px solid var(--border); }
+  .session-item {
+    display: flex; align-items: center; gap: 6px; padding: 9px 10px;
+    border-radius: var(--r-md); cursor: pointer; font-size: var(--fs-sm);
+    color: var(--text-2); background: transparent; width: 100%;
+  }
+  .session-item:hover { background: var(--card-hover); color: var(--text); }
+  .session-item.active { background: var(--primary-light); color: var(--text); }
+  .session-item .s-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .session-item .s-del {
+    flex: none; border: none; background: transparent; color: var(--muted);
+    width: 22px; height: 22px; border-radius: 6px; cursor: pointer; font-size: 12px;
+    display: grid; place-items: center; opacity: 0; transition: opacity 0.15s;
+  }
+  .session-item:hover .s-del { opacity: 1; }
+  .session-item .s-del:hover { background: color-mix(in srgb, var(--err) 15%, transparent); color: var(--err); }
+  .session-empty { padding: 12px 10px; font-size: var(--fs-xs); color: var(--muted); }
+  #sidebar-mask { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); z-index: 25; display: none; }
+  #sidebar-mask.show { display: block; }
+  #menu-btn { display: none; }
+  /* 桌面端收起侧栏：主区占满整行；收起后左上角 menu-btn 兼做展开开关 */
+  @media (min-width: 769px) {
+    body.sidebar-collapsed #sidebar { display: none; }
+    body.sidebar-collapsed #menu-btn { display: inline-flex; }
+  }
+  @media (max-width: 768px) {
+    #sidebar {
+      position: fixed; top: 0; bottom: 0; left: 0; z-index: 30; width: 270px;
+      transform: translateX(-100%); transition: transform 0.2s;
     }
+    #sidebar.open { transform: none; box-shadow: var(--shadow-2); }
+    #menu-btn { display: inline-flex; }
+    #collapse-sidebar { display: none; } /* 移动端收起=关抽屉，该按钮无意义 */
   }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+  @media (min-width: 769px) { #sidebar-mask { display: none !important; } }
   body {
     font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
     background: var(--bg); color: var(--text);
-    display: flex; flex-direction: column; height: 100vh;
+    display: flex; flex-direction: row; height: 100vh;
+  }
+  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  /* 顶部极淡清华紫 glow，让页面不再是一整块死黑（文档二十七） */
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: -1;
+    background: radial-gradient(640px 340px at 78% -8%, var(--glow-color), transparent 70%);
+  }
+  /* 滚动条与深色界面协调 */
+  #chat::-webkit-scrollbar { width: 10px; }
+  #chat::-webkit-scrollbar-thumb { background: var(--border); border-radius: 5px; border: 2px solid var(--bg); }
+  #chat::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+  /* 键盘焦点可见 + 尊重减少动态偏好 */
+  :focus-visible { outline: 2px solid var(--primary-soft); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  }
+  /* 小屏适配（文档三十） */
+  @media (max-width: 768px) {
+    #chat { padding: 20px 16px; gap: 12px; }
+    #composer-wrap { padding: 10px 16px 16px; }
+    .msg { max-width: 88%; }
+    header { padding: 8px 14px; gap: 8px; }
+    .brand-sub, .conn { display: none; }
   }
   header {
-    padding: 12px 20px; background: var(--card); border-bottom: 1px solid var(--border);
-    font-weight: 600; font-size: 17px;
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 20px;
+    background: color-mix(in srgb, var(--bg-soft) 85%, transparent);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border-bottom: 1px solid var(--border-soft);
   }
-  header .sub { font-weight: 400; font-size: 12px; color: var(--muted); margin-left: 8px; }
-  #chat { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
-  .msg { max-width: 78%; padding: 10px 14px; border-radius: 12px; line-height: 1.65; white-space: pre-wrap; word-break: break-word; }
-  .msg.user { align-self: flex-end; background: var(--primary); color: #fff; }
-  .msg.bot { align-self: flex-start; background: var(--card); border: 1px solid var(--border); }
-  .msg .saved-att { display: block; margin-bottom: 6px; font-size: 12px; opacity: 0.8; }
-  .msg .cursor { display: inline-block; width: 8px; height: 15px; background: var(--primary); vertical-align: -2px; animation: blink 0.8s infinite; }
+  .brand { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+  .logo {
+    width: 34px; height: 34px; border-radius: 10px;
+    background: var(--grad-user); color: #fff;
+    display: grid; place-items: center; font-size: 16px;
+    box-shadow: var(--shadow-1);
+  }
+  .brand-text { display: flex; flex-direction: column; line-height: 1.25; }
+  .brand-name { font-weight: 600; font-size: 15px; }
+  .brand-sub { font-size: 11px; color: var(--muted); letter-spacing: 0.02em; }
+  .conn {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: var(--fs-xs); color: var(--text-2);
+    padding: 6px 10px; border: 1px solid var(--border-soft); border-radius: 999px;
+  }
+  .conn-dot {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--ok);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent);
+  }
+  .conn[hidden] { display: none; }
+  #chat {
+    flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 16px;
+    padding: 28px max(24px, calc((100% - 1040px) / 2)); /* 大屏居中聊天内容 */
+  }
+  .msg {
+    max-width: 82%; padding: 12px 16px; border-radius: var(--r-lg);
+    line-height: 1.7; white-space: pre-wrap; word-break: break-word;
+    font-size: var(--fs-body); box-shadow: var(--shadow-1);
+    animation: msg-in 0.22s ease;
+  }
+  .msg.user {
+    align-self: flex-end; max-width: 72%;
+    background: var(--grad-user); color: #fff;
+    border-radius: var(--r-lg) var(--r-lg) 4px var(--r-lg);
+  }
+  .msg.bot {
+    align-self: flex-start;
+    background: var(--card); border: 1px solid var(--border-soft);
+    border-radius: var(--r-lg) var(--r-lg) var(--r-lg) 4px;
+  }
+  /* AI 消息的轻量身份标识（UI.md 第六条）：连续多条 bot 消息只在第一条显示 */
+  .msg.bot::before {
+    content: "✦ 清灵"; display: block;
+    font-size: 11.5px; font-weight: 600; letter-spacing: 0.02em;
+    color: var(--primary-bright); opacity: 0.75; margin-bottom: 3px;
+  }
+  .msg.bot + .msg.bot::before { display: none; }
+  @keyframes msg-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  .msg .saved-att { display: block; margin-bottom: 6px; font-size: var(--fs-xs); opacity: 0.8; }
+  .msg .msg-meta { margin-top: 6px; font-size: var(--fs-xs); color: var(--muted); }
+  .msg .cursor { display: inline-block; width: 8px; height: 15px; background: var(--primary-soft); vertical-align: -2px; animation: blink 0.8s infinite; }
   @keyframes blink { 50% { opacity: 0; } }
-  .tool-chip {
-    align-self: flex-start; font-size: 12.5px; color: var(--tool);
-    background: color-mix(in srgb, var(--tool) 10%, transparent);
-    border: 1px solid color-mix(in srgb, var(--tool) 30%, transparent);
-    border-radius: 999px; padding: 4px 12px; display: flex; gap: 8px; align-items: center;
+  /* Thinking Card：Agent 处理过程的实时状态（文档四/六/九/十） */
+  .thinking {
+    /* flex:none：本卡是 #chat 滚动容器里唯一 overflow:hidden 的子项——
+       flex 自动最小尺寸因此归零，对话一长（内容溢出）就会被收缩算法
+       压扁成一条线（2026-08-31 用户实测），必须禁止收缩 */
+    flex: none;
+    align-self: flex-start; width: min(480px, 88%);
+    background: var(--card); border: 1px solid var(--border-soft);
+    border-radius: var(--r-lg) var(--r-lg) var(--r-lg) 4px;
+    overflow: hidden; box-shadow: var(--shadow-1);
+    animation: msg-in 0.22s ease;
   }
-  .tool-chip .spin { animation: rot 1s linear infinite; display: inline-block; }
-  @keyframes rot { to { transform: rotate(360deg); } }
-  .tool-chip.fail { color: var(--err); border-color: color-mix(in srgb, var(--err) 30%, transparent); background: color-mix(in srgb, var(--err) 8%, transparent); }
+  .thinking.removing { opacity: 0; transform: translateY(-4px); transition: opacity 0.25s, transform 0.25s; }
+  .think-bar {
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--primary-soft), transparent);
+    background-size: 50% 100%;
+    animation: think-shimmer 1.4s linear infinite;
+  }
+  @keyframes think-shimmer { from { background-position: -60% 0; } to { background-position: 160% 0; } }
+  .think-head { display: flex; align-items: center; gap: 8px; padding: 12px 16px 8px; font-size: 14px; font-weight: 600; }
+  .think-head .spark { color: var(--primary-bright); }
+  .think-time { margin-left: auto; font-size: var(--fs-xs); color: var(--muted); font-weight: 400; }
+  .think-steps { display: flex; flex-direction: column; gap: 7px; padding: 0 16px 12px; }
+  .think-step { display: flex; align-items: center; gap: 9px; font-size: var(--fs-sm); color: var(--text-2); }
+  .think-step .dot {
+    width: 7px; height: 7px; border-radius: 50%; flex: none;
+    border: 1.5px solid var(--muted); background: transparent;
+  }
+  .think-step.active .dot {
+    border-color: var(--primary-soft); background: var(--primary-soft);
+    animation: think-pulse 1.2s ease infinite;
+  }
+  @keyframes think-pulse { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary-soft) 22%, transparent); } }
+  .think-step.done { color: var(--muted); }
+  .think-step.done .dot { border-color: var(--ok); background: var(--ok); }
+  .think-step.fail { color: var(--err); }
+  .think-step.fail .dot { border-color: var(--err); background: var(--err); }
+  .think-step .ms { margin-left: auto; font-size: var(--fs-xs); color: var(--muted); font-variant-numeric: tabular-nums; }
+  /* 错误卡片：人话文案 + 可折叠技术详情 + 重新生成（文档十六/十七） */
+  .error-card {
+    align-self: flex-start; width: min(480px, 88%);
+    background: color-mix(in srgb, var(--err) 6%, var(--card));
+    border: 1px solid color-mix(in srgb, var(--err) 30%, transparent);
+    border-radius: var(--r-lg) var(--r-lg) var(--r-lg) 4px;
+    padding: 14px 16px; box-shadow: var(--shadow-1); animation: msg-in 0.22s ease;
+  }
+  .err-head { font-weight: 600; font-size: 14px; color: var(--err); }
+  .err-body { font-size: var(--fs-sm); color: var(--text-2); margin-top: 6px; line-height: 1.6; }
+  .err-detail { margin-top: 10px; font-size: var(--fs-xs); }
+  .err-detail summary { color: var(--muted); cursor: pointer; width: fit-content; }
+  .err-detail pre {
+    margin-top: 6px; padding: 8px 10px; background: var(--inset); border-radius: var(--r-sm);
+    white-space: pre-wrap; word-break: break-all; color: var(--muted);
+    max-height: 160px; overflow: auto;
+  }
+  .err-actions { margin-top: 12px; }
+  .err-retry {
+    border: 1px solid color-mix(in srgb, var(--err) 40%, transparent);
+    background: transparent; color: var(--text); font-size: var(--fs-sm);
+    padding: 6px 14px; border-radius: 999px; cursor: pointer;
+  }
+  .err-retry:hover { background: color-mix(in srgb, var(--err) 10%, transparent); }
+  /* Toast：系统通知与 AI 回复分离（文档十五） */
+  #toasts {
+    position: fixed; top: 64px; right: 20px; z-index: 50;
+    display: flex; flex-direction: column; gap: 10px; pointer-events: none;
+  }
+  .toast {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--card); color: var(--text);
+    border: 1px solid var(--border); border-left: 3px solid var(--primary);
+    border-radius: var(--r-md); padding: 10px 16px; font-size: var(--fs-sm);
+    box-shadow: var(--shadow-2); animation: toast-in 0.25s ease;
+  }
+  .toast.ok { border-left-color: var(--ok); }
+  .toast.err { border-left-color: var(--err); }
+  .toast.out { opacity: 0; transform: translateX(12px); transition: opacity 0.3s, transform 0.3s; }
+  @keyframes toast-in { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
+  /* 回到底部按钮（文档二十八） */
+  #scroll-btn {
+    position: fixed; right: 24px; bottom: 130px; z-index: 5;
+    width: 36px; height: 36px; border-radius: 50%;
+    border: 1px solid var(--border); background: var(--card); color: var(--text-2);
+    cursor: pointer; box-shadow: var(--shadow-1); font-size: 16px; line-height: 1;
+  }
+  #scroll-btn:hover { color: var(--text); background: var(--card-hover); }
+  #scroll-btn[hidden] { display: none; }
+  /* Welcome Screen：空对话状态 + 快捷问题（文档十四） */
+  #welcome { align-self: center; text-align: center; padding: 9vh 16px 0; width: min(560px, 100%); }
+  .w-spark { font-size: 30px; color: var(--primary-bright); }
+  .w-title { font-size: 22px; font-weight: 600; margin-top: 12px; }
+  .w-sub { font-size: var(--fs-sm); color: var(--muted); margin-top: 10px; line-height: 1.6; }
+  .w-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 28px; }
+  #explore-btn {
+    margin-top: 18px; padding: 8px 14px; border: none; background: transparent;
+    color: var(--primary-bright); font-size: 13px; cursor: pointer; border-radius: 8px;
+  }
+  #explore-btn:hover { background: var(--primary-light); }
+  .w-card {
+    display: flex; align-items: center; gap: 10px; padding: 14px 16px;
+    background: var(--card); border: 1px solid var(--border-soft); border-radius: var(--r-lg);
+    color: var(--text); font-size: var(--fs-sm); cursor: pointer; text-align: left;
+    transition: border-color 0.15s, background 0.15s, transform 0.15s;
+  }
+  .w-card:hover { border-color: var(--primary); background: var(--primary-light); transform: translateY(-1px); }
+  .w-ico { font-size: 18px; }
+  #welcome[hidden] { display: none; }
+  @media (max-width: 560px) { .w-grid { grid-template-columns: 1fr; } }
+  /* Markdown 渲染样式（文档十九）：层级清晰、克制 */
+  .msg.md { white-space: normal; }
+  .md > :first-child { margin-top: 0; }
+  .md > :last-child { margin-bottom: 0; }
+  .md p { margin: 0 0 10px; }
+  .md h1, .md h2, .md h3, .md h4 {
+    font-size: 15.5px; font-weight: 600; margin: 14px 0 8px;
+  }
+  .md ul, .md ol { margin: 6px 0 10px; padding-left: 22px; display: flex; flex-direction: column; gap: 4px; }
+  .md strong { font-weight: 600; }
+  .md code {
+    background: var(--inset); padding: 2px 6px; border-radius: 6px;
+    font-size: 13px; font-family: ui-monospace, Consolas, "Courier New", monospace;
+  }
+  .md pre { background: var(--inset); padding: 10px 12px; border-radius: var(--r-md); overflow-x: auto; margin: 8px 0; }
+  .md pre code { background: transparent; padding: 0; }
+  .md table { border-collapse: collapse; margin: 8px 0 12px; font-size: 13.5px; width: 100%; }
+  .md th, .md td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+  .md th { background: var(--inset); font-weight: 600; }
+  .md td { font-variant-numeric: tabular-nums; }
+  .md blockquote {
+    border-left: 3px solid var(--primary); margin: 8px 0; padding: 2px 12px;
+    color: var(--text-2); background: var(--primary-light);
+    border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  }
+  .md a { color: var(--tool); }
+  .md hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+  /* Message Actions：AI 回复 hover 时显示（文档十八） */
+  .msg-actions {
+    display: none; gap: 4px; margin-top: 10px; padding-top: 8px;
+    border-top: 1px solid var(--border-soft);
+    opacity: 1;
+  }
+  .msg.bot:hover .msg-actions { display: flex; }
+  @media (hover: none) { .msg-actions { display: flex; } }
+  .msg-actions button {
+    border: none; background: transparent; color: var(--muted);
+    font-size: 14px; padding: 3px 8px; border-radius: 7px; cursor: pointer;
+  }
+  .msg-actions button:hover { background: var(--card-hover); color: var(--text); }
+  /* （赞/踩已移除：单用户本地应用反馈无处可去，避免假功能） */
   .qr-card { align-self: flex-start; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; text-align: center; }
   .qr-card img { width: 220px; height: 220px; }
   .qr-card .url { font-size: 12px; color: var(--muted); word-break: break-all; margin-top: 8px; max-width: 260px; }
   .pay-card { align-self: flex-start; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; text-align: center; max-width: 320px; }
   .pay-card button { padding: 10px 24px; border: none; border-radius: 9px; background: var(--primary); color: #fff; font-size: 14px; cursor: pointer; }
   .pay-card .tip { font-size: 12px; color: var(--muted); margin-top: 8px; }
-  #inputbar { display: flex; gap: 10px; padding: 14px 20px; background: var(--card); border-top: 1px solid var(--border); }
-  .iconbtn {
-    padding: 0 13px; border: 1px solid var(--border); border-radius: 10px;
-    background: var(--bg); color: var(--text); font-size: 16px; cursor: pointer;
+  .cal-card { align-self: flex-start; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; max-width: 360px; }
+  .cal-card .cal-title { font-size: 14px; font-weight: 600; }
+  .cal-card .cal-sub { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .cal-card button { margin-top: 10px; padding: 7px 16px; border: none; border-radius: 8px; background: var(--primary); color: #fff; font-size: 13px; cursor: pointer; }
+  .cal-card button:hover { background: var(--primary-strong); }
+  /* UI 访问口令遮罩（.env 配置 UI_TOKEN 后局域网访问需先输入一次） */
+  #ui-auth-mask { position: fixed; inset: 0; z-index: 60; background: var(--bg); display: grid; place-items: center; }
+  #ui-auth-mask[hidden] { display: none; }
+  .ui-auth-card { width: min(320px, 88vw); background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 24px 22px; display: flex; flex-direction: column; gap: 12px; }
+  .ui-auth-title { font-size: 15px; font-weight: 600; }
+  #ui-token-input { padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--inset); color: var(--text); font-size: 14px; outline: none; }
+  #ui-token-input:focus { border-color: var(--primary); }
+  #ui-token-ok { padding: 10px; border: none; border-radius: 9px; background: var(--primary); color: #fff; font-size: 14px; cursor: pointer; }
+  .ui-auth-err { font-size: 12px; color: var(--err); min-height: 16px; }
+  /* Composer：卡片式输入区（文档十二） */
+  #composer-wrap { padding: 12px max(24px, calc((100% - 1040px) / 2)) 20px; }
+  .quick-chips { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 2px 8px; }
+  .quick-chip {
+    border: 1px solid var(--border); background: var(--card); color: var(--text-2);
+    font-size: var(--fs-sm); padding: 6px 13px; border-radius: 999px; cursor: pointer;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
   }
+  .quick-chip:hover { border-color: var(--primary); color: var(--text); background: var(--primary-light); }
+  #composer {
+    background: var(--bg-soft); border: 1px solid var(--border);
+    border-radius: var(--r-xl); padding: 10px 12px 8px;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  #composer:focus-within { border-color: var(--primary); box-shadow: 0 0 0 3px var(--ring); }
+  #q {
+    display: block; width: 100%; border: none; background: transparent; color: var(--text);
+    font-size: var(--fs-body); line-height: 1.55; outline: none; resize: none;
+    min-height: 24px; max-height: 140px; font-family: inherit;
+  }
+  #q::placeholder { color: var(--muted); }
+  .composer-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+  .composer-hint { margin-left: auto; font-size: var(--fs-xs); color: var(--muted); }
+  @media (max-width: 640px) { .composer-hint { display: none; } }
+  #disclaimer { margin: 8px 4px 0; text-align: center; font-size: 11.5px; color: var(--muted); opacity: 0.75; }
+  #composer .iconbtn { background: transparent; }
+  .iconbtn {
+    padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--r-md);
+    background: transparent; color: var(--text); cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .iconbtn svg { display: block; }
   .iconbtn.off { opacity: 0.35; }
   #mic.recording {
     background: var(--err); color: #fff; border-color: var(--err);
@@ -62,7 +423,7 @@
   }
   @keyframes pulse { 50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--err) 22%, transparent); } }
   /* 待发送图片缩略图条 */
-  #thumbs { display: flex; gap: 8px; padding: 10px 20px 0; background: var(--card); }
+  #thumbs { display: flex; gap: 8px; padding: 0 4px 8px; }
   #thumbs[hidden] { display: none; }
   #thumbs .thumb { position: relative; }
   #thumbs img { height: 56px; border-radius: 8px; border: 1px solid var(--border); display: block; }
@@ -76,18 +437,16 @@
   /* 顶栏右侧开关 */
   header { display: flex; align-items: center; }
   header .ctl { margin-left: auto; display: flex; gap: 8px; }
-  header .iconbtn { padding: 5px 10px; font-size: 14px; }
+  header .iconbtn { padding: 7px; border: none; color: var(--muted); }
+  header .iconbtn:hover { color: var(--text); background: var(--card-hover); }
   #login-btn { padding: 7px 14px; border: 0; border-radius: 9px; background: var(--primary); color: #fff; font-size: 13px; cursor: pointer; }
   #login-btn.logged-in { background: var(--primary-light); color: var(--primary); border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent); }
-  #q {
-    flex: 1; padding: 11px 14px; border: 1px solid var(--border); border-radius: 10px;
-    font-size: 15px; background: var(--bg); color: var(--text); outline: none;
-  }
-  #q:focus { border-color: var(--primary); }
   #send {
-    padding: 0 22px; border: none; border-radius: 10px; background: var(--primary);
-    color: #fff; font-size: 15px; cursor: pointer;
+    padding: 8px 20px; border: none; border-radius: 999px; background: var(--primary);
+    color: #fff; font-size: var(--fs-sm); font-weight: 500; cursor: pointer;
+    transition: background 0.15s;
   }
+  #send:hover:not(:disabled) { background: var(--primary-strong); }
   #send:disabled { opacity: 0.45; cursor: not-allowed; }
   /* 确认弹窗 */
   #modal-mask {
@@ -160,25 +519,191 @@
   }
   #auth-cancel { color: var(--text); background: var(--bg); border: 1px solid var(--border) !important; }
   #auth-submit { color: #fff; background: var(--primary); }
+  /* 关于清灵（UI.md 第十六/十七条）：Header 品牌区与欢迎页"探索清灵"均可打开 */
+  #about-mask {
+    position: fixed; inset: 0; background: rgba(8, 12, 24, 0.58);
+    display: none; align-items: center; justify-content: center; z-index: 20;
+    padding: 20px;
+  }
+  #about-mask.show { display: flex; }
+  #about-modal {
+    width: min(400px, 100%); background: var(--card); color: var(--text);
+    border: 1px solid var(--border); border-radius: 20px; padding: 28px;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.32); text-align: center;
+  }
+  .about-logo {
+    width: 54px; height: 54px; margin: 0 auto 14px; border-radius: 16px;
+    background: var(--grad-user); display: grid; place-items: center;
+    box-shadow: var(--shadow-1);
+  }
+  #about-title { font-size: 21px; }
+  #about-title .about-en { font-size: 13px; color: var(--muted); font-weight: 400; margin-left: 4px; }
+  .about-sub { color: var(--text-2); font-size: 13.5px; margin-top: 4px; }
+  .about-ver { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .about-caps { display: grid; gap: 8px; margin: 18px 0; text-align: left; }
+  .about-caps .cap {
+    display: flex; align-items: baseline; gap: 10px; padding: 9px 12px;
+    background: var(--bg); border: 1px solid var(--border-soft); border-radius: 10px;
+  }
+  .about-caps .cap b { font-size: 13px; flex: none; }
+  .about-caps .cap span { font-size: 12.5px; color: var(--muted); }
+  #about-close {
+    width: 100%; padding: 11px; border-radius: 12px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 14px;
+  }
+  #about-close:hover { border-color: var(--primary); background: var(--primary-light); }
   #auth-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
+<script>/* marked v18.0.11 (MIT) · 内联以保持单文件自包含、支持离线打包部署 */
+/**
+ * marked v18.0.11 - a markdown parser
+ * Copyright (c) 2018-2026, MarkedJS. (MIT License)
+ * Copyright (c) 2011-2018, Christopher Jeffrey. (MIT License)
+ * https://github.com/markedjs/marked
+ */
+
+/**
+ * DO NOT EDIT THIS FILE
+ * The code in this file is generated from files in ./src/
+ */
+(function(g,f){if(typeof exports=="object"&&typeof module<"u"){module.exports=f()}else if("function"==typeof define && define.amd){define("marked",f)}else {g["marked"]=f()}}(typeof globalThis < "u" ? globalThis : typeof self < "u" ? self : this,function(){var exports={};var __exports=exports;var module={exports};
+"use strict";var j=Object.defineProperty;var we=Object.getOwnPropertyDescriptor;var ye=Object.getOwnPropertyNames;var Pe=Object.prototype.hasOwnProperty;var Se=(l,e)=>{for(var t in e)j(l,t,{get:e[t],enumerable:!0})},_e=(l,e,t,n)=>{if(e&&typeof e=="object"||typeof e=="function")for(let s of ye(e))!Pe.call(l,s)&&s!==t&&j(l,s,{get:()=>e[s],enumerable:!(n=we(e,s))||n.enumerable});return l};var $e=l=>_e(j({},"__esModule",{value:!0}),l);var Lt={};Se(Lt,{Hooks:()=>P,Lexer:()=>x,Marked:()=>D,Parser:()=>b,Renderer:()=>y,TextRenderer:()=>_,Tokenizer:()=>w,defaults:()=>R,getDefaults:()=>z,lexer:()=>$t,marked:()=>g,options:()=>Tt,parse:()=>St,parseInline:()=>Pt,parser:()=>_t,setOptions:()=>wt,use:()=>Re,walkTokens:()=>yt});module.exports=$e(Lt);function z(){return{async:!1,breaks:!1,extensions:null,gfm:!0,hooks:null,pedantic:!1,renderer:null,silent:!1,tokenizer:null,walkTokens:null}}var R=z();function F(l){R=l}var M={exec:()=>null};function I(l){let e=[];return t=>{let n=Math.max(0,Math.min(3,t-1)),s=e[n];return s||(s=l(n),e[n]=s),s}}function k(l,e=""){let t=typeof l=="string"?l:l.source,n={replace:(s,r)=>{let i=typeof r=="string"?r:r.source;return i=i.replace(m.caret,"$1"),t=t.replace(s,i),n},getRegex:()=>new RegExp(t,e)};return n}var Le=((l="")=>{try{return!!new RegExp("(?<=1)(?<!1)"+l)}catch{return!1}})(),m={codeRemoveIndent:/^(?: {1,4}| {0,3}\t)/gm,outputLinkReplace:/\\([\[\]])/g,indentCodeCompensation:/^(\s+)(?:```)/,beginningSpace:/^\s+/,endingHash:/#$/,startingSpaceChar:/^ /,endingSpaceChar:/ $/,nonSpaceChar:/[^ ]/,newLineCharGlobal:/\n/g,tabCharGlobal:/\t/g,multipleSpaceGlobal:/\s+/g,blankLine:/^[ \t]*$/,doubleBlankLine:/\n[ \t]*\n[ \t]*$/,blockquoteStart:/^ {0,3}>/,blockquoteSetextReplace:/\n {0,3}((?:=+|-+) *)(?=\n|$)/g,blockquoteSetextReplace2:/^ {0,3}>[ \t]?/gm,listReplaceNesting:/^ {1,4}(?=( {4})*[^ ])/g,listIsTask:/^\[[ xX]\] +\S/,listReplaceTask:/^\[[ xX]\] +/,listTaskCheckbox:/\[[ xX]\]/,anyLine:/\n.*\n/,hrefBrackets:/^<(.*)>$/,tableDelimiter:/[:|]/,tableAlignChars:/^\||\| *$/g,tableRowBlankLine:/\n[ \t]*$/,tableAlignRight:/^ *-+: *$/,tableAlignCenter:/^ *:-+: *$/,tableAlignLeft:/^ *:-+ *$/,startATag:/^<a /i,endATag:/^<\/a>/i,startPreScriptTag:/^<(pre|code|kbd|script)(\s|>)/i,endPreScriptTag:/^<\/(pre|code|kbd|script)(\s|>)/i,startAngleBracket:/^</,endAngleBracket:/>$/,pedanticHrefTitle:/^([^'"]*[^\s])\s+(['"])(.*)\2/,unicodeAlphaNumeric:/[\p{L}\p{N}]/u,escapeTest:/[&<>"']/,escapeReplace:/[&<>"']/g,escapeTestNoEncode:/[<>"']|&(?!(#\d{1,7}|#[Xx][a-fA-F0-9]{1,6}|\w+);)/,escapeReplaceNoEncode:/[<>"']|&(?!(#\d{1,7}|#[Xx][a-fA-F0-9]{1,6}|\w+);)/g,caret:/(^|[^\[])\^/g,percentDecode:/%25/g,findPipe:/\|/g,splitPipe:/ \|/,slashPipe:/\\\|/g,carriageReturn:/\r\n|\r/g,spaceLine:/^ +$/gm,notSpaceStart:/^\S*/,endingNewline:/\n$/,listItemRegex:l=>new RegExp(`^( {0,3}${l})((?:[	 ][^\\n]*)?(?:\\n|$))`),nextBulletRegex:I(l=>new RegExp(`^ {0,${l}}(?:[*+-]|\\d{1,9}[.)])((?:[ 	][^\\n]*)?(?:\\n|$))`)),hrRegex:I(l=>new RegExp(`^ {0,${l}}((?:- *){3,}|(?:_ *){3,}|(?:\\* *){3,})(?:\\n+|$)`)),fencesBeginRegex:I(l=>new RegExp(`^ {0,${l}}(?:\`\`\`|~~~)`)),headingBeginRegex:I(l=>new RegExp(`^ {0,${l}}#`)),htmlBeginRegex:I(l=>new RegExp(`^ {0,${l}}<(?:[a-z].*>|!--)`,"i")),blockquoteBeginRegex:I(l=>new RegExp(`^ {0,${l}}>`))},Ee=/^(?:[ \t]*(?:\n|$))+/,ze=/^((?: {4}| {0,3}\t)[^\n]+(?:\n(?:[ \t]*(?:\n|$))*)?)+/,Me=/^ {0,3}(`{3,}(?=[^`\n]*(?:\n|$))|~{3,})([^\n]*)(?:\n|$)(?:|([\s\S]*?)(?:\n|$))(?: {0,3}\1[~`]* *(?=\n|$)|$)/,v=/^ {0,3}((?:-[\t ]*){3,}|(?:_[ \t]*){3,}|(?:\*[ \t]*){3,})(?:\n+|$)/,Ae=/^ {0,3}(#{1,6})(?=\s|$)(.*)(?:\n+|$)/,K=/ {0,3}(?:[*+-]|\d{1,9}[.)])/,ae=/^(?!bull |blockCode|fences|blockquote|heading|html|table)((?:.|\n(?!\s*?\n|bull |blockCode|fences|blockquote|heading|html|table))+?)\n {0,3}(=+|-+) *(?:\n+|$)/,le=k(ae).replace(/bull/g,K).replace(/blockCode/g,/(?: {4}| {0,3}\t)/).replace(/fences/g,/ {0,3}(?:`{3,}|~{3,})/).replace(/blockquote/g,/ {0,3}>/).replace(/heading/g,/ {0,3}#{1,6}(?:\s|$)/).replace(/html/g,/ {0,3}<[^\n>]+>\n/).replace(/\|table/g,"").getRegex(),Ie=k(ae).replace(/bull/g,K).replace(/blockCode/g,/(?: {4}| {0,3}\t)/).replace(/fences/g,/ {0,3}(?:`{3,}|~{3,})/).replace(/blockquote/g,/ {0,3}>/).replace(/heading/g,/ {0,3}#{1,6}(?:\s|$)/).replace(/html/g,/ {0,3}<[^\n>]+>\n/).replace(/table/g,/ {0,3}\|?(?:[:\- ]*\|)+[\:\- ]*\n/).getRegex(),W=/^([^\n]+(?:\n(?!hr|heading|lheading|blockquote|fences|list|html|table|[ \t]+\n)[^\n]+)*)/,Ce=/^[^\n]+/,X=/(?!\s*\])(?:\\[\s\S]|[^\[\]\\])+/,Be=k(/^ {0,3}\[(label)\]: *(?:\n[ \t]*)?([^<\s][^\s]*|<.*?>)(?:(?: +(?:\n[ \t]*)?| *\n[ \t]*)(title))? *(?:\n+|$)/).replace("label",X).replace("title",/(?:"(?:\\"?|[^"\\])*"|'[^'\n]*(?:\n[^'\n]+)*\n?'|\([^()]*\))/).getRegex(),De=k(/^(bull)([ \t][^\n]*?)?(?:\n|$)/).replace(/bull/g,K).getRegex(),Q="address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|meta|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul",J=/<!--(?:-?>|[\s\S]*?(?:-->|$))/,qe=k("^ {0,3}(?:<(script|pre|style|textarea)[\\s>][\\s\\S]*?(?:</\\1>[^\\n]*\\n*|$)|comment[^\\n]*(\\n+|$)|<\\?[\\s\\S]*?(?:\\?>[^\\n]*\\n*|$)|<![A-Z][\\s\\S]*?(?:>[^\\n]*\\n*|$)|<!\\[CDATA\\[[\\s\\S]*?(?:\\]\\]>[^\\n]*\\n*|$)|</?(tag)(?: +|\\n|/?>)[\\s\\S]*?(?:(?:\\n[ 	]*)+\\n|$)|<(?!script|pre|style|textarea)([a-z][\\w-]*)(?:attribute)*? */?>(?=[ \\t]*(?:\\n|$))[\\s\\S]*?(?:(?:\\n[ 	]*)+\\n|$)|</(?!script|pre|style|textarea)[a-z][\\w-]*\\s*>(?=[ \\t]*(?:\\n|$))[\\s\\S]*?(?:(?:\\n[ 	]*)+\\n|$))","i").replace("comment",J).replace("tag",Q).replace("attribute",/ +[a-zA-Z:_][\w.:-]*(?: *= *"[^"\n]*"| *= *'[^'\n]*'| *= *[^\s"'=<>`]+)?/).getRegex(),ue=l=>k(W).replace("hr",v).replace("heading"," {0,3}#{1,6}(?:\\s|$)").replace("|lheading","").replace("|table","").replace("blockquote"," {0,3}>").replace("fences"," {0,3}(?:`{3,}(?=[^`\\n]*(?:\\n|$))|~~~)[^\\n]*(?:\\n|$)").replace("list",l).replace("html","</?(?:tag)(?: +|\\n|/?>)|<(?:script|pre|style|textarea|!--)").replace("tag",Q).getRegex(),ve=ue(/ {0,3}(?:[*+-]|1[.)])[ \t]+[^ \t\n]/),He=ue(/ {0,3}(?:[*+-]|\d{1,9}[.)])(?:[ \t]|\n|$)/),Ze=k(/^( {0,3}> ?(paragraph|[^\n]*)(?:\n|$))+/).replace("paragraph",He).getRegex(),V={blockquote:Ze,code:ze,def:Be,fences:Me,heading:Ae,hr:v,html:qe,lheading:le,list:De,newline:Ee,paragraph:ve,table:M,text:Ce},ie=k("^ *([^\\n ].*)\\n {0,3}((?:\\| *)?:?-+:? *(?:\\| *:?-+:? *)*(?:\\| *)?)(?:\\n((?:(?! *\\n|hr|heading|blockquote|code|fences|list|html).*(?:\\n|$))*)\\n*|$)").replace("hr",v).replace("heading"," {0,3}#{1,6}(?:\\s|$)").replace("blockquote"," {0,3}>").replace("code","(?: {4}| {0,3}	)[^\\n]").replace("fences"," {0,3}(?:`{3,}(?=[^`\\n]*(?:\\n|$))|~~~)[^\\n]*(?:\\n|$)").replace("list"," {0,3}(?:[*+-]|1[.)])[ \\t]").replace("html","</?(?:tag)(?: +|\\n|/?>)|<(?:script|pre|style|textarea|!--)").replace("tag",Q).getRegex(),Ge={...V,lheading:Ie,table:ie,paragraph:k(W).replace("hr",v).replace("heading"," {0,3}#{1,6}(?:\\s|$)").replace("|lheading","").replace("table",ie).replace("blockquote"," {0,3}>").replace("fences"," {0,3}(?:`{3,}(?=[^`\\n]*(?:\\n|$))|~~~)[^\\n]*(?:\\n|$)").replace("list"," {0,3}(?:[*+-]|1[.)])[ \\t]+[^ \\t\\n]").replace("html","</?(?:tag)(?: +|\\n|/?>)|<(?:script|pre|style|textarea|!--)").replace("tag",Q).getRegex()},Qe={...V,html:k(`^ *(?:comment *(?:\\n|\\s*$)|<(tag)[\\s\\S]+?</\\1> *(?:\\n{2,}|\\s*$)|<tag(?:"[^"]*"|'[^']*'|\\s[^'"/>\\s]*)*?/?> *(?:\\n{2,}|\\s*$))`).replace("comment",J).replace(/tag/g,"(?!(?:a|em|strong|small|s|cite|q|dfn|abbr|data|time|code|var|samp|kbd|sub|sup|i|b|u|mark|ruby|rt|rp|bdi|bdo|span|br|wbr|ins|del|img)\\b)\\w+(?!:|[^\\w\\s@]*@)\\b").getRegex(),def:/^ *\[([^\]]+)\]: *<?([^\s>]+)>?(?: +(["(][^\n]+[")]))? *(?:\n+|$)/,heading:/^(#{1,6})(.*)(?:\n+|$)/,fences:M,lheading:/^(.+?)\n {0,3}(=+|-+) *(?:\n+|$)/,paragraph:k(W).replace("hr",v).replace("heading",` *#{1,6} *[^
+]`).replace("lheading",le).replace("|table","").replace("blockquote"," {0,3}>").replace("|fences","").replace("|list","").replace("|html","").replace("|tag","").getRegex()},Ne=/^\\([!"#$%&'()*+,\-./:;<=>?@\[\]\\^_`{|}~])/,je=/^(`+)([^`]|[^`][\s\S]*?[^`])\1(?!`)/,pe=/^( {2,}|\\)\n(?!\s*$)/,Fe=/^(`+|[^`])(?:(?= {2,}\n)|[\s\S]*?(?:(?=[\\<!\[`*_]|\b_|$)|[^ ](?= {2,}\n)))/,$=/[\p{P}\p{S}]/u,C=/[\s\p{P}\p{S}]/u,H=/[^\s\p{P}\p{S}]/u,Ue=k(/^((?![*_])punctSpace)/,"u").replace(/punctSpace/g,C).getRegex(),Ke=/[\p{Pi}\p{Ps}"']/u,ce=/(?!~)[\p{P}\p{S}]/u,We=/(?!~)[\s\p{P}\p{S}]/u,Xe=/(?:[^\s\p{P}\p{S}]|~)/u,Je=k(/link|precode-code|html/,"g").replace("link",/\[(?:[^\[\]`]|(?<a>`+)[^`]+\k<a>(?!`))*?\]\((?:\\[\s\S]|[^\\\(\)]|\((?:\\[\s\S]|[^\\\(\)])*\))*\)/).replace("precode-",Le?"(?<!`)()":"(^^|[^`])").replace("code",/(?<b>`+)[^`]+\k<b>(?!`)/).replace("html",/<(?! )[^<>]*?>/).getRegex(),he=/^(?:\*+(?:((?!\*)punct)|([^\s*]))?)|^_+(?:((?!_)punct)|([^\s_]))?/,Ve=k(he,"u").replace(/punct/g,$).getRegex(),Ye=k(he,"u").replace(/punct/g,ce).getRegex(),et=/^(?:\*+(?:((?!\*)(?!openQuote)punct)|([^\s*]))?)|^_+(?:((?!_)(?!openQuote)punct)|([^\s_]))?/,tt=k(et,"u").replace(/openQuote/g,Ke).replace(/punct/g,$).getRegex(),ke="^[^_*]*?__[^_*]*?\\*[^_*]*?(?=__)|[^*]+(?=[^*])|(?!\\*)punct(\\*+)(?=[\\s]|$)|notPunctSpace(\\*+)(?!\\*)(?=punctSpace|$)|(?!\\*)punctSpace(\\*+)(?=notPunctSpace)|[\\s](\\*+)(?!\\*)(?=punct)|(?!\\*)punct(\\*+)(?!\\*)(?=punct)|notPunctSpace(\\*+)(?=notPunctSpace)",nt=k(ke,"gu").replace(/notPunctSpace/g,H).replace(/punctSpace/g,C).replace(/punct/g,$).getRegex(),rt=k(ke,"gu").replace(/notPunctSpace/g,Xe).replace(/punctSpace/g,We).replace(/punct/g,ce).getRegex(),st="^[^_*]*?__[^_*]*?\\*[^_*]*?(?=__)|[^*]+(?=[^*])|(?!\\*)punct(\\*+)(?=[\\s]|$)|notPunctSpace(\\*+)(?!\\*)(?=punctSpace|$)|(?!\\*)[\\s](\\*+)(?=notPunctSpace)|[\\s](\\*+)(?!\\*)(?=punct)|(?!\\*)punct(\\*+)(?!\\*)(?=punct)|(?:(?!\\*)punct|notPunctSpace)(\\*+)(?!\\*)(?=notPunctSpace)",it=k(st,"gu").replace(/notPunctSpace/g,H).replace(/punctSpace/g,C).replace(/punct/g,$).getRegex(),ot=k("^[^_*]*?\\*\\*[^_*]*?_[^_*]*?(?=\\*\\*)|[^_]+(?=[^_])|(?!_)punct(_+)(?=[\\s]|$)|notPunctSpace(_+)(?!_)(?=punctSpace|$)|(?!_)punctSpace(_+)(?=notPunctSpace)|[\\s](_+)(?!_)(?=punct)|(?!_)punct(_+)(?!_)(?=punct)","gu").replace(/notPunctSpace/g,H).replace(/punctSpace/g,C).replace(/punct/g,$).getRegex(),at="^[^_*]*?\\*\\*[^_*]*?_[^_*]*?(?=\\*\\*)|[^_]+(?=[^_])|(?!_)punct(_+)(?=[\\s]|$)|notPunctSpace(_+)(?!_)(?=punctSpace|$)|(?!_)[\\s](_+)(?=notPunctSpace)|[\\s](_+)(?!_)(?=punct)|(?!_)punct(_+)(?!_)(?=punct)|(?:(?!_)punct|notPunctSpace)(_+)(?!_)(?=notPunctSpace)",lt=k(at,"gu").replace(/notPunctSpace/g,H).replace(/punctSpace/g,C).replace(/punct/g,$).getRegex(),ut=k(/^~~?(?:((?!~)punct)|[^\s~])/,"u").replace(/punct/g,$).getRegex(),pt="^[^~]+(?=[^~])|(?!~)punct(~~?)(?=[\\s]|$)|notPunctSpace(~~?)(?!~)(?=punctSpace|$)|(?!~)punctSpace(~~?)(?=notPunctSpace)|[\\s](~~?)(?!~)(?=punct)|(?!~)punct(~~?)(?!~)(?=punct)|notPunctSpace(~~?)(?=notPunctSpace)",ct=k(pt,"gu").replace(/notPunctSpace/g,H).replace(/punctSpace/g,C).replace(/punct/g,$).getRegex(),ht=k(/\\(punct)/,"gu").replace(/punct/g,$).getRegex(),kt=k(/^<(scheme:[^\s\x00-\x1f<>]*|email)>/).replace("scheme",/[a-zA-Z][a-zA-Z0-9+.-]{1,31}/).replace("email",/[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+(@)[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+(?![-_])/).getRegex(),dt=k(J).replace("(?:-->|$)","-->").getRegex(),gt=k("^comment|^</[a-zA-Z][\\w:-]*\\s*>|^<[a-zA-Z][\\w-]*(?:attribute)*?\\s*/?>|^<\\?[\\s\\S]*?\\?>|^<![a-zA-Z]+\\s[\\s\\S]*?>|^<!\\[CDATA\\[[\\s\\S]*?\\]\\]>").replace("comment",dt).replace("attribute",/\s+[a-zA-Z:_][\w.:-]*(?:\s*=\s*"[^"]*"|\s*=\s*'[^']*'|\s*=\s*[^\s"'=<>`]+)?/).getRegex(),G=/(?:\[(?:\\[\s\S]|[^\[\]\\])*\]|\\[\s\S]|`+(?!`)[^`]*?`+(?!`)|``+(?=\])|[^\[\]\\`])*?/,ft=k(/^!?\[(label)\]\(\s*(href)(?:(?:[ \t]+(?:\n[ \t]*)?|\n[ \t]*)(title))?\s*\)/).replace("label",G).replace("href",/<(?:\\.|[^\n<>\\])+>|[^ \t\n\x00-\x1f]+|(?=\))/).replace("title",/"(?:\\"?|[^"\\])*"|'(?:\\'?|[^'\\])*'|\((?:\\\)?|[^)\\])*\)/).getRegex(),de=k(/^!?\[(label)\]\[(ref)\]/).replace("label",G).replace("ref",X).getRegex(),ge=k(/^!?\[(ref)\](?:\[\])?/).replace("ref",X).getRegex(),mt=k("reflink|nolink(?!\\()","g").replace("reflink",de).replace("nolink",ge).getRegex(),oe=/[hH][tT][tT][pP][sS]?|[fF][tT][pP]/,Y={_backpedal:M,anyPunctuation:ht,autolink:kt,blockSkip:Je,br:pe,code:je,del:M,delLDelim:M,delRDelim:M,emStrongLDelim:Ve,emStrongRDelimAst:nt,emStrongRDelimUnd:ot,escape:Ne,link:ft,nolink:ge,punctuation:Ue,reflink:de,reflinkSearch:mt,tag:gt,text:Fe,url:M},xt={...Y,emStrongLDelim:tt,emStrongRDelimAst:it,emStrongRDelimUnd:lt,link:k(/^!?\[(label)\]\((.*?)\)/).replace("label",G).getRegex(),reflink:k(/^!?\[(label)\]\s*\[([^\]]*)\]/).replace("label",G).getRegex()},U={...Y,emStrongRDelimAst:rt,emStrongLDelim:Ye,delLDelim:ut,delRDelim:ct,url:k(/^((?:protocol):\/\/|www\.)(?:[a-zA-Z0-9\-]+\.?)+[^\s<]*|^email/).replace("protocol",oe).replace("email",/[A-Za-z0-9._+-]+(@)[a-zA-Z0-9-_]+(?:\.[a-zA-Z0-9-_]*[a-zA-Z0-9])+(?![-_])/).getRegex(),_backpedal:/(?:[^?!.,:;*_'"~()&]+|\([^)]*\)|&(?![a-zA-Z0-9]+;$)|[?!.,:;*_'"~)]+(?!$))+/,del:/^(~~?)(?=[^\s~])((?:\\[\s\S]|[^\\])*?(?:\\[\s\S]|[^\s~\\]))\1(?=[^~]|$)/,text:k(/^(`+|~+|[^`~])(?:(?=[`~])|(?= {2,}\n)|(?=[a-zA-Z0-9.!#$%&'*+\/=?_`{\|}~-]+@)|[\s\S]*?(?:(?=[\\<!\[`*~_]|\b_|protocol:\/\/|www\.|$)|[^ ](?= {2,}\n)|[^a-zA-Z0-9.!#$%&'*+\/=?_`{\|}~-](?=[a-zA-Z0-9.!#$%&'*+\/=?_`{\|}~-]+@)))/).replace("protocol",oe).getRegex()},bt={...U,br:k(pe).replace("{2,}","*").getRegex(),text:k(U.text).replace("\\b_","\\b_| {2,}\\n").replace(/\{2,\}/g,"*").getRegex()},Z={normal:V,gfm:Ge,pedantic:Qe},B={normal:Y,gfm:U,breaks:bt,pedantic:xt};var Rt={"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"},fe=l=>Rt[l];function T(l,e){if(e){if(m.escapeTest.test(l))return l.replace(m.escapeReplace,fe)}else if(m.escapeTestNoEncode.test(l))return l.replace(m.escapeReplaceNoEncode,fe);return l}function ee(l){try{l=encodeURI(l).replace(m.percentDecode,"%")}catch{return null}return l}function te(l,e){let t=l.replace(m.findPipe,(r,i,o)=>{let u=!1,a=i;for(;--a>=0&&o[a]==="\\";)u=!u;return u?"|":" |"}),n=t.split(m.splitPipe),s=0;if(n[0].trim()||n.shift(),n.length>0&&!n.at(-1)?.trim()&&n.pop(),e)if(n.length>e)n.splice(e);else for(;n.length<e;)n.push("");for(;s<n.length;s++)n[s]=n[s].trim().replace(m.slashPipe,"|");return n}function L(l,e,t){let n=l.length;if(n===0)return"";let s=0;for(;s<n;){let r=l.charAt(n-s-1);if(r===e&&!t)s++;else if(r!==e&&t)s++;else break}return l.slice(0,n-s)}function ne(l){let e=l.split(`
+`),t=e.length-1;for(;t>=0&&m.blankLine.test(e[t]);)t--;return e.length-t<=2?l:e.slice(0,t+1).join(`
+`)}function me(l,e){if(l.indexOf(e[1])===-1)return-1;let t=0;for(let n=0;n<l.length;n++)if(l[n]==="\\")n++;else if(l[n]===e[0])t++;else if(l[n]===e[1]&&(t--,t<0))return n;return t>0?-2:-1}function xe(l,e=0){let t=e,n="";for(let s of l)if(s==="	"){let r=4-t%4;n+=" ".repeat(r),t+=r}else n+=s,t++;return n}function be(l,e,t,n,s){let r=e.href,i=e.title||null,o=l[1].replace(s.other.outputLinkReplace,"$1"),u=l[0].charAt(0)==="!";n.state.inLink=!0;let a=n.state.linkEmitted,p=n.state.inRawBlock;n.state.linkEmitted=!1;let c=n.inlineTokens(o),h=n.state.linkEmitted;if(n.state.linkEmitted=a,n.state.inLink=!1,!u){if(h){n.state.inRawBlock=p;return}n.state.linkEmitted=!0}return{type:u?"image":"link",raw:t,href:r,title:i,text:o,tokens:c}}function Ot(l,e,t){let n=l.match(t.other.indentCodeCompensation);if(n===null)return e;let s=n[1];return e.split(`
+`).map(r=>{let i=r.match(t.other.beginningSpace);if(i===null)return r;let[o]=i;return o.length>=s.length?r.slice(s.length):r}).join(`
+`)}var w=class{options;rules;lexer;constructor(e){this.options=e||R}space(e){let t=this.rules.block.newline.exec(e);if(t&&t[0].length>0)return{type:"space",raw:t[0]}}code(e){let t=this.rules.block.code.exec(e);if(t){let n=this.options.pedantic?t[0]:ne(t[0]),s=n.replace(this.rules.other.codeRemoveIndent,"");return{type:"code",raw:n,codeBlockStyle:"indented",text:s}}}fences(e){let t=this.rules.block.fences.exec(e);if(t){let n=t[0],s=Ot(n,t[3]||"",this.rules);return{type:"code",raw:n,lang:t[2]?t[2].trim().replace(this.rules.inline.anyPunctuation,"$1"):t[2],text:s}}}heading(e){let t=this.rules.block.heading.exec(e);if(t){let n=t[2].trim();if(this.rules.other.endingHash.test(n)){let s=L(n,"#");(this.options.pedantic||!s||this.rules.other.endingSpaceChar.test(s))&&(n=s.trim())}return{type:"heading",raw:L(t[0],`
+`),depth:t[1].length,text:n,tokens:this.lexer.inline(n)}}}hr(e){let t=this.rules.block.hr.exec(e);if(t)return{type:"hr",raw:L(t[0],`
+`)}}blockquote(e){let t=this.rules.block.blockquote.exec(e);if(t){let n=L(t[0],`
+`).split(`
+`),s="",r="",i=[];for(;n.length>0;){let o=!1,u=[],a;for(a=0;a<n.length;a++)if(this.rules.other.blockquoteStart.test(n[a]))u.push(n[a]),o=!0;else if(!o)u.push(n[a]);else break;n=n.slice(a);let p=u.join(`
+`),c=p.replace(this.rules.other.blockquoteSetextReplace,`
+    $1`).replace(this.rules.other.blockquoteSetextReplace2,"");s=s?`${s}
+${p}`:p,r=r?`${r}
+${c}`:c;let h=this.lexer.state.top;if(this.lexer.state.top=!0,this.lexer.blockTokens(c,i,!0),this.lexer.state.top=h,n.length===0)break;let d=i.at(-1);if(d?.type==="code")break;if(d?.type==="blockquote"){let O=d,f=n.join(`
+`),S=O.raw+`
+`+f.replace(this.rules.other.blockquoteSetextReplace2,""),E=this.blockquote(S);i[i.length-1]=E,s=`${s}
+${f}`,r=r.substring(0,r.length-O.text.length)+E.text;break}else if(d?.type==="list"){let O=d,f=O.raw+`
+`+n.join(`
+`),S=this.list(f);i[i.length-1]=S,s=s.substring(0,s.length-d.raw.length)+S.raw,r=r.substring(0,r.length-O.raw.length)+S.raw,n=f.substring(i.at(-1).raw.length).split(`
+`);continue}}return{type:"blockquote",raw:s,tokens:i,text:r}}}list(e){let t=this.rules.block.list.exec(e);if(t){let n=t[1].trim(),s=n.length>1,r={type:"list",raw:"",ordered:s,start:s?+n.slice(0,-1):"",loose:!1,items:[]};n=s?`\\d{1,9}\\${n.slice(-1)}`:`\\${n}`,this.options.pedantic&&(n=s?n:"[*+-]");let i=this.rules.other.listItemRegex(n),o=!1;for(;e;){let a=!1,p="",c="";if(!(t=i.exec(e))||this.rules.block.hr.test(e))break;p=t[0],e=e.substring(p.length);let h=xe(t[2].split(`
+`,1)[0],t[1].length),d=e.split(`
+`,1)[0],O=!h.trim(),f=0;if(this.options.pedantic?(f=2,c=h.trimStart()):O?f=t[1].length+1:(f=h.search(this.rules.other.nonSpaceChar),f=f>4?1:f,c=h.slice(f),f+=t[1].length),O&&this.rules.other.blankLine.test(d)&&(p+=d+`
+`,e=e.substring(d.length+1),a=!0),!a){let S=this.rules.other.nextBulletRegex(f),E=this.rules.other.hrRegex(f),re=this.rules.other.fencesBeginRegex(f),se=this.rules.other.headingBeginRegex(f),Oe=this.rules.other.htmlBeginRegex(f),Te=this.rules.other.blockquoteBeginRegex(f);for(;e;){let N=e.split(`
+`,1)[0],q;if(d=N,this.options.pedantic?(d=d.replace(this.rules.other.listReplaceNesting,"  "),q=d):q=d.replace(this.rules.other.tabCharGlobal,"    "),re.test(d)||se.test(d)||Oe.test(d)||Te.test(d)||S.test(d)||E.test(d))break;if(q.search(this.rules.other.nonSpaceChar)>=f||!d.trim())c+=`
+`+q.slice(f);else{if(O||h.replace(this.rules.other.tabCharGlobal,"    ").search(this.rules.other.nonSpaceChar)>=4||re.test(h)||se.test(h)||E.test(h))break;c+=`
+`+d}O=!d.trim(),p+=N+`
+`,e=e.substring(N.length+1),h=q.slice(f)}}r.loose||(o?r.loose=!0:this.rules.other.doubleBlankLine.test(p)&&(o=!0)),r.items.push({type:"list_item",raw:p,task:!!this.options.gfm&&this.rules.other.listIsTask.test(c),loose:!1,text:c,tokens:[]}),r.raw+=p}let u=r.items.at(-1);if(u)u.raw=u.raw.trimEnd(),u.text=u.text.trimEnd();else return;r.raw=r.raw.trimEnd();for(let a of r.items)if(this.lexer.state.top=!1,a.tokens=this.lexer.blockTokens(a.text,[]),!r.loose){let p=a.tokens.filter(h=>h.type==="space"),c=p.length>0&&p.some(h=>this.rules.other.anyLine.test(h.raw));r.loose=c}for(let a of r.items){let p=a.tokens[0];if(a.task&&(p?.type==="text"||p?.type==="paragraph")){a.text=a.text.replace(this.rules.other.listReplaceTask,""),p.raw=p.raw.replace(this.rules.other.listReplaceTask,""),p.text=p.text.replace(this.rules.other.listReplaceTask,"");for(let h=this.lexer.inlineQueue.length-1;h>=0;h--)if(this.rules.other.listIsTask.test(this.lexer.inlineQueue[h].src)){this.lexer.inlineQueue[h].src=this.lexer.inlineQueue[h].src.replace(this.rules.other.listReplaceTask,"");break}let c=this.rules.other.listTaskCheckbox.exec(a.raw);if(c){let h={type:"checkbox",raw:c[0]+" ",checked:c[0]!=="[ ]"};a.checked=h.checked,r.loose?a.tokens[0]&&["paragraph","text"].includes(a.tokens[0].type)&&"tokens"in a.tokens[0]&&a.tokens[0].tokens?(a.tokens[0].raw=h.raw+a.tokens[0].raw,a.tokens[0].text=h.raw+a.tokens[0].text,a.tokens[0].tokens.unshift(h)):a.tokens.unshift({type:"paragraph",raw:h.raw,text:h.raw,tokens:[h]}):a.tokens.unshift(h)}}else a.task&&(a.task=!1)}if(r.loose)for(let a of r.items){a.loose=!0;for(let p of a.tokens)p.type==="text"&&(p.type="paragraph")}return r}}html(e){let t=this.rules.block.html.exec(e);if(t){let n=ne(t[0]);return{type:"html",block:!0,raw:n,pre:t[1]==="pre"||t[1]==="script"||t[1]==="style",text:n}}}def(e){let t=this.rules.block.def.exec(e);if(t){let n=t[1].toLowerCase().replace(this.rules.other.multipleSpaceGlobal," "),s=t[2]?t[2].replace(this.rules.other.hrefBrackets,"$1").replace(this.rules.inline.anyPunctuation,"$1"):"",r=t[3]?t[3].substring(1,t[3].length-1).replace(this.rules.inline.anyPunctuation,"$1"):t[3];return{type:"def",tag:n,raw:L(t[0],`
+`),href:s,title:r}}}table(e){let t=this.rules.block.table.exec(e);if(!t||!this.rules.other.tableDelimiter.test(t[2]))return;let n=te(t[1]),s=t[2].replace(this.rules.other.tableAlignChars,"").split("|"),r=t[3]?.trim()?t[3].replace(this.rules.other.tableRowBlankLine,"").split(`
+`):[],i={type:"table",raw:L(t[0],`
+`),header:[],align:[],rows:[]};if(n.length===s.length){for(let o of s)this.rules.other.tableAlignRight.test(o)?i.align.push("right"):this.rules.other.tableAlignCenter.test(o)?i.align.push("center"):this.rules.other.tableAlignLeft.test(o)?i.align.push("left"):i.align.push(null);for(let o=0;o<n.length;o++)i.header.push({text:n[o],tokens:this.lexer.inline(n[o]),header:!0,align:i.align[o]});for(let o of r)i.rows.push(te(o,i.header.length).map((u,a)=>({text:u,tokens:this.lexer.inline(u),header:!1,align:i.align[a]})));return i}}lheading(e){let t=this.rules.block.lheading.exec(e);if(t){let n=t[1].trim();return{type:"heading",raw:L(t[0],`
+`),depth:t[2].charAt(0)==="="?1:2,text:n,tokens:this.lexer.inline(n)}}}paragraph(e){let t=this.rules.block.paragraph.exec(e);if(t){let n=t[1].charAt(t[1].length-1)===`
+`?t[1].slice(0,-1):t[1];return{type:"paragraph",raw:t[0],text:n,tokens:this.lexer.inline(n)}}}text(e){let t=this.rules.block.text.exec(e);if(t)return{type:"text",raw:t[0],text:t[0],tokens:this.lexer.inline(t[0])}}escape(e){let t=this.rules.inline.escape.exec(e);if(t)return{type:"escape",raw:t[0],text:t[1]}}tag(e){let t=this.rules.inline.tag.exec(e);if(t)return!this.lexer.state.inLink&&this.rules.other.startATag.test(t[0])?this.lexer.state.inLink=!0:this.lexer.state.inLink&&this.rules.other.endATag.test(t[0])&&(this.lexer.state.inLink=!1),!this.lexer.state.inRawBlock&&this.rules.other.startPreScriptTag.test(t[0])?this.lexer.state.inRawBlock=!0:this.lexer.state.inRawBlock&&this.rules.other.endPreScriptTag.test(t[0])&&(this.lexer.state.inRawBlock=!1),{type:"html",raw:t[0],inLink:this.lexer.state.inLink,inRawBlock:this.lexer.state.inRawBlock,block:!1,text:t[0]}}link(e){let t=this.rules.inline.link.exec(e);if(t){let n=t[2].trim();if(!this.options.pedantic&&this.rules.other.startAngleBracket.test(n)){if(!this.rules.other.endAngleBracket.test(n))return;let i=L(n.slice(0,-1),"\\");if((n.length-i.length)%2===0)return}else{let i=me(t[2],"()");if(i===-2)return;if(i>-1){let u=(t[0].indexOf("!")===0?5:4)+t[1].length+i;t[2]=t[2].substring(0,i),t[0]=t[0].substring(0,u).trim(),t[3]=""}}let s=t[2],r="";if(this.options.pedantic){let i=this.rules.other.pedanticHrefTitle.exec(s);i&&(s=i[1],r=i[3])}else r=t[3]?t[3].slice(1,-1):"";return s=s.trim(),this.rules.other.startAngleBracket.test(s)&&(this.options.pedantic&&!this.rules.other.endAngleBracket.test(n)?s=s.slice(1):s=s.slice(1,-1)),be(t,{href:s&&s.replace(this.rules.inline.anyPunctuation,"$1"),title:r&&r.replace(this.rules.inline.anyPunctuation,"$1")},t[0],this.lexer,this.rules)}}reflink(e,t){let n;if((n=this.rules.inline.reflink.exec(e))||(n=this.rules.inline.nolink.exec(e))){let s=(n[2]||n[1]).replace(this.rules.other.multipleSpaceGlobal," "),r=t[s.toLowerCase()];if(!r){let i=n[0].charAt(0);return{type:"text",raw:i,text:i}}return be(n,r,n[0],this.lexer,this.rules)}}emStrong(e,t,n=""){let s=this.rules.inline.emStrongLDelim.exec(e);if(!s||!s[1]&&!s[2]&&!s[3]&&!s[4]||s[4]&&n.match(this.rules.other.unicodeAlphaNumeric))return;if(!(s[1]||s[3]||"")||!n||this.rules.inline.punctuation.exec(n)){let i=[...s[0]].length-1,o,u,a=i,p=0,c=s[0][0],h=n===c,d=c==="*"?this.rules.inline.emStrongRDelimAst:this.rules.inline.emStrongRDelimUnd;for(d.lastIndex=0,t=t.slice(-1*e.length+i);(s=d.exec(t))!==null;){if(o=s[1]||s[2]||s[3]||s[4]||s[5]||s[6],!o)continue;if(u=[...o].length,s[3]||s[4]){a+=u;continue}else if(s[5]||s[6]){if(i%3&&!((i+u)%3)){p+=u;continue}if(h)break}if(a-=u,a>0)continue;u=Math.min(u,u+a+p);let O=[...s[0]][0].length,f=e.slice(0,i+s.index+O+u);if(Math.min(i,u)%2){let E=f.slice(1,-1);return{type:"em",raw:f,text:E,tokens:this.lexer.inlineTokens(E)}}let S=f.slice(2,-2);return{type:"strong",raw:f,text:S,tokens:this.lexer.inlineTokens(S)}}}}codespan(e){let t=this.rules.inline.code.exec(e);if(t){let n=t[2].replace(this.rules.other.newLineCharGlobal," "),s=this.rules.other.nonSpaceChar.test(n),r=this.rules.other.startingSpaceChar.test(n)&&this.rules.other.endingSpaceChar.test(n);return s&&r&&(n=n.substring(1,n.length-1)),{type:"codespan",raw:t[0],text:n}}}br(e){let t=this.rules.inline.br.exec(e);if(t)return{type:"br",raw:t[0]}}del(e,t,n=""){let s=this.rules.inline.delLDelim.exec(e);if(!s)return;if(!(s[1]||"")||!n||this.rules.inline.punctuation.exec(n)){let i=[...s[0]].length-1,o,u,a=i,p=this.rules.inline.delRDelim;for(p.lastIndex=0,t=t.slice(-1*e.length+i);(s=p.exec(t))!==null;){if(o=s[1]||s[2]||s[3]||s[4]||s[5]||s[6],!o||(u=[...o].length,u!==i))continue;if(s[3]||s[4]){a+=u;continue}if(a-=u,a>0)continue;u=Math.min(u,u+a);let c=[...s[0]][0].length,h=e.slice(0,i+s.index+c+u),d=h.slice(i,-i);return{type:"del",raw:h,text:d,tokens:this.lexer.inlineTokens(d)}}}}autolink(e){let t=this.rules.inline.autolink.exec(e);if(t){let n,s;return t[2]==="@"?(n=t[1],s="mailto:"+n):(n=t[1],s=n),{type:"link",raw:t[0],text:n,href:s,tokens:[{type:"text",raw:n,text:n}]}}}url(e){let t;if(t=this.rules.inline.url.exec(e)){let n,s;if(t[2]==="@")n=t[0],s="mailto:"+n;else{let r;do r=t[0],t[0]=this.rules.inline._backpedal.exec(t[0])?.[0]??"";while(r!==t[0]);n=t[0],t[1]==="www."?s="http://"+t[0]:s=t[0]}return{type:"link",raw:t[0],text:n,href:s,tokens:[{type:"text",raw:n,text:n}]}}}inlineText(e){let t=this.rules.inline.text.exec(e);if(t){let n=this.lexer.state.inRawBlock;return{type:"text",raw:t[0],text:t[0],escaped:n}}}};var x=class l{tokens;options;state;inlineQueue;tokenizer;constructor(e){this.tokens=[],this.tokens.links=Object.create(null),this.options=e||R,this.options.tokenizer=this.options.tokenizer||new w,this.tokenizer=this.options.tokenizer,this.tokenizer.options=this.options,this.tokenizer.lexer=this,this.inlineQueue=[],this.state={inLink:!1,inRawBlock:!1,linkEmitted:!1,top:!0};let t={other:m,block:Z.normal,inline:B.normal};this.options.pedantic?(t.block=Z.pedantic,t.inline=B.pedantic):this.options.gfm&&(t.block=Z.gfm,this.options.breaks?t.inline=B.breaks:t.inline=B.gfm),this.tokenizer.rules=t}static get rules(){return{block:Z,inline:B}}static lex(e,t){return new l(t).lex(e)}static lexInline(e,t){return new l(t).inlineTokens(e)}lex(e){e=e.replace(m.carriageReturn,`
+`),this.blockTokens(e,this.tokens);for(let t=0;t<this.inlineQueue.length;t++){let n=this.inlineQueue[t];this.inlineTokens(n.src,n.tokens)}return this.inlineQueue=[],this.tokens}blockTokens(e,t=[],n=!1){this.tokenizer.lexer=this,this.options.pedantic&&(e=e.replace(m.tabCharGlobal,"    ").replace(m.spaceLine,""));let s=1/0;for(;e;){if(e.length<s)s=e.length;else{this.infiniteLoopError(e.charCodeAt(0));break}let r;if(this.options.extensions?.block?.some(o=>(r=o.call({lexer:this},e,t))?(e=e.substring(r.raw.length),t.push(r),!0):!1))continue;if(r=this.tokenizer.space(e)){e=e.substring(r.raw.length);let o=t.at(-1);r.raw.length===1&&o!==void 0?o.raw+=`
+`:t.push(r);continue}if(r=this.tokenizer.code(e)){e=e.substring(r.raw.length);let o=t.at(-1);o?.type==="paragraph"||o?.type==="text"?(o.raw+=(o.raw.endsWith(`
+`)?"":`
+`)+r.raw,o.text+=`
+`+r.text,this.inlineQueue.at(-1).src=o.text):t.push(r);continue}if(r=this.tokenizer.fences(e)){e=e.substring(r.raw.length),t.push(r);continue}if(r=this.tokenizer.heading(e)){e=e.substring(r.raw.length),t.push(r);continue}if(r=this.tokenizer.hr(e)){e=e.substring(r.raw.length),t.push(r);continue}if(r=this.tokenizer.blockquote(e)){e=e.substring(r.raw.length),t.push(r);continue}if(r=this.tokenizer.list(e)){e=e.substring(r.raw.length),t.push(r);continue}if(r=this.tokenizer.html(e)){e=e.substring(r.raw.length),t.push(r);continue}if(r=this.tokenizer.def(e)){e=e.substring(r.raw.length);let o=t.at(-1);o?.type==="paragraph"||o?.type==="text"?(o.raw+=(o.raw.endsWith(`
+`)?"":`
+`)+r.raw,o.text+=`
+`+r.raw,this.inlineQueue.at(-1).src=o.text):this.tokens.links[r.tag]||(this.tokens.links[r.tag]={href:r.href,title:r.title},t.push(r));continue}if(r=this.tokenizer.table(e)){e=e.substring(r.raw.length),t.push(r);continue}if(r=this.tokenizer.lheading(e)){e=e.substring(r.raw.length),t.push(r);continue}let i=e;if(this.options.extensions?.startBlock){let o=1/0,u=e.slice(1),a;this.options.extensions.startBlock.forEach(p=>{a=p.call({lexer:this},u),typeof a=="number"&&a>=0&&(o=Math.min(o,a))}),o<1/0&&o>=0&&(i=e.substring(0,o+1))}if(this.state.top&&(r=this.tokenizer.paragraph(i))){let o=t.at(-1);n&&o?.type==="paragraph"?(o.raw+=(o.raw.endsWith(`
+`)?"":`
+`)+r.raw,o.text+=`
+`+r.text,this.inlineQueue.pop(),this.inlineQueue.at(-1).src=o.text):t.push(r),n=i.length!==e.length,e=e.substring(r.raw.length);continue}if(r=this.tokenizer.text(e)){e=e.substring(r.raw.length);let o=t.at(-1);o?.type==="text"?(o.raw+=(o.raw.endsWith(`
+`)?"":`
+`)+r.raw,o.text+=`
+`+r.text,this.inlineQueue.pop(),this.inlineQueue.at(-1).src=o.text):t.push(r);continue}if(e){this.infiniteLoopError(e.charCodeAt(0));break}}return this.state.top=!0,t}inline(e,t=[]){return this.inlineQueue.push({src:e,tokens:t}),t}linkInText(e){if(!e.includes("["))return!1;let t=this.tokenizer.rules.inline.link;for(let n of e.matchAll(this.tokenizer.rules.inline.blockSkip))if(t.test(n[0])&&e.charAt(n.index-1)!=="!")return!0;for(let n of e.matchAll(this.tokenizer.rules.inline.reflinkSearch)){let s=n[0],r=s.lastIndexOf("[");if(!(s.charAt(0)==="!"||!Object.hasOwn(this.tokens.links,s.slice(r+1,-1)))&&!(r>1&&this.linkInText(s.slice(1,r-1))))return!0}return!1}inlineTokens(e,t=[]){this.tokenizer.lexer=this;let n=e;if(this.tokens.links&&e.includes("[")){let o=this.tokenizer.rules.inline.reflinkSearch,u=a=>{let p=a.lastIndexOf("[");if(!Object.hasOwn(this.tokens.links,a.slice(p+1,-1)))return a;if(p>1&&a.charAt(0)!=="!"){let c=a.slice(1,p-1);if(this.linkInText(c))return"["+c.replace(o,u)+"]["+"a".repeat(a.length-p-2)+"]"}return"["+"a".repeat(a.length-2)+"]"};n=n.replace(o,u)}n=n.replace(this.tokenizer.rules.inline.anyPunctuation,o=>"+".repeat(o.length)),n=n.replace(this.tokenizer.rules.inline.blockSkip,(o,u,a)=>{let p=a?a.length:0;return o.slice(0,p)+"["+"a".repeat(o.length-p-2)+"]"}),n=this.options.hooks?.emStrongMask?.call({lexer:this},n)??n;let s=!1,r="",i=1/0;for(;e;){if(e.length<i)i=e.length;else{this.infiniteLoopError(e.charCodeAt(0));break}s||(r=""),s=!1;let o;if(this.options.extensions?.inline?.some(a=>(o=a.call({lexer:this},e,t))?(e=e.substring(o.raw.length),t.push(o),!0):!1))continue;if(o=this.tokenizer.escape(e)){e=e.substring(o.raw.length),t.push(o);continue}if(o=this.tokenizer.tag(e)){e=e.substring(o.raw.length),t.push(o);continue}if(o=this.tokenizer.link(e)){e=e.substring(o.raw.length),t.push(o);continue}if(o=this.tokenizer.reflink(e,this.tokens.links)){e=e.substring(o.raw.length);let a=t.at(-1);o.type==="text"&&a?.type==="text"?(a.raw+=o.raw,a.text+=o.text):t.push(o);continue}if(o=this.tokenizer.emStrong(e,n,r)){e=e.substring(o.raw.length),t.push(o);continue}if(o=this.tokenizer.codespan(e)){e=e.substring(o.raw.length),t.push(o);continue}if(o=this.tokenizer.br(e)){e=e.substring(o.raw.length),t.push(o);continue}if(o=this.tokenizer.del(e,n,r)){e=e.substring(o.raw.length),t.push(o);continue}if(o=this.tokenizer.autolink(e)){e=e.substring(o.raw.length),t.push(o);continue}if(!this.state.inLink&&(o=this.tokenizer.url(e))){e=e.substring(o.raw.length),t.push(o);continue}let u=e;if(this.options.extensions?.startInline){let a=1/0,p=e.slice(1),c;this.options.extensions.startInline.forEach(h=>{c=h.call({lexer:this},p),typeof c=="number"&&c>=0&&(a=Math.min(a,c))}),a<1/0&&a>=0&&(u=e.substring(0,a+1))}if(o=this.tokenizer.inlineText(u)){e=e.substring(o.raw.length),o.raw.slice(-1)!=="_"&&(r=o.raw.slice(-1)),s=!0;let a=t.at(-1);a?.type==="text"?(a.raw+=o.raw,a.text+=o.text):t.push(o);continue}if(e){this.infiniteLoopError(e.charCodeAt(0));break}}return t}infiniteLoopError(e){let t="Infinite loop on byte: "+e;if(this.options.silent)console.error(t);else throw new Error(t)}};var y=class{options;parser;constructor(e){this.options=e||R}space(e){return""}code({text:e,lang:t,escaped:n}){let s=(t||"").match(m.notSpaceStart)?.[0],r=e.replace(m.endingNewline,"")+`
+`;return s?'<pre><code class="language-'+T(s)+'">'+(n?r:T(r,!0))+`</code></pre>
+`:"<pre><code>"+(n?r:T(r,!0))+`</code></pre>
+`}blockquote({tokens:e}){return`<blockquote>
+${this.parser.parse(e)}</blockquote>
+`}html({text:e}){return e}def(e){return""}heading({tokens:e,depth:t}){return`<h${t}>${this.parser.parseInline(e)}</h${t}>
+`}hr(e){return`<hr>
+`}list(e){let t=e.ordered,n=e.start,s="";for(let o=0;o<e.items.length;o++){let u=e.items[o];s+=this.listitem(u)}let r=t?"ol":"ul",i=t&&n!==1?' start="'+n+'"':"";return"<"+r+i+`>
+`+s+"</"+r+`>
+`}listitem(e){return`<li>${this.parser.parse(e.tokens)}</li>
+`}checkbox({checked:e}){return"<input "+(e?'checked="" ':"")+'disabled="" type="checkbox"> '}paragraph({tokens:e}){return`<p>${this.parser.parseInline(e)}</p>
+`}table(e){let t="",n="";for(let r=0;r<e.header.length;r++)n+=this.tablecell(e.header[r]);t+=this.tablerow({text:n});let s="";for(let r=0;r<e.rows.length;r++){let i=e.rows[r];n="";for(let o=0;o<i.length;o++)n+=this.tablecell(i[o]);s+=this.tablerow({text:n})}return s&&(s=`<tbody>${s}</tbody>`),`<table>
+<thead>
+`+t+`</thead>
+`+s+`</table>
+`}tablerow({text:e}){return`<tr>
+${e}</tr>
+`}tablecell(e){let t=this.parser.parseInline(e.tokens),n=e.header?"th":"td";return(e.align?`<${n} align="${e.align}">`:`<${n}>`)+t+`</${n}>
+`}strong({tokens:e}){return`<strong>${this.parser.parseInline(e)}</strong>`}em({tokens:e}){return`<em>${this.parser.parseInline(e)}</em>`}codespan({text:e}){return`<code>${T(e,!0)}</code>`}br(e){return"<br>"}del({tokens:e}){return`<del>${this.parser.parseInline(e)}</del>`}link({href:e,title:t,tokens:n}){let s=this.parser.parseInline(n),r=ee(e);if(r===null)return s;e=r;let i='<a href="'+e+'"';return t&&(i+=' title="'+T(t)+'"'),i+=">"+s+"</a>",i}image({href:e,title:t,text:n,tokens:s}){s&&(n=this.parser.parseInline(s,this.parser.textRenderer));let r=ee(e);if(r===null)return T(n);e=r;let i=`<img src="${e}" alt="${T(n)}"`;return t&&(i+=` title="${T(t)}"`),i+=">",i}text(e){return"tokens"in e&&e.tokens?this.parser.parseInline(e.tokens):"escaped"in e&&e.escaped?e.text:T(e.text)}};var _=class{strong({text:e}){return e}em({text:e}){return e}codespan({text:e}){return e}del({text:e}){return e}html({text:e}){return e}text({text:e}){return e}link({text:e}){return""+e}image({text:e}){return""+e}br(){return""}checkbox({raw:e}){return e}};var b=class l{options;renderer;textRenderer;constructor(e){this.options=e||R,this.options.renderer=this.options.renderer||new y,this.renderer=this.options.renderer,this.renderer.options=this.options,this.renderer.parser=this,this.textRenderer=new _}static parse(e,t){return new l(t).parse(e)}static parseInline(e,t){return new l(t).parseInline(e)}parse(e){this.renderer.parser=this;let t="";for(let n=0;n<e.length;n++){let s=e[n];if(this.options.extensions?.renderers?.[s.type]){let i=s,o=this.options.extensions.renderers[i.type].call({parser:this},i);if(o!==!1||!["space","hr","heading","code","table","blockquote","list","checkbox","html","def","paragraph","text"].includes(i.type)){t+=o||"";continue}}let r=s;switch(r.type){case"space":{t+=this.renderer.space(r);break}case"hr":{t+=this.renderer.hr(r);break}case"heading":{t+=this.renderer.heading(r);break}case"code":{t+=this.renderer.code(r);break}case"table":{t+=this.renderer.table(r);break}case"blockquote":{t+=this.renderer.blockquote(r);break}case"list":{t+=this.renderer.list(r);break}case"checkbox":{t+=this.renderer.checkbox(r);break}case"html":{t+=this.renderer.html(r);break}case"def":{t+=this.renderer.def(r);break}case"paragraph":{t+=this.renderer.paragraph(r);break}case"text":{t+=this.renderer.text(r);break}default:{let i='Token with "'+r.type+'" type was not found.';if(this.options.silent)return console.error(i),"";throw new Error(i)}}}return t}parseInline(e,t=this.renderer){this.renderer.parser=this;let n="";for(let s=0;s<e.length;s++){let r=e[s];if(this.options.extensions?.renderers?.[r.type]){let o=this.options.extensions.renderers[r.type].call({parser:this},r);if(o!==!1||!["escape","html","link","image","checkbox","strong","em","codespan","br","del","text"].includes(r.type)){n+=o||"";continue}}let i=r;switch(i.type){case"escape":{n+=t.text(i);break}case"html":{n+=t.html(i);break}case"link":{n+=t.link(i);break}case"image":{n+=t.image(i);break}case"checkbox":{n+=t.checkbox(i);break}case"strong":{n+=t.strong(i);break}case"em":{n+=t.em(i);break}case"codespan":{n+=t.codespan(i);break}case"br":{n+=t.br(i);break}case"del":{n+=t.del(i);break}case"text":{n+=t.text(i);break}default:{let o='Token with "'+i.type+'" type was not found.';if(this.options.silent)return console.error(o),"";throw new Error(o)}}}return n}};var P=class{options;block;constructor(e){this.options=e||R}static passThroughHooks=new Set(["preprocess","postprocess","processAllTokens","emStrongMask"]);static passThroughHooksRespectAsync=new Set(["preprocess","postprocess","processAllTokens"]);preprocess(e){return e}postprocess(e){return e}processAllTokens(e){return e}emStrongMask(e){return e}provideLexer(e=this.block){return e?x.lex:x.lexInline}provideParser(e=this.block){return e?b.parse:b.parseInline}};var D=class{defaults=z();options=this.setOptions;parse=this.parseMarkdown(!0);parseInline=this.parseMarkdown(!1);Parser=b;Renderer=y;TextRenderer=_;Lexer=x;Tokenizer=w;Hooks=P;constructor(...e){this.use(...e)}walkTokens(e,t){let n=[];for(let s of e)switch(n=n.concat(t.call(this,s)),s.type){case"table":{let r=s;for(let i of r.header)n=n.concat(this.walkTokens(i.tokens,t));for(let i of r.rows)for(let o of i)n=n.concat(this.walkTokens(o.tokens,t));break}case"list":{let r=s;n=n.concat(this.walkTokens(r.items,t));break}default:{let r=s;this.defaults.extensions?.childTokens?.[r.type]?this.defaults.extensions.childTokens[r.type].forEach(i=>{let o=r[i].flat(1/0);n=n.concat(this.walkTokens(o,t))}):r.tokens&&(n=n.concat(this.walkTokens(r.tokens,t)))}}return n}use(...e){let t=this.defaults.extensions||{renderers:{},childTokens:{}};return e.forEach(n=>{let s={...n};if(s.async=this.defaults.async||s.async||!1,n.extensions&&(n.extensions.forEach(r=>{if(!r.name)throw new Error("extension name required");if("renderer"in r){let i=t.renderers[r.name];i?t.renderers[r.name]=function(...o){let u=r.renderer.apply(this,o);return u===!1&&(u=i.apply(this,o)),u}:t.renderers[r.name]=r.renderer}if("tokenizer"in r){if(!r.level||r.level!=="block"&&r.level!=="inline")throw new Error("extension level must be 'block' or 'inline'");let i=t[r.level];i?i.unshift(r.tokenizer):t[r.level]=[r.tokenizer],r.start&&(r.level==="block"?t.startBlock?t.startBlock.push(r.start):t.startBlock=[r.start]:r.level==="inline"&&(t.startInline?t.startInline.push(r.start):t.startInline=[r.start]))}"childTokens"in r&&r.childTokens&&(t.childTokens[r.name]=r.childTokens)}),s.extensions=t),n.renderer){let r=this.defaults.renderer||new y(this.defaults);for(let i in n.renderer){if(!(i in r))throw new Error(`renderer '${i}' does not exist`);if(["options","parser"].includes(i))continue;let o=i,u=n.renderer[o],a=r[o];r[o]=(...p)=>{let c=u.apply(r,p);return c===!1&&(c=a.apply(r,p)),c||""}}s.renderer=r}if(n.tokenizer){let r=this.defaults.tokenizer||new w(this.defaults);for(let i in n.tokenizer){if(!(i in r))throw new Error(`tokenizer '${i}' does not exist`);if(["options","rules","lexer"].includes(i))continue;let o=i,u=n.tokenizer[o],a=r[o];r[o]=(...p)=>{let c=u.apply(r,p);return c===!1&&(c=a.apply(r,p)),c}}s.tokenizer=r}if(n.hooks){let r=this.defaults.hooks||new P;for(let i in n.hooks){if(!(i in r))throw new Error(`hook '${i}' does not exist`);if(["options","block"].includes(i))continue;let o=i,u=n.hooks[o],a=r[o];P.passThroughHooks.has(i)?r[o]=p=>{if(this.defaults.async&&P.passThroughHooksRespectAsync.has(i))return(async()=>{let h=await u.call(r,p);return a.call(r,h)})();let c=u.call(r,p);return a.call(r,c)}:r[o]=(...p)=>{if(this.defaults.async)return(async()=>{let h=await u.apply(r,p);return h===!1&&(h=await a.apply(r,p)),h})();let c=u.apply(r,p);return c===!1&&(c=a.apply(r,p)),c}}s.hooks=r}if(n.walkTokens){let r=this.defaults.walkTokens,i=n.walkTokens;s.walkTokens=function(o){let u=[];return u.push(i.call(this,o)),r&&(u=u.concat(r.call(this,o))),u}}this.defaults={...this.defaults,...s}}),this}setOptions(e){return this.defaults={...this.defaults,...e},this}lexer(e,t){return x.lex(e,t??this.defaults)}parser(e,t){return b.parse(e,t??this.defaults)}parseMarkdown(e){return(n,s)=>{let r={...s},i={...this.defaults,...r},o=this.onError(!!i.silent,!!i.async);if(this.defaults.async===!0&&r.async===!1)return o(new Error("marked(): The async option was set to true by an extension. Remove async: false from the parse options object to return a Promise."));if(typeof n>"u"||n===null)return o(new Error("marked(): input parameter is undefined or null"));if(typeof n!="string")return o(new Error("marked(): input parameter is of type "+Object.prototype.toString.call(n)+", string expected"));if(i.hooks&&(i.hooks.options=i,i.hooks.block=e),i.async)return(async()=>{let u=i.hooks?await i.hooks.preprocess(n):n,p=await(i.hooks?await i.hooks.provideLexer(e):e?x.lex:x.lexInline)(u,i),c=i.hooks?await i.hooks.processAllTokens(p):p;i.walkTokens&&await Promise.all(this.walkTokens(c,i.walkTokens));let d=await(i.hooks?await i.hooks.provideParser(e):e?b.parse:b.parseInline)(c,i);return i.hooks?await i.hooks.postprocess(d):d})().catch(o);try{i.hooks&&(n=i.hooks.preprocess(n));let a=(i.hooks?i.hooks.provideLexer(e):e?x.lex:x.lexInline)(n,i);i.hooks&&(a=i.hooks.processAllTokens(a)),i.walkTokens&&this.walkTokens(a,i.walkTokens);let c=(i.hooks?i.hooks.provideParser(e):e?b.parse:b.parseInline)(a,i);return i.hooks&&(c=i.hooks.postprocess(c)),c}catch(u){return o(u)}}}onError(e,t){return n=>{if(n.message+=`
+Please report this to https://github.com/markedjs/marked.`,e){let s="<p>An error occurred:</p><pre>"+T(n.message+"",!0)+"</pre>";return t?Promise.resolve(s):s}if(t)return Promise.reject(n);throw n}}};var A=new D;function g(l,e){return A.parse(l,e)}g.options=g.setOptions=function(l){return A.setOptions(l),g.defaults=A.defaults,F(g.defaults),g};g.getDefaults=z;g.defaults=R;function Re(...l){return A.use(...l),g.defaults=A.defaults,F(g.defaults),g}g.use=Re;g.walkTokens=function(l,e){return A.walkTokens(l,e)};g.parseInline=A.parseInline;g.Parser=b;g.parser=b.parse;g.Renderer=y;g.TextRenderer=_;g.Lexer=x;g.lexer=x.lex;g.Tokenizer=w;g.Hooks=P;g.parse=g;var Tt=g.options,wt=g.setOptions,yt=g.walkTokens,Pt=g.parseInline,St=g,_t=b.parse,$t=x.lex;
+
+if(__exports != exports)module.exports = exports;return module.exports}));
+//# sourceMappingURL=marked.umd.js.map
+
+</script>
 </head>
 <body>
-<header>清华小助手<span class="sub">单用户本地模式 · 写操作会弹窗确认 · 支持语音/图片输入</span>
+<aside id="sidebar">
+  <div class="sidebar-top">
+    <button id="new-chat" type="button"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>新建对话</button>
+    <button id="collapse-sidebar" class="iconbtn" type="button" title="收起侧栏"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m11 17-5-5 5-5"/><path d="m18 17-5-5 5-5"/></svg></button>
+  </div>
+  <div id="session-list"></div>
+  <div id="session-usage" class="session-usage" hidden></div>
+</aside>
+<div id="sidebar-mask"></div>
+<div id="main">
+<header title="清灵 QingLing · 清华校园智能助手">
+  <button id="menu-btn" class="iconbtn" type="button" title="会话列表"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg></button>
+  <div class="brand" title="关于清灵">
+    <div class="logo" aria-hidden="true"><svg viewBox="0 0 32 32" width="20" height="20"><g fill="#fff"><ellipse cx="16" cy="9" rx="3.4" ry="5.2"/><ellipse cx="16" cy="9" rx="3.4" ry="5.2" transform="rotate(72 16 16)"/><ellipse cx="16" cy="9" rx="3.4" ry="5.2" transform="rotate(144 16 16)"/><ellipse cx="16" cy="9" rx="3.4" ry="5.2" transform="rotate(216 16 16)"/><ellipse cx="16" cy="9" rx="3.4" ry="5.2" transform="rotate(288 16 16)"/></g><circle cx="16" cy="16" r="2.6" fill="#e9d5ff"/></svg></div>
+    <div class="brand-text">
+      <span class="brand-name">清灵</span>
+      <span class="brand-sub">QingLing · 清华校园智能助手</span>
+    </div>
+  </div>
   <span class="ctl">
+    <span id="conn-status" class="conn" hidden><span class="conn-dot"></span>清华 Info 已连接</span>
     <button id="login-btn" type="button">登录</button>
-    <button id="tts-toggle" class="iconbtn" title="朗读回复开关">🔊</button>
-    <button id="snd-toggle" class="iconbtn" title="提示音效开关">🔔</button>
+    <button id="theme-toggle" class="iconbtn" type="button" title="切换到浅色模式"></button>
+    <button id="tts-toggle" class="iconbtn" title="朗读回复开关"></button>
+    <button id="snd-toggle" class="iconbtn" title="提示音效开关"></button>
   </span>
 </header>
-<div id="chat"></div>
-<div id="thumbs" hidden></div>
-<div id="inputbar">
-  <button id="attach" class="iconbtn" title="发送图片">📎</button>
-  <button id="mic" class="iconbtn" title="语音输入">🎤</button>
-  <input id="q" placeholder="问点什么，如：我今天有什么课？" autocomplete="off">
-  <button id="send" disabled>发送</button>
-  <input id="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
+<div id="chat">
+  <div id="welcome" hidden>
+    <div class="w-spark">✦</div>
+    <h1 class="w-title">今天想让清灵帮你做什么？</h1>
+    <p class="w-sub" id="w-login-hint">你好，我是清灵——课程、日程、场馆、图书馆和校园服务，都可以问我。</p>
+    <div class="w-grid">
+      <button class="w-card" type="button" data-q="我今天有什么课？"><span class="w-ico">📚</span><span>查今天的课表</span></button>
+      <button class="w-card" type="button" data-q="今晚哪里可以打羽毛球？"><span class="w-ico">🏃</span><span>查场馆空位</span></button>
+      <button class="w-card" type="button" data-q="帮我看看图书馆哪里有位置"><span class="w-ico">📖</span><span>图书馆座位</span></button>
+      <button class="w-card" type="button" data-q="我明天下午有什么空闲时间？"><span class="w-ico">🗓️</span><span>找空闲时间</span></button>
+    </div>
+    <button id="explore-btn" type="button">探索清灵 →</button>
+  </div>
+</div>
+<div id="toasts"></div>
+<div id="ui-auth-mask" hidden>
+  <div class="ui-auth-card">
+    <div class="ui-auth-title">🔒 输入访问口令</div>
+    <input id="ui-token-input" type="password" placeholder="访问口令（.env 里的 UI_TOKEN）" autocomplete="off">
+    <button id="ui-token-ok" type="button">进入</button>
+    <div id="ui-auth-err" class="ui-auth-err"></div>
+  </div>
+</div>
+<button id="scroll-btn" type="button" title="回到底部" hidden>↓</button>
+<div id="composer-wrap">
+  <div id="quick-chips" class="quick-chips" hidden></div>
+  <div id="thumbs" hidden></div>
+  <div id="composer">
+    <textarea id="q" rows="1" placeholder="有什么想让清灵帮你查的？" autocomplete="off"></textarea>
+    <div class="composer-row">
+      <button id="attach" class="iconbtn" title="发送图片"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+      <button id="mic" class="iconbtn" title="语音输入"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg></button>
+      <span class="composer-hint">Enter 发送 · Shift+Enter 换行</span>
+      <button id="send" disabled>发送</button>
+      <input id="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
+    </div>
+  </div>
+  <p id="disclaimer">清灵的回答可能存在误差，重要信息请以学校官方信息为准</p>
 </div>
 
 <div id="modal-mask">
@@ -196,7 +721,7 @@
 <div id="auth-mask" aria-hidden="true">
   <div id="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title">
     <div class="auth-badge">🔐</div>
-    <h3 id="auth-title">登录清华小助手</h3>
+    <h3 id="auth-title">连接清华 Info</h3>
     <p id="auth-status">使用清华 Info 账号登录，凭证只会发送到本机服务。</p>
     <div id="auth-login-fields">
       <label>学号<input id="auth-username" type="text" inputmode="numeric" autocomplete="username" maxlength="128" placeholder="输入学号"></label>
@@ -216,10 +741,35 @@
   </div>
 </div>
 
+<div id="about-mask" aria-hidden="true">
+  <div id="about-modal" role="dialog" aria-modal="true" aria-labelledby="about-title">
+    <div class="about-logo" aria-hidden="true"><svg viewBox="0 0 32 32" width="30" height="30"><g fill="#fff"><ellipse cx="16" cy="9" rx="3.4" ry="5.2"/><ellipse cx="16" cy="9" rx="3.4" ry="5.2" transform="rotate(72 16 16)"/><ellipse cx="16" cy="9" rx="3.4" ry="5.2" transform="rotate(144 16 16)"/><ellipse cx="16" cy="9" rx="3.4" ry="5.2" transform="rotate(216 16 16)"/><ellipse cx="16" cy="9" rx="3.4" ry="5.2" transform="rotate(288 16 16)"/></g><circle cx="16" cy="16" r="2.6" fill="#e9d5ff"/></svg></div>
+    <h3 id="about-title">清灵 <span class="about-en">QingLing</span></h3>
+    <p class="about-sub">清华校园智能助手</p>
+    <p class="about-ver">Version 0.1.0</p>
+    <div class="about-caps">
+      <div class="cap"><b>课程</b><span>查询课表、上课地点</span></div>
+      <div class="cap"><b>日程</b><span>寻找空闲时间</span></div>
+      <div class="cap"><b>图书馆</b><span>查询座位情况</span></div>
+      <div class="cap"><b>体育</b><span>查询场馆开放和空位</span></div>
+      <div class="cap"><b>校园服务</b><span>获取常用校园信息</span></div>
+    </div>
+    <button id="about-close" type="button">好的</button>
+  </div>
+</div>
+
 <script>
+/* 品牌常量（UI.md 第二十条）：动态文案统一从这里取，改名只改这一处。
+ * 静态 HTML（标题/Header/欢迎页）直接写死，避免首屏闪烁。 */
+const BRAND = {
+  name: "清灵",
+  englishName: "QingLing",
+  subtitle: "清华校园智能助手",
+};
 const chat = document.getElementById("chat");
 const q = document.getElementById("q");
 const sendBtn = document.getElementById("send");
+const aboutMask = document.getElementById("about-mask");
 const mask = document.getElementById("modal-mask");
 const authMask = document.getElementById("auth-mask");
 const authStatus = document.getElementById("auth-status");
@@ -248,13 +798,40 @@ let loginInFlight = false;
 let loginAbortController = null;
 let authCancelRequested = false;
 let authenticated = false;
+let stopping = false;
 const authMethodLabels = {
   totp: {icon: "🔢", label: "验证器动态码", hint: "使用验证器 App 中的当前验证码"},
   mobile: {icon: "📱", label: "短信验证码", hint: "向已绑定手机号发送验证码"},
   wechat: {icon: "💬", label: "微信验证", hint: "使用清华身份认证关联的微信"},
 };
 
-function scrollDown() { chat.scrollTop = chat.scrollHeight; }
+/* 智能滚动：贴底时自动跟随；用户上翻则停止强滚并显示"回到底部" */
+let followScroll = true;
+const scrollBtn = document.getElementById("scroll-btn");
+chat.addEventListener("scroll", () => {
+  followScroll = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 80;
+  scrollBtn.hidden = followScroll;
+});
+function scrollDown(force = false) {
+  if (force) {
+    // 新请求会同步追加“用户消息 → Thinking Card”。浏览器的 scroll 事件
+    // 可能尚未把 followScroll 更新回来，因此这里必须同步恢复跟随状态。
+    followScroll = true;
+    scrollBtn.hidden = true;
+  } else if (!followScroll) {
+    return;
+  }
+  chat.scrollTop = chat.scrollHeight;
+}
+scrollBtn.onclick = () => scrollDown(true);
+
+function toast(message, type = "") {
+  const el = document.createElement("div");
+  el.className = "toast " + type;
+  el.textContent = message;
+  document.getElementById("toasts").appendChild(el);
+  setTimeout(() => { el.classList.add("out"); setTimeout(() => el.remove(), 320); }, 2600);
+}
 
 function addMsg(role, text) {
   const div = document.createElement("div");
@@ -262,6 +839,7 @@ function addMsg(role, text) {
   div.textContent = text;
   chat.appendChild(div);
   saveChatHistory();
+  updateWelcome();
   scrollDown();
   return div;
 }
@@ -279,7 +857,8 @@ function addUserMsg(text, images) {
   div.appendChild(document.createTextNode(text));
   chat.appendChild(div);
   saveChatHistory();
-  scrollDown();
+  updateWelcome();
+  scrollDown(true);
 }
 
 /* ---- 声音：提示音效（WebAudio 合成，无音频文件） + TTS 朗读 ---- */
@@ -287,35 +866,121 @@ const store = {
   get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch {} },
 };
-const CHAT_HISTORY_KEY = "thu-assistant-chat-v1";
+const CHAT_HISTORY_KEY = "thu-assistant-chat-v1"; // 旧单会话 key（迁移来源）
+const SESSIONS_KEY = "thu-assistant-sessions-v1";
 const MAX_SAVED_MESSAGES = 100;
 const MAX_SAVED_TEXT_LENGTH = 20000;
+const MAX_SESSIONS = 30;
+const newSessionId = () => "s_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const deriveTitle = (messages) => {
+  const firstUser = (messages ?? []).find((m) => m.role === "user");
+  const text = (firstUser?.text ?? "").trim();
+  return text ? text.slice(0, 18) : "新对话";
+};
+
+/* ---- 统一功能图标（Lucide 风格内联 SVG，避免 emoji/unicode 混用） ---- */
+const ICON_PATHS = {
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>',
+  moon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
+  volOn: '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>',
+  volOff: '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="22" x2="16" y1="9" y2="15"/><line x1="16" x2="22" y1="9" y2="15"/>',
+  bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
+  bellOff: '<path d="M13.73 21a2 2 0 0 1-3.46 0"/><path d="M18.63 13A17.89 17.89 0 0 1 18 8"/><path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"/><path d="M18 8a6 6 0 0 0-9.33-5"/><line x1="1" x2="23" y1="1" y2="23"/>',
+};
+const icon = (name) =>
+  `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON_PATHS[name]}</svg>`;
+
+/* ---- 主题切换（默认深色，localStorage 持久化） ---- */
+const themeBtn = document.getElementById("theme-toggle");
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  themeBtn.innerHTML = icon(t === "dark" ? "sun" : "moon");
+  themeBtn.title = t === "dark" ? "切换到浅色模式" : "切换到深色模式";
+}
+let theme = store.get("theme", "dark");
+applyTheme(theme);
+themeBtn.onclick = () => {
+  theme = theme === "dark" ? "light" : "dark";
+  store.set("theme", theme);
+  applyTheme(theme);
+};
+
+/* ---- 多会话历史：新建 / 切换 / 删除，localStorage 持久化 ---- */
+let sessionsState = (() => {
+  let state = null;
+  try {
+    const raw = store.get(SESSIONS_KEY, "");
+    if (raw) state = JSON.parse(raw);
+  } catch { /* 数据损坏则重建 */ }
+  if (!state || !Array.isArray(state.sessions) || typeof state.activeId !== "string") {
+    state = {sessions: [], activeId: newSessionId()};
+  }
+  // 旧版单会话数据自动迁移为第一个会话
+  if (state.sessions.length === 0) {
+    try {
+      const legacy = JSON.parse(store.get(CHAT_HISTORY_KEY, "[]"));
+      if (Array.isArray(legacy) && legacy.length > 0) {
+        state.sessions.push({id: state.activeId, title: deriveTitle(legacy), createdAt: Date.now(), messages: legacy});
+      }
+    } catch { /* 忽略损坏的旧数据 */ }
+  }
+  if (!state.sessions.some((s) => s.id === state.activeId)) {
+    state.activeId = state.sessions[0]?.id ?? state.activeId;
+  }
+  return state;
+})();
+
+function persistSessions() {
+  // 会话数超限时淘汰最旧的非活跃会话
+  while (sessionsState.sessions.length > MAX_SESSIONS) {
+    const idx = sessionsState.sessions.findIndex((s) => s.id !== sessionsState.activeId);
+    if (idx < 0) break;
+    sessionsState.sessions.splice(idx, 1);
+  }
+  store.set(SESSIONS_KEY, JSON.stringify(sessionsState));
+  store.set(CHAT_HISTORY_KEY, "[]"); // 迁移完成后清掉旧 key
+}
+
+const activeSession = () => sessionsState.sessions.find((s) => s.id === sessionsState.activeId);
 
 function saveChatHistory() {
   const records = [...chat.children]
     .filter((node) => node.classList.contains("msg"))
     .map((node) => ({
       role: node.classList.contains("user") ? "user" : "bot",
-      text: [...node.childNodes]
+      text: (node.dataset.raw ?? [...node.childNodes]
         .filter((child) => child.nodeType === Node.TEXT_NODE)
         .map((child) => child.textContent ?? "")
-        .join("")
+        .join(""))
         .slice(0, MAX_SAVED_TEXT_LENGTH),
       imageCount: node.querySelectorAll("img.att").length,
     }))
     .slice(-MAX_SAVED_MESSAGES);
-  store.set(CHAT_HISTORY_KEY, JSON.stringify(records));
+  let session = activeSession();
+  if (!session) {
+    session = {id: sessionsState.activeId, title: deriveTitle(records), createdAt: Date.now(), messages: []};
+    sessionsState.sessions.push(session);
+  }
+  session.messages = records;
+  if (session.title === "新对话") {
+    const derived = deriveTitle(records);
+    if (derived !== "新对话") session.title = derived;
+  }
+  persistSessions();
+  renderSessionList();
 }
 
-function restoreChatHistory() {
-  let records;
-  try { records = JSON.parse(store.get(CHAT_HISTORY_KEY, "[]")); } catch { records = []; }
-  if (!Array.isArray(records)) return;
-  for (const record of records) {
+function renderMessages(records) {
+  for (const record of records ?? []) {
     if (!record || (record.role !== "user" && record.role !== "bot") || typeof record.text !== "string") continue;
     const div = document.createElement("div");
     div.className = "msg " + record.role;
-    if (record.role === "user" && Number.isInteger(record.imageCount) && record.imageCount > 0) {
+    if (record.role === "bot") {
+      renderMd(div, record.text); // AI 消息按 Markdown 恢复
+      chat.appendChild(div);
+      continue;
+    }
+    if (Number.isInteger(record.imageCount) && record.imageCount > 0) {
       const attachment = document.createElement("span");
       attachment.className = "saved-att";
       attachment.textContent = `🖼️ ${record.imageCount} 张图片附件（刷新后不保留预览）`;
@@ -324,28 +989,262 @@ function restoreChatHistory() {
     div.appendChild(document.createTextNode(record.text));
     chat.appendChild(div);
   }
+  updateWelcome();
   scrollDown();
 }
 
-function clearChatHistory() {
-  chat.replaceChildren();
-  store.set(CHAT_HISTORY_KEY, "[]");
+/** 清空聊天区并回到欢迎页。welcome 是 #chat 的子节点，replaceChildren 会把它
+ *  一并删掉导致欢迎页再也出不来（须刷新才恢复），所以清空后要把它放回去 */
+function resetChatView() {
+  chat.replaceChildren(welcome);
+  updateWelcome();
 }
 
-function showStartupGuide() {
-  if (chat.querySelector(".msg")) return;
-  if (authenticated) {
-    addMsg("bot", "欢迎回来！你已登录清华账号，可以直接告诉我你的需求，例如查询课表、寻找空闲时间或了解校园服务。");
-  } else {
-    addMsg("bot", "你好！欢迎使用清华小助手 👋\n请先点击右上角“登录”，使用清华 Info 账号登录并完成二次认证。登录成功后，我就可以帮你查询课表、规划空闲时间以及了解校园服务。");
+function clearChatHistory() {
+  resetChatView();
+  sessionsState = {sessions: [], activeId: newSessionId()};
+  persistSessions();
+  renderSessionList();
+  // 后端各会话的上下文一并销毁（logout 时服务端已清，这里兜底覆盖其他调用方）
+  fetch("/api/session/destroy", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({all: true}),
+  }).catch(() => {});
+}
+
+/* ---- 会话栏交互：新建 / 切换 / 删除 ---- */
+const sidebar = document.getElementById("sidebar");
+const sidebarMask = document.getElementById("sidebar-mask");
+function closeSidebarMobile() {
+  sidebar.classList.remove("open");
+  sidebarMask.classList.remove("show");
+}
+document.getElementById("menu-btn").onclick = () => {
+  if (window.matchMedia("(max-width: 768px)").matches) {
+    const open = sidebar.classList.toggle("open");
+    sidebarMask.classList.toggle("show", open);
+    return;
+  }
+  // 桌面端：menu-btn 兼做侧栏展开开关（侧栏收起后它才会出现）
+  sidebarCollapsed = false;
+  store.set("sidebar-collapsed", "0");
+  applySidebarCollapsed();
+};
+
+/* ---- 侧栏收起/展开（桌面端）：状态 localStorage 持久化；移动端仍是抽屉 ---- */
+const collapseBtn = document.getElementById("collapse-sidebar");
+let sidebarCollapsed = store.get("sidebar-collapsed", "0") === "1";
+function applySidebarCollapsed() {
+  // 仅桌面生效（≤768px 是抽屉布局，不受 collapsed 影响）
+  document.body.classList.toggle("sidebar-collapsed", sidebarCollapsed);
+}
+collapseBtn.onclick = () => {
+  sidebarCollapsed = true;
+  store.set("sidebar-collapsed", "1");
+  applySidebarCollapsed();
+};
+applySidebarCollapsed();
+sidebarMask.onclick = closeSidebarMobile;
+
+function renderSessionList() {
+  const list = document.getElementById("session-list");
+  list.replaceChildren();
+  const sorted = [...sessionsState.sessions].sort((a, b) => b.createdAt - a.createdAt);
+  for (const s of sorted) {
+    const item = document.createElement("div");
+    item.className = "session-item" + (s.id === sessionsState.activeId ? " active" : "");
+    item.title = s.title;
+    const title = document.createElement("span");
+    title.className = "s-title";
+    title.textContent = s.title;
+    const del = document.createElement("button");
+    del.className = "s-del";
+    del.type = "button";
+    del.textContent = "✕";
+    del.title = "删除对话";
+    del.onclick = (e) => { e.stopPropagation(); requestDeleteSession(s.id); };
+    item.append(title, del);
+    item.onclick = () => switchSession(s.id);
+    list.appendChild(item);
+  }
+  if (sorted.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "session-empty";
+    empty.textContent = "暂无历史对话";
+    list.appendChild(empty);
+  }
+  renderSessionUsage();
+}
+
+/* ---- Token 用量显示：每条回答下方小字 + 侧栏会话累计 ---- */
+const fmtTokens = (n) => n >= 10000 ? (n / 10000).toFixed(1) + "万" : n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n);
+function renderSessionUsage() {
+  const el = document.getElementById("session-usage");
+  const tokens = activeSession()?.tokens;
+  if (el) {
+    el.hidden = !tokens;
+    if (tokens) el.textContent = `本会话累计 ${fmtTokens(tokens)} tokens`;
   }
 }
+
+/** 把本轮 usage 渲染到回答气泡下方（renderMd 会重写气泡内容，须在其后调用） */
+function renderUsageMeta(botDiv, usage) {
+  if (!botDiv || !usage || !usage.totalTokens) return;
+  const meta = document.createElement("div");
+  meta.className = "msg-meta";
+  meta.textContent = `${fmtTokens(usage.totalTokens)} tokens` + (usage.costYuan !== undefined ? ` · ≈¥${usage.costYuan.toFixed(3)}` : "");
+  meta.title = `输入 ${usage.promptTokens} + 输出 ${usage.completionTokens} tokens`;
+  botDiv.appendChild(meta);
+}
+
+/* ---- 会话标题：首轮回答后由后端 LLM 生成概括式标题（如"你好"→"打招呼"）；
+   失败保持"首条消息截取"的兜底标题。每会话只生成一次（标志随会话持久化） ---- */
+let titleGenerating = false;
+function maybeGenerateTitle() {
+  const session = activeSession();
+  if (!session || session.titleLlm || titleGenerating) return;
+  session.titleLlm = true;
+  titleGenerating = true;
+  persistSessions();
+  fetch("/api/session/title", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({sessionId: sessionsState.activeId}),
+  }).then((resp) => resp.ok ? resp.json() : null)
+    .then((data) => {
+      if (data?.title) {
+        session.title = data.title;
+        persistSessions();
+        renderSessionList();
+      }
+    })
+    .catch(() => {})
+    .finally(() => { titleGenerating = false; });
+}
+
+function newChat() {
+  if (busy) { toast("请等待当前回答完成", "err"); return; }
+  if (!chat.querySelector(".msg")) { toast("已经是新对话了"); closeSidebarMobile(); return; }
+  saveChatHistory(); // 当前 DOM 归档到当前会话
+  const fresh = {id: newSessionId(), title: "新对话", createdAt: Date.now(), messages: []};
+  sessionsState.sessions.push(fresh);
+  sessionsState.activeId = fresh.id;
+  persistSessions();
+  resetChatView();
+  renderSessionList();
+  closeSidebarMobile();
+  q.focus();
+}
+
+function switchSession(id) {
+  closeSidebarMobile();
+  if (id === sessionsState.activeId) return;
+  if (busy) { toast("请等待当前回答完成", "err"); return; }
+  saveChatHistory(); // 当前 DOM 归档
+  sessionsState.activeId = id;
+  persistSessions();
+  resetChatView();
+  renderMessages(activeSession()?.messages ?? []);
+  renderSessionList();
+}
+
+let deleteTargetId = null;
+function requestDeleteSession(id) {
+  const target = sessionsState.sessions.find((x) => x.id === id);
+  if (!target) return;
+  deleteTargetId = id;
+  modalTitle.textContent = "🗑️ 删除对话";
+  modalWarn.textContent = `确定删除「${target.title}」吗？删除后不可恢复。`;
+  modalArgs.replaceChildren();
+  modalOk.textContent = "删除";
+  modalNo.textContent = "取消";
+  mask.classList.add("show");
+  confirmResolver = (approved) => {
+    mask.classList.remove("show");
+    confirmResolver = null;
+    if (!approved) { deleteTargetId = null; return; }
+    const idx = sessionsState.sessions.findIndex((x) => x.id === deleteTargetId);
+    deleteTargetId = null;
+    if (idx < 0) return;
+    const wasActive = sessionsState.sessions[idx].id === sessionsState.activeId;
+    const deletedId = sessionsState.sessions[idx].id;
+    sessionsState.sessions.splice(idx, 1);
+    // 后端对应会话的上下文一并销毁，防止"删掉的会话"在服务端复活
+    fetch("/api/session/destroy", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({sessionId: deletedId}),
+    }).catch(() => {});
+    if (wasActive) {
+      sessionsState.activeId = sessionsState.sessions[0]?.id ?? newSessionId();
+      resetChatView();
+      renderMessages(activeSession()?.messages ?? []);
+    }
+    persistSessions();
+    renderSessionList();
+    toast("对话已删除", "ok");
+  };
+}
+
+document.getElementById("new-chat").onclick = newChat;
+
+/* ---- Welcome Screen：仅在空对话时显示，随首条内容出现而隐藏 ---- */
+const welcome = document.getElementById("welcome");
+const wLoginHint = document.getElementById("w-login-hint");
+/* ---- 快捷指令：对话非空时常驻输入框上方的常用问法胶囊（点按即发送） ---- */
+const QUICK_ACTIONS = [
+  {label: "今晚羽毛球场", q: "今晚哪里可以打羽毛球？现在还有场吗？"},
+  {label: "图书馆座位", q: "现在图书馆哪里还有座位？"},
+  {label: "校园卡余额", q: "我的校园卡余额是多少？"},
+  {label: "今天有课吗", q: "我今天有什么课？"},
+  {label: "宿舍电量", q: "宿舍还剩多少电？"},
+];
+const quickChips = document.getElementById("quick-chips");
+for (const action of QUICK_ACTIONS) {
+  const chip = document.createElement("button");
+  chip.type = "button";
+  chip.className = "quick-chip";
+  chip.textContent = action.label;
+  chip.onclick = () => { if (!busy) submit(action.q, []); };
+  quickChips.appendChild(chip);
+}
+function updateWelcome() {
+  const hasContent = !!chat.querySelector(".msg, .thinking, .error-card, .qr-card, .pay-card");
+  welcome.hidden = hasContent;
+  quickChips.hidden = !hasContent; // 空对话时欢迎大卡片已有推荐，有内容后换成常驻胶囊
+  wLoginHint.hidden = authenticated;
+}
+welcome.querySelectorAll(".w-card").forEach((card) => {
+  card.onclick = () => {
+    const text = card.dataset.q;
+    submit(text, []);
+  };
+});
+
+/* ---- 关于清灵（UI.md 第十六/十七条）：Header 品牌区与"探索清灵"打开 ---- */
+function openAbout() {
+  aboutMask.classList.add("show");
+  aboutMask.setAttribute("aria-hidden", "false");
+}
+function closeAbout() {
+  aboutMask.classList.remove("show");
+  aboutMask.setAttribute("aria-hidden", "true");
+}
+document.querySelector(".brand").addEventListener("click", openAbout);
+document.getElementById("explore-btn").addEventListener("click", openAbout);
+document.getElementById("about-close").addEventListener("click", closeAbout);
+aboutMask.addEventListener("click", (e) => {
+  if (e.target === aboutMask) closeAbout();
+});
 
 let soundOn = store.get("snd", "1") === "1";
 let ttsOn = store.get("tts", "0") === "1";
 const sndToggle = document.getElementById("snd-toggle");
 const ttsToggle = document.getElementById("tts-toggle");
 function renderToggles() {
+  sndToggle.innerHTML = icon(soundOn ? "bell" : "bellOff");
+  ttsToggle.innerHTML = icon(ttsOn ? "volOn" : "volOff");
   sndToggle.classList.toggle("off", !soundOn);
   ttsToggle.classList.toggle("off", !ttsOn);
 }
@@ -395,27 +1294,84 @@ function speak(text) {
 /* ---- 语音输入（WebSpeech，浏览器不支持则隐藏按钮） ---- */
 const micBtn = document.getElementById("mic");
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const PLACEHOLDER = "有什么想让清灵帮你查的？";
 let rec = null;
+let wantListen = false;   // 用户是否处于聆听状态（区分主动停止与服务端自动断开）
+let voiceBase = "";       // 开始聆听时输入框已有内容
+let voiceText = "";       // 跨实例累计的最终识别文本
+let instanceFinal = "";   // 当前识别实例内已定稿的文本
 if (!SR) {
-  micBtn.style.display = "none";
+  // 非 secure context（http://IP 访问）下浏览器不提供语音识别——不再隐藏按钮，
+  // 点击时给出可执行的建议（改用 127.0.0.1 访问即可恢复）
+  micBtn.onclick = () =>
+    toast("当前访问方式不支持语音输入：请用 http://127.0.0.1:3457 打开本页后再试", "err");
 } else {
-  micBtn.onclick = () => {
-    if (rec) { rec.stop(); return; }
-    const base = q.value.trim();
+  const renderVoice = (interim) => {
+    q.value = (voiceBase ? voiceBase + " " : "") + voiceText + instanceFinal + interim;
+    resizeQ();
+  };
+  const resetMicUi = () => {
+    micBtn.classList.remove("recording");
+    micBtn.title = "语音输入";
+    q.placeholder = PLACEHOLDER;
+  };
+  /** 单次识别实例。服务端会在静音/约 60 秒时自动断开，onend 里按 wantListen 自动续听 */
+  const listenOnce = () => {
+    instanceFinal = "";
     rec = new SR();
     rec.lang = "zh-CN";
+    rec.continuous = true;      // 连续识别：不要一句话停顿就自动断
     rec.interimResults = true;
     rec.onresult = (e) => {
-      let text = "";
-      for (const r of e.results) text += r[0].transcript;
-      q.value = (base ? base + " " : "") + text;
+      let interim = "";
+      let final = "";
+      for (let i = 0; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) final += t;
+        else interim += t;
+      }
+      instanceFinal = final;    // 每次全量重算，避免重复累计
+      renderVoice(interim);
     };
-    rec.onend = () => { rec = null; micBtn.classList.remove("recording"); };
-    rec.onerror = () => { rec = null; micBtn.classList.remove("recording"); };
+    rec.onend = () => {
+      rec = null;
+      voiceText += instanceFinal;
+      instanceFinal = "";
+      renderVoice("");
+      if (!wantListen) { resetMicUi(); return; }
+      // 自动断开：短暂间隔后续听，保持"点一次持续聆听"的体验
+      setTimeout(() => { if (wantListen && !rec) listenOnce(); }, 200);
+    };
+    rec.onerror = (e) => {
+      wantListen = false;
+      rec = null;
+      resetMicUi();
+      const why = e.error === "not-allowed" || e.error === "service-not-allowed"
+        ? "麦克风权限被拒绝，请在浏览器地址栏允许麦克风后重试"
+        : e.error === "network"
+          ? "语音识别服务连接失败（该功能需要联网）"
+          : "语音识别失败，请重试";
+      toast(why, "err");
+      sfx.error();
+    };
+    rec.start();
+  };
+  micBtn.onclick = () => {
+    if (rec) { wantListen = false; rec.stop(); return; }
+    wantListen = true;
+    voiceBase = q.value.trim();
+    voiceText = "";
     try {
-      rec.start();
+      listenOnce();
       micBtn.classList.add("recording");
-    } catch { rec = null; }
+      micBtn.title = "正在聆听，再次点击结束";
+      q.placeholder = "聆听中…说完再点一次麦克风";
+      toast("开始聆听，说完再点一次麦克风");
+    } catch (e) {
+      wantListen = false;
+      rec = null;
+      toast("语音输入启动失败，请重试", "err");
+    }
   };
 }
 
@@ -457,18 +1413,199 @@ function renderThumbs() {
   });
 }
 
-function addToolChip(name) {
-  const div = document.createElement("div");
-  div.className = "tool-chip";
-  div.innerHTML = `<span class="spin">⏳</span><span>正在调用 ${name}…</span>`;
-  chat.appendChild(div);
-  scrollDown();
-  return div;
+/* ---- Thinking Card：发送后立即给出可见反馈，真实工具事件驱动状态行 ---- */
+const TOOL_LABELS = {
+  get_schedule: "课表", get_classroom_state: "教室空闲情况", get_report: "成绩单",
+  get_campus_card_info: "校园卡信息", recharge_campus_card: "校园卡充值",
+  get_electricity: "宿舍电费", recharge_electricity: "电费充值",
+  get_library_seats: "图书馆座位", get_library_rooms: "研讨间",
+  book_library_seat: "预约图书馆座位", book_library_room: "预约研讨间",
+  cancel_library_booking: "取消图书馆预约", get_my_library_bookings: "我的预约",
+  get_sports_resources: "体育场馆", book_sports_field: "预约体育场馆", pay_sports_order: "体育订单支付",
+};
+const toolLabel = (name) => TOOL_LABELS[name] ?? name;
+
+function createThinkingCard() {
+  const card = document.createElement("div");
+  card.className = "thinking";
+  card.innerHTML =
+    '<div class="think-bar"></div>' +
+    `<div class="think-head"><span class="spark">✦</span><span>${BRAND.name}正在思考</span><span class="think-time">0s</span></div>` +
+    '<div class="think-steps"></div>';
+  chat.appendChild(card);
+  // 即使发送前用户曾上翻，也要保证本轮即时反馈进入可视区域。
+  scrollDown(true);
+
+  const steps = card.querySelector(".think-steps");
+  const timeEl = card.querySelector(".think-time");
+  const t0 = Date.now();
+  const timer = setInterval(() => {
+    timeEl.textContent = Math.floor((Date.now() - t0) / 1000) + "s";
+  }, 500);
+
+  // 模拟阶段文案按时间轮换（真实工具行会并行插入，见 addTool）
+  const phases = [`正在理解你的需求`, `正在查询校园服务`, `正在整理结果`];
+  let phaseIdx = 0;
+  let statusStep = null;
+  const phaseTimer = setInterval(() => {
+    phaseIdx = Math.min(phaseIdx + 1, phases.length - 1);
+    setStatus(phases[phaseIdx]);
+  }, 3500);
+
+  const mkStep = (text, state) => {
+    const el = document.createElement("div");
+    el.className = "think-step " + state;
+    el.innerHTML = `<span class="dot"></span><span>${text}</span>`;
+    steps.appendChild(el);
+    scrollDown();
+    return el;
+  };
+  const setStatus = (text) => {
+    if (statusStep) statusStep.remove();
+    statusStep = mkStep(text, "active");
+  };
+  setStatus(phases[0]);
+
+  let dismissed = false;
+  const dismiss = () => {
+    if (dismissed) return;
+    dismissed = true;
+    clearInterval(timer);
+    clearInterval(phaseTimer);
+    card.classList.add("removing");
+    setTimeout(() => card.remove(), 260);
+  };
+  let generating = false;
+  const addTool = (name) => {
+    generating = false;
+    setStatus(`正在查询校园服务`);
+    return mkStep(`正在查询「${toolLabel(name)}」…`, "active");
+  };
+  const markGenerating = () => {
+    if (dismissed || generating) return;
+    generating = true;
+    clearInterval(phaseTimer);
+    setStatus("正在生成回答");
+    scrollDown();
+  };
+  const finishTool = (el, e) => {
+    el.className = "think-step " + (e.success === false ? "fail" : "done");
+    el.querySelector("span:last-child").textContent =
+      `「${toolLabel(e.name)}」${e.success === false ? "查询失败" : "完成"}`;
+    if (e.ms != null) {
+      const ms = document.createElement("span");
+      ms.className = "ms";
+      ms.textContent = (e.ms / 1000).toFixed(1) + "s";
+      el.appendChild(ms);
+    }
+    scrollDown();
+  };
+  return {el: card, addTool, finishTool, markGenerating, dismiss};
 }
 
-function finishToolChip(chip, e) {
-  chip.classList.toggle("fail", e.success === false);
-  chip.innerHTML = `<span>${e.success === false ? "❌" : "✅"}</span><span>${e.name} ${e.success === false ? "失败" : "完成"}${e.ms != null ? "（" + (e.ms / 1000).toFixed(1) + "s）" : ""}</span>`;
+/* ---- Markdown 渲染（marked 内联库）：仅对最终回答渲染，流式过程保持纯文本 ---- */
+function renderMd(el, raw) {
+  el.classList.add("md");
+  el.dataset.raw = raw;          // 历史保存用原始 Markdown
+  el.innerHTML = marked.parse(raw);
+  // 安全清理：移除脚本类节点与内联事件，外链加固
+  el.querySelectorAll("script, style, iframe, object, embed, form, link, meta").forEach((n) => n.remove());
+  el.querySelectorAll("*").forEach((n) => {
+    for (const attr of [...n.attributes]) {
+      const bad = /^on/i.test(attr.name) ||
+        ((attr.name === "href" || attr.name === "src") && /^\s*javascript:/i.test(attr.value));
+      if (bad) n.removeAttribute(attr.name);
+    }
+  });
+  el.querySelectorAll("a").forEach((a) => { a.target = "_blank"; a.rel = "noopener noreferrer"; });
+  if (el.classList.contains("bot")) attachMsgActions(el);
+}
+
+/* ---- Message Actions：复制 / 重新生成 ---- */
+function attachMsgActions(el) {
+  const bar = document.createElement("div");
+  bar.className = "msg-actions";
+  const mkBtn = (icon, title, fn) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = icon;
+    b.title = title;
+    b.onclick = () => fn(b);
+    return b;
+  };
+  bar.appendChild(mkBtn("📋", "复制", () => {
+    const text = el.dataset.raw ?? el.textContent ?? "";
+    const done = () => toast(`已复制${BRAND.name}的回答`, "ok");
+    const fail = () => toast("复制失败，请长按/手动选择复制", "err");
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(done, fail);
+      return;
+    }
+    // 非 secure context（如 http://IP 访问）下 clipboard API 不存在，退回 execCommand
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.cssText = "position:fixed;opacity:0";
+    document.body.appendChild(ta);
+    ta.select();
+    let copied = false;
+    try { copied = document.execCommand("copy"); } catch { /* 忽略 */ }
+    ta.remove();
+    copied ? done() : fail();
+  }));
+  bar.appendChild(mkBtn("↻", "重新生成", () => {
+    if (busy) return;
+    const latest = [...chat.querySelectorAll(".msg.bot")].pop();
+    if (el !== latest) { toast("只能重新生成最新的回答", "err"); return; }
+    let prev = el.previousElementSibling;
+    while (prev && !prev.classList.contains("user")) prev = prev.previousElementSibling;
+    if (!prev) { toast("找不到对应的提问", "err"); return; }
+    const question = prev.dataset.raw ?? prev.textContent ?? "";
+    let next;
+    while ((next = el.nextElementSibling)) next.remove();
+    el.remove();
+    saveChatHistory();
+    updateWelcome();
+    scrollDown(true);
+    ask(question, []).catch((e) => { showErrorCard("网络错误：" + e.message); sfx.error(); });
+  }));
+  el.appendChild(bar);
+}
+
+/* ---- 错误卡片：技术错误转人话 + 可折叠详情 + 重新生成（品牌语言见 UI.md 第十二条） ---- */
+const ERROR_HINTS = [
+  {re: /concurrent request limit|HTTP 429/i, title: `${BRAND.name}暂时有点忙`, body: "当前请求较多，这次没有成功完成，你可以稍后再试一次。"},
+  {re: /HTTP 40[13]/, title: `${BRAND.name}暂时无法完成这次请求`, body: "可能是服务配置或额度问题，请稍后再试。"},
+  {re: /timeout|ETIMEDOUT|aborted/i, title: `${BRAND.name}暂时连接不上服务`, body: "服务响应太慢或网络不稳定，请稍后再试。"},
+  {re: /fetch failed|network|ECONN/i, title: `${BRAND.name}暂时连接不上服务`, body: "请检查网络连接后重试。"},
+];
+function humanizeError(raw) {
+  for (const h of ERROR_HINTS) if (h.re.test(raw)) return h;
+  return {title: `${BRAND.name}遇到了一点问题`, body: "刚才的操作没有成功，请重试。"};
+}
+
+let lastQuestion = null;   // 供"重新生成"使用
+let lastImages = null;
+function showErrorCard(raw) {
+  const hint = humanizeError(raw);
+  const card = document.createElement("div");
+  card.className = "error-card";
+  card.innerHTML =
+    `<div class="err-head">⚠️ ${hint.title}</div>` +
+    `<div class="err-body">${hint.body}</div>` +
+    '<details class="err-detail"><summary>技术详情</summary><pre></pre></details>' +
+    '<div class="err-actions"><button class="err-retry" type="button">↻ 让清灵再试一次</button></div>';
+  card.querySelector("pre").textContent = raw;
+  card.querySelector(".err-retry").onclick = () => {
+    card.remove();
+    if (lastQuestion == null && !(lastImages ?? []).length) return;
+    const text = lastQuestion, imgs = lastImages;
+    lastQuestion = null; lastImages = null;
+    addUserMsg(text, imgs);
+    sfx.send();
+    ask(text, imgs).catch((e) => { showErrorCard("网络错误：" + e.message); sfx.error(); });
+  };
+  chat.appendChild(card);
+  updateWelcome();
   scrollDown();
 }
 
@@ -500,6 +1637,35 @@ function showPayForm(data) {
   tip.textContent = "点击后跳转到清华大学在线支付平台（fa-online.tsinghua.edu.cn）";
   div.appendChild(btn);
   div.appendChild(tip);
+  chat.appendChild(div);
+  scrollDown();
+}
+
+/* 预约成功的日历卡片：点击下载 .ics（文本由后端生成，直接 Blob 保存） */
+function showCalendarCard(data) {
+  const div = document.createElement("div");
+  div.className = "cal-card";
+  const title = document.createElement("div");
+  title.className = "cal-title";
+  title.textContent = "📅 " + data.title;
+  const sub = document.createElement("div");
+  sub.className = "cal-sub";
+  sub.textContent = "下载后导入手机/电脑日历，到点自动提醒";
+  const btn = document.createElement("button");
+  btn.textContent = "下载日历 (.ics)";
+  btn.onclick = () => {
+    const blob = new Blob([data.icsContent], {type: "text/calendar;charset=utf-8"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = data.filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast("日历文件已下载", "ok");
+  };
+  div.append(title, sub, btn);
   chat.appendChild(div);
   scrollDown();
 }
@@ -567,11 +1733,14 @@ function closeAuthModal() {
   authSubmit.disabled = false;
 }
 
+const connStatus = document.getElementById("conn-status");
 function updateLoginButton() {
   loginBtn.textContent = authenticated ? "已登录" : "登录";
   loginBtn.classList.toggle("logged-in", authenticated);
   loginBtn.title = authenticated ? "点击退出登录" : "使用清华 Info 账号登录";
-  sendBtn.disabled = busy || loginInFlight;
+  connStatus.hidden = !authenticated;
+  sendBtn.textContent = stopping ? "正在停止…" : busy ? "■ 停止" : "发送";
+  sendBtn.disabled = stopping || (!busy && loginInFlight);
 }
 
 function openLoginModal() {
@@ -603,7 +1772,8 @@ async function logout() {
     clearChatHistory();
     pendingImages = [];
     renderThumbs();
-    addMsg("bot", "已退出登录。本次会话的校园服务已关闭。");
+    toast("已退出登录，清灵已断开校园服务", "ok");
+    updateWelcome();
   }
 }
 
@@ -732,7 +1902,9 @@ function handleAuthEvent(data) {
       authenticated = true;
       updateLoginButton();
       if (newlyAuthenticated) {
-        addMsg("bot", "登录成功！你现在可以开始使用清华小助手了。直接告诉我你的需求即可，例如查询课表、寻找空闲时间或了解校园服务。");
+        toast("✓ 清灵已连接你的清华 Info", "ok");
+        // 刚登录的用户从干净的欢迎页开始（UI 需求：登录后展示"今天想让清灵帮你做什么"）
+        resetChatView();
       }
     }
     setAuthMessage("认证成功，正在继续查询…");
@@ -828,138 +2000,277 @@ authCode.addEventListener("keydown", (e) => {
   if (e.key === "Enter") void submitAuthCode();
 });
 
+/* ---- UI 访问口令（.env 配 UI_TOKEN 后，局域网访问需先输一次；正确后种 cookie 一年有效） ---- */
+const uiAuthMask = document.getElementById("ui-auth-mask");
+const uiTokenInput = document.getElementById("ui-token-input");
+const uiAuthErr = document.getElementById("ui-auth-err");
+async function checkUiAuth() {
+  try {
+    const resp = await fetch("/api/auth/status");
+    if (resp.status === 403) {
+      uiAuthMask.hidden = false;
+      uiTokenInput.focus();
+      return false;
+    }
+  } catch { /* 网络错误不挡页面 */ }
+  return true;
+}
+async function submitUiToken() {
+  const token = uiTokenInput.value;
+  if (!token) { uiAuthErr.textContent = "请输入口令"; return; }
+  uiAuthErr.textContent = "";
+  try {
+    const resp = await fetch("/api/ui/auth", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({token}),
+    });
+    if (resp.ok) {
+      location.reload(); // cookie 已种，刷新走正常初始化
+      return;
+    }
+    uiAuthErr.textContent = "口令不正确";
+  } catch (e) {
+    uiAuthErr.textContent = "请求失败：" + e.message;
+  }
+}
+document.getElementById("ui-token-ok").onclick = submitUiToken;
+uiTokenInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") submitUiToken();
+});
+checkUiAuth();
+
 fetch("/api/auth/status").then((resp) => resp.json()).then((data) => {
   authenticated = data.authenticated === true;
   updateLoginButton();
-  showStartupGuide();
+  updateWelcome();
 }).catch(() => {
   updateLoginButton();
-  showStartupGuide();
+  updateWelcome();
 });
 
-/* ---- SSE 解析（fetch 流，EventSource 不支持 POST） ---- */
-async function ask(question, images) {
-  busy = true;
-  sendBtn.disabled = true;
-  const resp = await fetch("/api/chat", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({question, ...(images?.length ? {images} : {})}),
-  });
-  if (!resp.ok) {
-    const message = await resp.text();
-    if (resp.status === 401) {
-      authenticated = false;
-      updateLoginButton();
-      addMsg("bot", message || "请先点击右上角“登录”并完成清华账号认证。");
-    } else {
-      addMsg("bot", "出错了：" + message);
-    }
-    sfx.error();
-    busy = false;
-    updateLoginButton();
-    return;
-  }
-
-  let botDiv = null;       // 当前流式回答的气泡
-  let botText = "";
-  const chips = new Map(); // 进行中的工具提示
-
-  const ensureBot = () => {
-    if (!botDiv) {
-      botDiv = addMsg("bot", "");
-      botDiv.innerHTML = '<span class="cursor"></span>';
-    }
-    return botDiv;
-  };
-  const renderBot = () => {
-    if (botDiv) botDiv.innerHTML = "";
-    if (botDiv) {
-      botDiv.appendChild(document.createTextNode(botText));
-      const c = document.createElement("span");
-      c.className = "cursor";
-      botDiv.appendChild(c);
-      scrollDown();
-    }
-  };
-
-  const reader = resp.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  for (;;) {
-    const {done, value} = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, {stream: true});
-    let idx;
-    while ((idx = buffer.indexOf("\n\n")) !== -1) {
-      const block = buffer.slice(0, idx);
-      buffer = buffer.slice(idx + 2);
-      const ev = /^event: (.*)$/m.exec(block)?.[1];
-      const dataStr = /^data: (.*)$/m.exec(block)?.[1];
-      if (!ev || !dataStr) continue;
-      let data;
-      try { data = JSON.parse(dataStr); } catch { continue; }
-
-      if (ev === "token") {
-        botText += data.text;
-        ensureBot();
-        renderBot();
-      } else if (ev === "tool") {
-        if (data.phase === "start") {
-          chips.set(data.name, addToolChip(data.name));
-        } else {
-          const chip = chips.get(data.name);
-          if (chip) { finishToolChip(chip, data); chips.delete(data.name); }
-          if (data.success === false) sfx.toolFail(); else sfx.toolOk();
-        }
-      } else if (ev === "confirm") {
-        sfx.confirm();
-        showConfirm(data);
-      } else if (ev === "auth") {
-        handleAuthEvent(data);
-      } else if (ev === "qr") {
-        showQr(data);
-      } else if (ev === "payform") {
-        showPayForm(data);
-      } else if (ev === "answer") {
-        // 最终回答校对：以完整 answer 为准
-        botText = data.text;
-        ensureBot();
-        botDiv.textContent = botText;
-        saveChatHistory();
-        scrollDown();
-        if (ttsOn && botText) speak(botText);
-      } else if (ev === "error") {
-        addMsg("bot", "出错了：" + data.message);
-        sfx.error();
+/* ---- 任务通知轮询（Step 23）：提醒/抢场结果到点由服务端推入队列，这里 30s 取走 ---- */
+async function pollNotifications() {
+  try {
+    const resp = await fetch("/api/notifications");
+    if (!resp.ok) return;
+    const data = await resp.json();
+    for (const n of data.notifications ?? []) {
+      toast(`⏰ ${n.title}：${n.message}`, "ok");
+      sfx.confirm();
+      if ("Notification" in window && Notification.permission === "granted") {
+        new Notification("清灵 · " + n.title, {body: n.message});
       }
     }
+  } catch { /* 网络抖动下一轮再取 */ }
+}
+setInterval(pollNotifications, 30000);
+// 浏览器系统通知需要用户手势授权：首次点击时静默请求一次
+document.addEventListener("click", () => {
+  if ("Notification" in window && Notification.permission === "default") {
+    Notification.requestPermission();
   }
-  // 流结束：去掉光标
-  if (botDiv) {
-    botDiv.textContent = botText;
-    saveChatHistory();
-  }
-  busy = false;
-  sendBtn.disabled = false;
-  q.focus();
+}, {once: true});
+
+/* ---- SSE 解析（fetch 流，EventSource 不支持 POST） ---- */
+let chatAbort = null; // 当前问答的中止控制器（"停止生成"）
+let chatCancelPromise = null;
+function stopCurrentChat() {
+  if (!chatAbort || chatCancelPromise) return;
+  const controller = chatAbort;
+  stopping = true;
+  updateLoginButton();
+  chatCancelPromise = Promise.resolve().then(async () => {
+    controller.abort();
+    try {
+      await fetch("/api/chat/cancel", {method: "POST"});
+    } catch { /* 原请求断开仍会触发服务端中止 */ }
+  });
 }
 
-sendBtn.onclick = () => {
-  const text = q.value.trim();
-  const imgs = pendingImages;
+async function ask(question, images) {
+  busy = true;
+  updateLoginButton(); // 发送按钮 → "■ 停止"
+  lastQuestion = question;  // 供失败后"重新生成"
+  lastImages = images;
+  const thinking = createThinkingCard(); // 立即出现，不等 API
+  let botDiv = null;       // 当前流式回答的气泡
+  let botText = "";
+  let turnUsage = null;    // 本轮 token 用量（usage 事件先于 answer 到达）
+  chatAbort = new AbortController();
+  try {
+    const resp = await fetch("/api/chat", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({question, sessionId: sessionsState.activeId, ...(images?.length ? {images} : {})}),
+      signal: chatAbort.signal,
+    });
+    if (!resp.ok) {
+      const message = await resp.text();
+      if (resp.status === 401) {
+        authenticated = false;
+        updateLoginButton();
+        toast("请先登录清华账号后再使用校园功能", "err");
+      } else {
+        showErrorCard(message);
+      }
+      sfx.error();
+      return;
+    }
+
+    const chips = new Map(); // 进行中的工具状态行
+
+    const ensureBot = () => {
+      if (!botDiv) {
+        botDiv = addMsg("bot", "");
+        botDiv.innerHTML = '<span class="cursor"></span>';
+      }
+      return botDiv;
+    };
+    const renderBot = () => {
+      if (botDiv) botDiv.innerHTML = "";
+      if (botDiv) {
+        botDiv.appendChild(document.createTextNode(botText));
+        const c = document.createElement("span");
+        c.className = "cursor";
+        botDiv.appendChild(c);
+        scrollDown();
+      }
+    };
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, {stream: true});
+      let idx;
+      while ((idx = buffer.indexOf("\n\n")) !== -1) {
+        const block = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        const ev = /^event: (.*)$/m.exec(block)?.[1];
+        const dataStr = /^data: (.*)$/m.exec(block)?.[1];
+        if (!ev || !dataStr) continue;
+        let data;
+        try { data = JSON.parse(dataStr); } catch { continue; }
+
+        if (ev === "token") {
+          botText += data.text;
+          // 中间工具决策轮也可能输出前置文字，不能因此提前删除处理状态。
+          thinking.markGenerating();
+          ensureBot();
+          renderBot();
+        } else if (ev === "tool") {
+          if (data.phase === "start") {
+            chips.set(data.name, thinking.addTool(data.name));
+          } else {
+            const chip = chips.get(data.name);
+            if (chip) { thinking.finishTool(chip, data); chips.delete(data.name); }
+            if (data.success === false) sfx.toolFail(); else sfx.toolOk();
+          }
+        } else if (ev === "confirm") {
+          sfx.confirm();
+          showConfirm(data);
+        } else if (ev === "auth") {
+          handleAuthEvent(data);
+        } else if (ev === "qr") {
+          showQr(data);
+        } else if (ev === "payform") {
+          showPayForm(data);
+        } else if (ev === "calendar") {
+          sfx.confirm();
+          showCalendarCard(data);
+        } else if (ev === "answer") {
+          // 最终回答校对：以完整 answer 为准，并渲染 Markdown
+          botText = data.text;
+          thinking.markGenerating();
+          ensureBot();
+          renderMd(botDiv, botText);
+          renderUsageMeta(botDiv, turnUsage);
+          // 累计到当前会话（随 sessionsState 持久化）
+          if (turnUsage?.totalTokens) {
+            const session = activeSession();
+            if (session) session.tokens = (session.tokens ?? 0) + turnUsage.totalTokens;
+          }
+          thinking.dismiss();
+          saveChatHistory();
+          renderSessionUsage();
+          maybeGenerateTitle();
+          scrollDown();
+          if (ttsOn && botText) speak(botText);
+        } else if (ev === "usage") {
+          turnUsage = data;
+        } else if (ev === "error") {
+          thinking.dismiss();
+          showErrorCard(data.message);
+          sfx.error();
+        }
+      }
+    }
+  } catch (e) {
+    if (e?.name === "AbortError") {
+      toast("已停止生成");
+    } else {
+      showErrorCard("网络错误：" + e.message);
+      sfx.error();
+    }
+  } finally {
+    const cancellation = chatCancelPromise;
+    if (cancellation) await cancellation;
+    if (chatCancelPromise === cancellation) chatCancelPromise = null;
+    // 收尾：光标气泡渲染已收到的内容、确保 Thinking Card 已收起
+    thinking.dismiss();
+    if (botDiv) {
+      if (botText) { renderMd(botDiv, botText); renderUsageMeta(botDiv, turnUsage); }
+      else botDiv.remove();
+      saveChatHistory();
+      renderSessionUsage();
+    }
+    stopping = false;
+    busy = false;
+    chatAbort = null;
+    updateLoginButton();
+    q.focus();
+  }
+}
+
+/* 统一发送入口：发送按钮与"重新生成"共用 */
+function submit(text, imgs) {
   if ((!text && imgs.length === 0) || busy) return;
   if (rec) rec.stop(); // 发送时停止语音输入
   try { speechSynthesis.cancel(); } catch {} // 新一轮开始时停止朗读
-  q.value = "";
-  pendingImages = [];
-  renderThumbs();
   addUserMsg(text, imgs);
   sfx.send();
-  ask(text, imgs).catch((e) => { addMsg("bot", "网络错误：" + e.message); sfx.error(); });
+  ask(text, imgs).catch((e) => { showErrorCard("网络错误：" + e.message); sfx.error(); });
+}
+sendBtn.onclick = () => {
+  if (busy) { stopCurrentChat(); return; } // 等服务端确认清理完成后再允许下一问
+  const text = q.value.trim();
+  const imgs = pendingImages;
+  if (!text && imgs.length === 0) return;
+  q.value = "";
+  resizeQ();
+  pendingImages = [];
+  renderThumbs();
+  submit(text, imgs);
 };
-q.addEventListener("keydown", (e) => { if (e.key === "Enter") sendBtn.click(); });
-restoreChatHistory();
+/* textarea 自动伸缩 + Enter 发送 / Shift+Enter 换行 */
+function resizeQ() {
+  q.style.height = "auto";
+  q.style.height = Math.min(q.scrollHeight, 140) + "px";
+}
+q.addEventListener("input", resizeQ);
+q.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    sendBtn.click();
+  }
+});
+/* 启动时恢复当前会话的聊天记录与侧栏列表（2026-09-04 用户反馈：刷新不应丢记录）；
+   空会话自然落在欢迎页 */
+renderMessages(activeSession()?.messages ?? []);
+renderSessionList();
 q.focus();
 </script>
 </body>

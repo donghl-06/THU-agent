@@ -1,4 +1,4 @@
-# THU Assistant Agent（清华小助手 Agent）
+# THU Assistant Agent（清灵 Agent）
 
 面向清华大学校园生活场景的 LLM Agent 项目（开发中）。
 
@@ -92,21 +92,54 @@ Web UI 启动脚本会自动配置旧版 TLS 所需的 `OPENSSL_CONF`，PowerShe
 开发者可在 Windows 且已安装 Node.js 和 pnpm 的电脑上运行：
 
 ```bash
-pnpm package:win
+pnpm package:win:exe
 ```
 
-命令会生成版本化的最小发布目录、可直接上传 GitHub Release 的 ZIP，以及对应的 SHA-256
-校验文件。发布包只包含构建产物、内置 Node.js、启动器、配置示例和第三方许可证，不包含
-源码、测试或 `node_modules`，用户无需安装 Node.js、pnpm 或 Git。将 `.env.example` 复制为
-同目录下的 `.env` 并填写 `LLM_API_KEY` 等模型配置后，双击 `清华小助手.exe` 即可自动启动
-本地服务并打开浏览器。不要把填写过真实密钥的 `.env` 放进公开发布包。
-
+命令会在 `release/清灵-EXE/` 生成网页聊天发布目录，内置 Node.js 和生产依赖，用户无需安装
+Node.js、pnpm 或 Git。将 `.env.example` 复制为同目录下的 `.env` 并填写 `LLM_API_KEY`
+等模型配置后，双击 `清灵.exe` 即可自动启动本地服务并打开浏览器。程序退出入口
 使用 .NET 8 SDK 打包时，程序退出入口位于 Windows 任务栏托盘图标的右键菜单中。
 
 如果打包机额外安装了 .NET 8 SDK，脚本会优先生成带托盘菜单的启动器；没有 SDK 时会
 自动使用 Node.js SEA 生成启动 EXE；该备用启动器不提供托盘菜单，退出时可在任务管理器
-中结束“清华小助手”目录下的 Node.js 进程。无论采用哪条路径，普通用户都不需要安装
+中结束“清灵”目录下的 Node.js 进程。无论采用哪条路径，普通用户都不需要安装
 .NET 或 Node.js。
+
+### Codex MCP 独立连接包
+
+如果用户已经安装 Codex、Claude Desktop 等 MCP Agent，不需要下载网页聊天 EXE，直接运行：
+
+```bash
+pnpm package:win:mcp
+```
+
+命令会在 `release/清灵-MCP/` 生成独立连接包，只包含 MCP 服务、内置 Node.js
+运行时和配置模板。用户将 `.env.example` 复制为 `.env`，填写清华账号配置，再按照
+`docs/codex-mcp.md` 注册到已有 Agent 即可。两个发布包互不依赖，用户按使用场景选择一个下载。
+
+需要同时生成两个发布包时，开发者可运行 `pnpm package:win:all`；发布到 GitHub Release
+时分别压缩并上传 `release/清灵-EXE/` 和 `release/清灵-MCP/`。
+
+### 自动打包（GitHub Actions）
+
+仓库内置了云打包流水线（`.github/workflows/release.yml`）：无需本机装任何环境，
+由 GitHub 的云机器自动打出三个便携包——
+
+| 产物 | 云机器 | 说明 |
+| --- | --- | --- |
+| `QingLing-macOS-arm64` | macOS（M 系列芯片） | Apple Silicon 原生 |
+| `QingLing-macOS-x64` | macOS（运行时换官方 Intel 版 Node） | Intel Mac 原生 |
+| `QingLing-Windows-EXE` | Windows | 网页聊天 EXE 包 |
+
+**触发方式（二选一）**：
+
+1. **发版本（推荐）**：本地执行 `git tag v0.2.0 && git push origin v0.2.0`——
+   三个包并行打出后自动压缩，发布到仓库的 **Releases** 页面（永久保留，任何人可下载）；
+2. **手动试跑**：GitHub 仓库页 → Actions → 选"发布便携包" → Run workflow——
+   只出产物（Artifacts，保留 90 天，需登录 GitHub 下载），不发布 Release。
+
+macOS 包的芯片适配：arm64 包给 M 系列 Mac；x64 包给 Intel Mac（构建后运行时
+替换为官方同版本 Intel 版 Node，两种芯片各自原生运行，无需 Rosetta）。
 
 其他命令：
 
@@ -115,7 +148,14 @@ pnpm agent       # 命令行对话 Agent（需要 LLM_* 配置）
 pnpm dev         # 项目入口（当前为占位）
 pnpm test        # 全部测试（Skill + Harness 单测 + 真实链路集成测试）
 pnpm typecheck   # TypeScript 类型检查
+pnpm --silent mcp # 以 MCP stdio 模式启动，供 Codex 调用校园 Skill
 ```
+
+### Codex MCP 模式
+
+项目同时提供本地 MCP Server，可让 Codex 直接调用清华校园查询 Skill。MCP Server 不替代现有 Web/EXE 模式：Codex 负责理解和规划，服务器复用 `src/skills/` 与 `src/client/`；预约、取消、充值等写操作在 MCP 模式下默认拒绝，继续使用 Web/EXE 的确认界面完成。
+
+详细配置步骤见 [docs/codex-mcp.md](docs/codex-mcp.md)。开发者构建后的 MCP 入口为 `dist/scripts/mcp-server.cjs`，普通用户应直接下载 `清灵-MCP` 发布包。
 
 ## 注意事项
 

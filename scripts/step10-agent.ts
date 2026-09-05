@@ -10,16 +10,12 @@
  */
 import * as readline from "node:readline";
 import {Agent} from "../src/harness/agentLoop";
+import {dateContextLine} from "../src/harness/dateContext";
 import {createAllSkills} from "../src/skills";
 
-const today = new Date().toLocaleDateString("zh-CN", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-    weekday: "long",
-});
+const today = dateContextLine();
 
-const SYSTEM_PROMPT = `你是"清华小助手"，一个帮清华学生查询校园信息的助手。今天是${today}。
+const SYSTEM_PROMPT = `你是"清灵"，一个帮清华学生查询校园信息的助手。${today}。
 
 规则：
 1. 需要实时校园信息（课表、校园卡、教室、图书馆座位/研讨间、体育场馆、成绩单、宿舍电费、我的图书馆预约）时，必须调用对应工具，不许编造。
@@ -69,7 +65,7 @@ const confirmWrite = async (call: {function: {name: string; arguments: string}})
 // prewarm：启动时后台登录，首个问题不用再等登录
 const agent = new Agent(createAllSkills({prewarm: true}), SYSTEM_PROMPT, undefined, confirmWrite);
 
-console.log("清华小助手已就绪（输入 exit 退出）\n");
+console.log("清灵已就绪（输入 exit 退出）\n");
 
 // eslint-disable-next-line no-constant-condition
 while (true) {

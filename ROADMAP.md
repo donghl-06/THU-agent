@@ -513,4 +513,125 @@ THU-agent/                        ← 项目根（git 仓库）
                     工具失败/确认弹窗/错误各有提示音，顶栏 🔔 可关。
                   单测 156 个全绿（+7：多模态 parts 构造、默认提示语、
                   capabilities、图片校验四条）。
-[下一步] 待规划（远期：多用户 App·本机凭证模式，见上文）
+[已完成] Step 21 会话架构修复（2026-09-04 定案，现存问题：前端已多会话，
+                  后端仍是单一共享 Agent——切换/新建会话不影响后端上下文，
+                  跨会话串味；messages 只增不减；进程重启即失忆）：
+                  ① [已完成] 会话隔离：/api/chat 带 sessionId（非法/缺省落
+                    "default"），后端 Map<sessionId, Agent>（LRU 50 上限防泄漏）；
+                    step18-web 的 ThuClient 提到 factory 外只建一次，所有会话
+                    Agent 共享同一登录态，换会话不用重新登录；新增
+                    POST /api/session/destroy（单个/all）删会话时销毁后端上下文；
+                    logout 清全部；登录成功建的 Agent 落在 default 会话。
+                    前端 ask 带活跃会话 id，删会话/清空历史时调 destroy。
+                    单测 +4：跨会话不串味、destroy 单个、destroy all、非法 id 兜底。
+                  ② [已完成] 上下文裁剪（agentLoop.viewForLlm，Step 21b）：
+                    发送视图两级裁剪（不动存储本体）——旧轮超长 tool 结果
+                    （默认 >2000 字符）裁成一行摘要（失败调用保留错误码）；
+                    超过轮数上限（默认 20）整轮淘汰（保持
+                    assistant.tool_calls↔tool 消息配对完整性）；旧轮 base64
+                    图片换"（图片已省略）"占位；当前轮内容恒不裁。
+                    Agent 构造器加可选 trim 参数（测试可调小阈值）。
+                    单测 +4：摘要裁剪/本体不动、整轮淘汰+配对完整、
+                    图片占位（旧裁新留）、当前轮不裁。
+                  ③ [已完成] 会话持久化（src/server/sessionStore.ts，Step 21c）：
+                    messages 落 data/sessions.json（临时文件+rename 原子写，
+                    data/ 进 .gitignore），重启由 getOrCreateAgent 恢复——
+                    system 消息换用新实例的 systemPrompt（旧的带过期日期）；
+                    持久化前净化：去 system、图片 parts 归并纯文本（base64
+                    不落盘）、200 条上限；destroy 同步删盘；持久化失败不影响
+                    服务。Agent 加 snapshotMessages/loadMessages。step18-web
+                    传存储路径，webServer 测试默认不落盘（显式传 tmp 路径）。
+                    单测 +3：重启恢复+新 system、图片剔除、destroy 清盘。
+[已完成] Step 22 复活两个被砍技能（Step 15 时砍掉，前置障碍现已被扫清）：
+                  ① [已完成] get_dorm_score 宿舍卫生：ThuClient 包装
+                    helper.getDormScore（实测确认 lib uFetch 对 image/*
+                    Content-Type 返回 base64，公示图数据合法）；Skill 保持
+                    零 LLM，结果 data.imagesBase64 带出；agentLoop 新增
+                    collectToolImages——工具结果带图时在 tool 消息后追加
+                    带图 user 消息（OpenAI 协议 tool 消息只能字符串），
+                    LLM_VISION=0 时不追加；DormAuthError（无 message 的
+                    LIB_ERROR）转 DORM_SCORE_UNAVAILABLE 友好提示。
+                    单测 +5（skill 4 + agentLoop 带图 1）。
+                    ⚠ 真链验证待做：需要 Web UI 登录后问"宿舍卫生成绩"，
+                    确认 vision 模型能读公示图报分。
+                  ② [已完成] get_network_status 校园网（usereg）：新建
+                    src/client/usereg.ts 完全独立实现（lib 的 uFetch 全局
+                    jar 不分域名，usereg 的 ASP.NET 会话 cookie 会顶掉
+                    m.myhome 等会话——m.myhome 同款坑，故不走近 lib 通道）：
+                    手动 follow 重定向逐跳收 Set-Cookie 的独立 jar、
+                    node:crypto RSA/PKCS1 加密（替代 lib 的 jsencrypt）、
+                    无 cheerio 正则解析表格。登录链路与 lib network.ts 同源：
+                    /login 页取 csrf-token+#public 公钥+_csrf-8800 →
+                    /site/captcha 验证码 → 超级鹰字符识别（新增
+                    createChaojiyingCodeSolver，codetype 1902）→
+                    /site/validate-user → /login 表单；识别失败换图重试 ≤3。
+                    默认直连 usereg.tsinghua.edu.cn（USEREG_BASE_URL 可覆盖），
+                    校外 webvpn 场景待真链验证后再议。
+                    单测 +4：本地假 usereg 站点全链路（RSA 密文用测试私钥
+                    解密校验、错码换图重试、三连败报错、skill 降级）。
+                    真链验证 ✅（2026-09-04，用户报错后逐层排查，登录+查询
+                    全通：套餐/余额/在线设备）。实测踩坑（全部记录在案）：
+                    ✗ 登录名是 emailName（邮箱前缀）不是学号——表单
+                      placeholder"账号(邮箱前缀)"证实；学号被服务端拒
+                      （"用户名或密码错误"）。装配层传 resolveUsername 回调，
+                      登录时经 getUserInfo 解析。
+                    ✗ 登录表单是 AJAX 提交（按钮 type="button"）：POST /login
+                      必须带 X-Requested-With + X-CSRF-Token 头，缺了 400
+                      （"Bad Request"页）。lib 的"裸 fetch validate"在 RN 里
+                      由系统自动带 cookie，Node 必须显式带 cookie+头。
+                    ✗ AJAX 重定向无 Location 头，目标在 X-Redirect 头
+                      （https://usereg.tsinghua.edu.cn/home）。
+                    ✗ validate 成功后必须二次确认登录态（GET /login 不再含
+                      验证码字段才算成功），假成功会导致首页解析报错。
+                    诊断脚本 scripts/debug-usereg.ts（--both 对比学号/邮箱名，
+                    onDebug 打印每步中间量，凭证脱敏），排障利器。
+[已完成] Step 23 主动式能力（从被动应答到主动 Agent）：
+                  核心设计：LLM 只负责"创建任务"（走确认流），到点执行走
+                  确定性代码路径直接调 skill.execute，不再烧 LLM。
+                  ① 任务模型 + 进程内 scheduler（src/tasks/）：
+                    reminder/monitor（电费监控，m.myhome 查电量低于阈值触发，
+                    未触发按间隔顺延）/booking 三类；TaskStore 落盘
+                    data/tasks.json 重启恢复；30s 轮询不引任务队列；
+                    过期保护——booking 落后超 10 分钟拒绝执行（服务停摆后
+                    重启绝不突然下单），转"已过期"通知；执行异常转失败通知。
+                  ② 通知通道：NotificationHub + GET /api/notifications
+                    （drain 即消费）+ 前端 30s 轮询 → toast + 音效 +
+                    浏览器 Notification（首次点击静默请求权限）；
+                    GET /api/tasks、POST /api/tasks/cancel。
+                  ③ 任务类技能（仅装配 scheduler 的环境提供）：
+                    create_reminder / schedule_sports_booking（均确认流；
+                    抢场 payType 创建时必填，执行时不再问）/
+                    list_my_tasks / cancel_task；sessionId 经
+                    AsyncLocalStorage 从 server 层透传（模型无感知）；
+                    抢场执行器直接调 bookSportsField.execute（独立
+                    SportsClient + 超级鹰）；system prompt 增任务类引导规则。
+                  未能真实抢场端到端（需真 6 点场次），已用单测覆盖执行器
+                  合同（成功消息/失败消息/过期拒绝/异常转通知）。
+                  ⚠ 真链验证待做：真实抢场一次 + 低电费触发一次。
+[已完成] 小项（穿插在大步骤之间，不单独占步骤号）：
+                  ① [已完成] Token 统计：llmClient 解析 usage（流式加
+                    stream_options.include_usage，端点报 400 不认识该字段时
+                    自动去字段重发），Agent 按轮累计进 AgentRunResult，
+                    webServer 发 usage SSE 事件（配 LLM_PRICE_IN/OUT
+                    元/百万 token 时带估算费用）；前端回答气泡下方小字 +
+                    侧栏会话累计（随会话持久化）。假端点单测 4 个验证
+                    非流式/流式/降级重发。
+                  ② [已完成] 校历感知（src/harness/dateContext.ts）：
+                    .env 配 SEMESTER_START（学期第一教学周周一），系统
+                    提示词注入"今天是X年X月X日 星期X · 秋季学期第 N 教学
+                    周"（开学前提示尚未开学；>20 周提示考试周或假期）；
+                    step10/step18 两处 SYSTEM_PROMPT 统一换用。单测 6 个。
+                  ③ 快捷指令：输入框上方常驻常用问法胶囊，点按即发送（纯前端）。
+[已完成] 日历导出一期（2026-09-04，用户确认后实施）：
+                  预约成功 → SSE calendar 事件 → 前端"下载日历 (.ics)"按钮，
+                  导入系统日历自动带 15 分钟前提醒（补上"订上了但人会忘"的最后一环）。
+                  架构：src/server/calendar.ts 的 extractCalendarEvent + buildIcs
+                  在后端生成现成 ics 文本（可单测），前端只做 Blob 下载；
+                  挂在 webServer 现有 toolCalls 遍历里（extractPayUrl 同款模式）。
+                  覆盖三个预约技能：book_sports_field / book_library_room
+                  （具体时段，floating local time）+ book_library_seat
+                  （上游无起止时间 → VALUE=DATE 全天事件，签到提醒写进描述）。
+                  待支付订单也出按钮，描述里注明"【待支付】"。
+                  单测 +10（提取 4 + ics 生成 5 + webServer SSE 1）。
+[下一步] 远期：多用户 App（本机凭证模式）见上文；日历二期（我的预约批量导出、
+                  抢场成功通知带日历卡片）待议

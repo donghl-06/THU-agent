@@ -6,6 +6,10 @@
 import {afterEach, describe, expect, it} from "vitest";
 import type {AddressInfo} from "node:net";
 import type {Server} from "node:http";
+import {readFileSync, writeFileSync, existsSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
+import {randomUUID} from "node:crypto";
 import {Agent} from "../../src/harness/agentLoop";
 import type {LlmClient} from "../../src/harness/llmClient";
 import type {ChatMessage} from "../../src/harness/types";
@@ -13,12 +17,18 @@ import type {ConfirmFn} from "../../src/harness/toolRegistry";
 import type {TwoFactorHooks} from "../../src/client/auth";
 import {ok, type Skill} from "../../src/skills/base/types";
 import {createWebServer} from "../../src/server/webServer";
+import {NotificationHub} from "../../src/server/notificationHub";
+import {TaskScheduler} from "../../src/tasks/scheduler";
+import {currentSessionId} from "../../src/tasks/sessionContext";
 
-/** 脚本化假 LLM（沿用 harness 测试的模式） */
-function fakeLlm(script: ChatMessage[]): LlmClient {
+/** 脚本化假 LLM（沿用 harness 测试的模式）；seen 记录每轮收到的完整 messages */
+function fakeLlm(script: ChatMessage[]): LlmClient & {seen: ChatMessage[][]} {
     let i = 0;
+    const seen: ChatMessage[][] = [];
     return {
-        async chat() {
+        seen,
+        async chat(messages) {
+            seen.push([...messages]);
             const next = script[i++];
             if (!next) throw new Error("假 LLM 脚本已耗尽");
             return next;
@@ -76,6 +86,44 @@ async function readSse(resp: Response): Promise<{event: string; data: Record<str
     return events;
 }
 
+/**
+ * 读 SSE 流，遇到 confirm 事件时立即按给定结果应答（事件驱动，无盲轮询竞态）。
+ * 其余行为与 readSse 相同。
+ */
+async function readSseAnsweringConfirms(
+    base: string,
+    resp: Response,
+    approved: boolean,
+): Promise<{event: string; data: Record<string, unknown>}[]> {
+    const events: {event: string; data: Record<string, unknown>}[] = [];
+    const reader = resp.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+        const {done, value} = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, {stream: true});
+        let idx;
+        while ((idx = buffer.indexOf("\n\n")) !== -1) {
+            const block = buffer.slice(0, idx);
+            buffer = buffer.slice(idx + 2);
+            const event = /^event: (.*)$/m.exec(block)?.[1];
+            const dataStr = /^data: (.*)$/m.exec(block)?.[1];
+            if (!event || !dataStr) continue;
+            const data = JSON.parse(dataStr) as Record<string, unknown>;
+            events.push({event, data});
+            if (event === "confirm" && typeof data.id === "string") {
+                void fetch(`${base}/api/confirm`, {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({id: data.id, approved}),
+                }).catch(() => {});
+            }
+        }
+    }
+    return events;
+}
+
 describe("Web 服务端", () => {
     let server: Server | undefined;
     let base = "";
@@ -107,7 +155,7 @@ describe("Web 服务端", () => {
         const resp = await fetch(`${base}/`);
         expect(resp.status).toBe(200);
         const html = await resp.text();
-        expect(html).toContain("清华小助手");
+        expect(html).toContain("清灵");
     });
 
     it("纯文本问答：answer + done 事件", async () => {
@@ -277,20 +325,8 @@ describe("Web 服务端", () => {
             body: JSON.stringify({question: "充 10 块"}),
         });
 
-        // 读到 confirm 事件后应答同意
-        const eventsPromise = readSse(resp);
-        for (let i = 0; i < 50 && !executed; i++) {
-            await new Promise((r) => setTimeout(r, 100));
-            // 从服务端的 pendingConfirms 拿不到（封装内），改为轮询 /api/confirm 404→200
-            // 简化：直接尝试用递增 id 应答——confirm 事件的 id 是 cf_1
-            const ack = await fetch(`${base}/api/confirm`, {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({id: "cf_1", approved: true}),
-            });
-            if (ack.status === 200) break;
-        }
-        const events = await eventsPromise;
+        // 事件驱动：读到 confirm 事件即应答同意（不依赖固定 id 与轮询时序）
+        const events = await readSseAnsweringConfirms(base, resp, true);
         expect(executed).toBe(true);
         expect(events.some((e) => e.event === "confirm" && e.data.name === "recharge")).toBe(true);
         expect(events.some((e) => e.event === "answer")).toBe(true);
@@ -305,17 +341,7 @@ describe("Web 服务端", () => {
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({question: "充 10 块"}),
         });
-        const eventsPromise = readSse(resp);
-        for (let i = 0; i < 50; i++) {
-            const ack = await fetch(`${base}/api/confirm`, {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({id: "cf_1", approved: false}),
-            });
-            if (ack.status === 200) break;
-            await new Promise((r) => setTimeout(r, 100));
-        }
-        await eventsPromise;
+        await readSseAnsweringConfirms(base, resp, false);
         expect(executed).toBe(false);
     });
 
@@ -326,20 +352,176 @@ describe("Web 服务端", () => {
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({question: "充电费"}),
         });
-        const eventsPromise = readSse(resp);
-        for (let i = 0; i < 50; i++) {
-            const ack = await fetch(`${base}/api/confirm`, {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({id: "cf_1", approved: true}),
-            });
-            if (ack.status === 200) break;
-            await new Promise((r) => setTimeout(r, 100));
-        }
-        const events = await eventsPromise;
+        const events = await readSseAnsweringConfirms(base, resp, true);
         const qr = events.find((e) => e.event === "qr");
         expect(qr?.data.url).toBe("https://qr.alipay.com/fake-test-code");
         expect(String(qr?.data.dataUrl ?? "")).toMatch(/^data:image\/png/);
+    });
+
+    it("ask 返回 usage 时发 usage 事件", async () => {
+        const usageAgent = {
+            async ask() {
+                return {answer: "好", toolCalls: [], usage: {promptTokens: 100, completionTokens: 20, totalTokens: 120}};
+            },
+        } as unknown as Agent;
+        server = createWebServer(() => usageAgent, {requireLogin: false});
+        await new Promise<void>((r) => server!.listen(0, "127.0.0.1", r));
+        base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+        const resp = await fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question: "你好"}),
+        });
+        const events = await readSse(resp);
+        const usage = events.find((e) => e.event === "usage");
+        expect(usage?.data.totalTokens).toBe(120);
+        expect(usage?.data.promptTokens).toBe(100);
+    });
+
+    it("会话标题端点：首轮对话后生成一次，重复调用不再生成", async () => {
+        const titleLlm = fakeLlm([textMsg("打招呼")]);
+        let titleCalls = 0;
+        const titleSpy: LlmClient = {
+            async chat() {
+                titleCalls += 1;
+                return {role: "assistant", content: "打招呼"} as ChatMessage;
+            },
+        };
+        void titleLlm;
+        server = createWebServer((confirm: ConfirmFn) =>
+                new Agent([echoSkill], "测试", fakeLlm([textMsg("你好呀！")]), async (call, skill) => confirm(call, skill)),
+            {requireLogin: false, titleLlm: titleSpy});
+        await new Promise<void>((r) => server!.listen(0, "127.0.0.1", r));
+        base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+        // 先完成一轮对话（创建会话 Agent）
+        const chat = await fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question: "你好", sessionId: "s_title"}),
+        });
+        await readSse(chat);
+
+        // 会话不存在 → title null
+        const miss = await fetch(`${base}/api/session/title`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({sessionId: "s_absent"}),
+        });
+        expect((await miss.json()).title).toBeNull();
+
+        // 首次生成
+        const first = await fetch(`${base}/api/session/title`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({sessionId: "s_title"}),
+        });
+        expect((await first.json()).title).toBe("打招呼");
+        expect(titleCalls).toBe(1);
+
+        // 防重复：第二次不再烧 LLM
+        const second = await fetch(`${base}/api/session/title`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({sessionId: "s_title"}),
+        });
+        expect((await second.json()).title).toBeNull();
+        expect(titleCalls).toBe(1);
+    });
+
+    it("预约成功的工具结果发 calendar 事件（含现成 ics 文本）", async () => {
+        const bookSkill: Skill = {
+            name: "book_sports_field",
+            description: "假预约，仅测试用",
+            inputSchema: {type: "object", properties: {}},
+            async execute() {
+                return ok({
+                    venue: "气膜馆羽毛球", field: "羽03",
+                    date: "2026-09-06", time: "06:00-07:30",
+                    orderGenerated: false, freeOrder: true,
+                    message: "预约成功。",
+                });
+            },
+        };
+        await start([toolCallMsg("book_sports_field", {}), textMsg("订好了")], [bookSkill]);
+        const resp = await fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question: "约场地"}),
+        });
+        const events = await readSse(resp);
+        const cal = events.find((e) => e.event === "calendar");
+        expect(cal?.data.title).toBe("气膜馆羽毛球（羽03）");
+        expect(String(cal?.data.filename)).toMatch(/\.ics$/);
+        const ics = String(cal?.data.icsContent);
+        expect(ics).toContain("BEGIN:VCALENDAR");
+        expect(ics).toContain("DTSTART:20260906T060000");
+        expect(ics).toContain("TRIGGER:-PT15M");
+    });
+
+    it("skill 能读到当前会话 id（任务归属用）", async () => {
+        let seenSession: string | undefined;
+        const sessionSkill: Skill = {
+            name: "which_session",
+            description: "读会话上下文，仅测试用",
+            inputSchema: {type: "object", properties: {}},
+            async execute() {
+                seenSession = currentSessionId();
+                return ok({});
+            },
+        };
+        await start([toolCallMsg("which_session", {}), textMsg("好的")], [sessionSkill]);
+        const resp = await fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question: "创建任务", sessionId: "s_ctx"}),
+        });
+        await readSse(resp);
+        expect(seenSession).toBe("s_ctx");
+    });
+
+    it("通知与任务端点：push 后可取走，drain 即消费", async () => {
+        const hub = new NotificationHub();
+        const scheduler = new TaskScheduler({
+            notify: (task, message) => hub.push(task.id, task.title, message),
+            executeBooking: async () => "ok",
+            checkMonitor: async () => ({triggered: false, message: ""}),
+        });
+        server = createWebServer((confirm: ConfirmFn) =>
+            new Agent([echoSkill], "测试", fakeLlm([textMsg("x")]), async (call, skill) => confirm(call, skill)),
+            {requireLogin: false, notificationHub: hub, scheduler});
+        await new Promise<void>((r) => server!.listen(0, "127.0.0.1", r));
+        base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+        // 没通知时返回空
+        let resp = await fetch(`${base}/api/notifications`);
+        expect(((await resp.json()) as {notifications: unknown[]}).notifications).toHaveLength(0);
+
+        // scheduler 加提醒任务并立刻到期 → tick 执行 → 通知入队
+        scheduler.add({kind: "reminder", title: "电费要充了", sessionId: "s1", nextRunAt: Date.now() - 10});
+        await scheduler.tick();
+
+        resp = await fetch(`${base}/api/notifications`);
+        const drained = (await resp.json()) as {notifications: {title: string; message: string}[]};
+        expect(drained.notifications).toHaveLength(1);
+        expect(drained.notifications[0].message).toBe("电费要充了");
+
+        // drain 即消费：再取为空
+        resp = await fetch(`${base}/api/notifications`);
+        expect(((await resp.json()) as {notifications: unknown[]}).notifications).toHaveLength(0);
+
+        // 任务列表可见（含已完成的提醒）
+        const tasksResp = await fetch(`${base}/api/tasks`);
+        const tasks = (await tasksResp.json()) as {tasks: {id: string; done?: boolean}[]};
+        expect(tasks.tasks).toHaveLength(1);
+
+        // 取消端点：对已完成任务 404
+        const cancel = await fetch(`${base}/api/tasks/cancel`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({id: tasks.tasks[0].id}),
+        });
+        expect(cancel.status).toBe(404);
     });
 
     it("工具结果带 payFormHtml 时发 payform 事件", async () => {
@@ -363,47 +545,139 @@ describe("Web 服务端", () => {
     });
 
     it("进行中再来一问返回 409", async () => {
-        // 用一个会等确认的写操作把第一轮卡住
+        // 用一个会等确认的写操作把第一问卡在确认挂起；
+        // 读到 confirm 事件（确定性窗口）后：先发第二问验证 409，再同意放行第一问
         await start([toolCallMsg("recharge", {amountYuan: 10}), textMsg("充好了")], [paySkill]);
         const first = await fetch(`${base}/api/chat`, {
             method: "POST",
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({question: "第一问"}),
         });
-        const firstEvents = readSse(first);
-        // 等第一轮进入确认挂起（confirm 事件已发出）
-        for (let i = 0; i < 50; i++) {
-            const probe = await fetch(`${base}/api/confirm`, {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({id: "cf_1", approved: true}),
-            });
-            if (probe.status === 200) {
-                // 已被这个探测应答了——说明确认确实挂起过；重新发起一轮来测 409 不可行，
-                // 直接验证第一轮完成即可
-                break;
-            }
-            // 确认还没挂上时，第二轮应被 409 拒绝
-            const second = await fetch(`${base}/api/chat`, {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({question: "第二问"}),
-            });
-            if (second.status === 409) {
-                expect(second.status).toBe(409);
-                // 放行第一轮
+        const reader = first.body!.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let secondStatus = 0;
+        let sawAnswer = false;
+        let sawConfirm = false;
+        for (;;) {
+            const {done, value} = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, {stream: true});
+            let idx;
+            while ((idx = buffer.indexOf("\n\n")) !== -1) {
+                const block = buffer.slice(0, idx);
+                buffer = buffer.slice(idx + 2);
+                const event = /^event: (.*)$/m.exec(block)?.[1];
+                const dataStr = /^data: (.*)$/m.exec(block)?.[1];
+                if (event === "answer") sawAnswer = true;
+                if (event !== "confirm" || sawConfirm || !dataStr) continue;
+                sawConfirm = true;
+                const id = (JSON.parse(dataStr) as {id?: string}).id;
+                // 第一问仍挂起：第二问必须被 409 拒绝
+                const second = await fetch(`${base}/api/chat`, {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({question: "第二问"}),
+                });
+                secondStatus = second.status;
+                await second.text();
+                // 放行第一问
                 await fetch(`${base}/api/confirm`, {
                     method: "POST",
                     headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify({id: "cf_1", approved: true}),
+                    body: JSON.stringify({id, approved: true}),
                 });
-                await firstEvents;
-                return;
             }
-            await new Promise((r) => setTimeout(r, 100));
         }
-        await firstEvents;
+        expect(secondStatus).toBe(409);
+        expect(sawAnswer).toBe(true);
     }, 20000);
+
+    it("停止生成：客户端断开 → 中止信号传到 LLM 且 busy 释放", async () => {
+        const seenSignals: AbortSignal[] = [];
+        let calls = 0;
+        server = createWebServer((confirm: ConfirmFn) =>
+            new Agent([echoSkill], "测试", {
+                async chat(_messages, _tools, signal) {
+                    calls += 1;
+                    seenSignals.push(signal!);
+                    if (calls === 1) {
+                        // 模拟 LLM 长响应：挂起直到外部中止（或 5s 兜底）
+                        await new Promise<void>((resolve) => {
+                            signal!.addEventListener("abort", () => resolve(), {once: true});
+                            setTimeout(resolve, 5000);
+                        });
+                    }
+                    return textMsg(`回复 ${calls}`);
+                },
+            }), {requireLogin: false});
+        await new Promise<void>((r) => server!.listen(0, "127.0.0.1", r));
+        base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+        // 前端"停止生成" = abort fetch（断开连接）
+        const controller = new AbortController();
+        const pending = fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question: "你好"}),
+            signal: controller.signal,
+        });
+        // 轮询等待服务端进入 LLM 调用（固定 sleep 在高负载下不可靠）
+        for (let i = 0; i < 100 && calls === 0; i++) {
+            await new Promise((r) => setTimeout(r, 20));
+        }
+        expect(calls).toBe(1);
+        controller.abort();
+        await expect(pending).rejects.toThrow();
+
+        await new Promise((r) => setTimeout(r, 100));
+        expect(seenSignals[0]?.aborted).toBe(true);
+
+        // busy 已释放：紧接着再问应正常受理（而非 409）
+        const resp2 = await fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question: "再来一问"}),
+        });
+        expect(resp2.status).toBe(200);
+        await resp2.text();
+    }, 10000);
+
+    it("停止生成：挂起的工具调用被中止，下一问不会收到 409", async () => {
+        let markStarted!: () => void;
+        const started = new Promise<void>((resolve) => { markStarted = resolve; });
+        const hangingSkill: Skill = {
+            name: "hanging",
+            description: "永不返回，仅测试中止",
+            inputSchema: {type: "object", properties: {}},
+            async execute() {
+                markStarted();
+                return new Promise<never>(() => {});
+            },
+        };
+        await start([toolCallMsg("hanging", {}), textMsg("第二问正常回答")], [hangingSkill]);
+
+        const first = await fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question: "第一问"}),
+        });
+        await started;
+
+        const cancelled = await fetch(`${base}/api/chat/cancel`, {method: "POST"});
+        expect(cancelled.status).toBe(200);
+        expect(await cancelled.json()).toEqual({cancelled: true});
+        await first.text();
+
+        const second = await fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question: "第二问"}),
+        });
+        expect(second.status).toBe(200);
+        const events = await readSse(second);
+        expect(events.find((event) => event.event === "answer")?.data.text).toBe("第二问正常回答");
+    }, 10000);
 
     it("空问题返回 400", async () => {
         await start([textMsg("x")]);
@@ -474,5 +748,291 @@ describe("Web 服务端", () => {
             body: JSON.stringify({question: "看图", images: "data:image/png;base64,xx"}),
         });
         expect(resp.status).toBe(400);
+    });
+
+    /** 起服务：所有会话共享同一个脚本化 LLM（跨会话观察上下文串扰用） */
+    async function startWithSharedLlm(script: ChatMessage[], skills: Skill[] = [echoSkill]) {
+        const llm = fakeLlm(script);
+        server = createWebServer((confirm: ConfirmFn) =>
+            new Agent(skills, "测试", llm, async (call, skill) => confirm(call, skill)), {requireLogin: false});
+        await new Promise<void>((r) => server!.listen(0, "127.0.0.1", r));
+        base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+        return llm;
+    }
+
+    const askIn = (sessionId: string, question: string) =>
+        fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question, sessionId}),
+        }).then(readSse);
+
+    it("不同 sessionId 的会话上下文互不串扰", async () => {
+        const llm = await startWithSharedLlm([textMsg("好的小明"), textMsg("好的小红"), textMsg("你叫小明")]);
+        await askIn("s_aaa", "我叫小明");
+        await askIn("s_bbb", "我叫小红");
+        await askIn("s_aaa", "我叫什么？");
+        // 第三问（s_aaa）的上下文应含 s_aaa 的历史、绝不含 s_bbb 的
+        const thirdCall = JSON.stringify(llm.seen[2]);
+        expect(thirdCall).toContain("小明");
+        expect(thirdCall).not.toContain("小红");
+    });
+
+    it("destroy 会话后对应上下文清空", async () => {
+        const llm = await startWithSharedLlm([textMsg("记住了"), textMsg("你还没告诉过我名字")]);
+        await askIn("s_del", "我叫小明");
+        const destroy = await fetch(`${base}/api/session/destroy`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({sessionId: "s_del"}),
+        });
+        expect(destroy.status).toBe(200);
+        await askIn("s_del", "我叫什么？");
+        expect(JSON.stringify(llm.seen[1])).not.toContain("小明");
+    });
+
+    it("destroy all 清空全部会话上下文", async () => {
+        const llm = await startWithSharedLlm([textMsg("a1"), textMsg("b1"), textMsg("ok")]);
+        await askIn("s_x1", "橘子味暗号");
+        await askIn("s_x2", "香蕉味暗号");
+        await fetch(`${base}/api/session/destroy`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({all: true}),
+        });
+        await askIn("s_x1", "暗号是什么？");
+        const lastCall = JSON.stringify(llm.seen[2]);
+        expect(lastCall).not.toContain("橘子");
+        expect(lastCall).not.toContain("香蕉");
+    });
+
+    it("非法 sessionId 落到默认会话（不报错）", async () => {
+        const llm = await startWithSharedLlm([textMsg("一问"), textMsg("二问")]);
+        await askIn("../evil", "第一问");
+        await askIn("", "第二问");
+        // 两次都落 default：第二问能看见第一问的上下文
+        expect(JSON.stringify(llm.seen[1])).toContain("第一问");
+    });
+});
+
+describe("UI 访问口令（UI_TOKEN 鉴权）", () => {
+    let server: Server | undefined;
+    let base = "";
+    const savedToken = process.env.UI_TOKEN;
+
+    afterEach(async () => {
+        if (server) await new Promise((r) => server!.close(r));
+        server = undefined;
+        if (savedToken === undefined) delete process.env.UI_TOKEN;
+        else process.env.UI_TOKEN = savedToken;
+    });
+
+    async function startWithToken(): Promise<void> {
+        process.env.UI_TOKEN = "secret-pass";
+        server = createWebServer((confirm: ConfirmFn) =>
+            new Agent([echoSkill], "测试", fakeLlm([textMsg("x")]), async (call, skill) => confirm(call, skill)),
+            {requireLogin: false});
+        await new Promise<void>((r) => server!.listen(0, "127.0.0.1", r));
+        base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    }
+
+    it("启用口令：豁免清单放行，其余无 cookie 一律 403", async () => {
+        await startWithToken();
+        // 豁免：首页 / capabilities / 口令端点 / manifest / 图标
+        expect((await fetch(`${base}/`)).status).toBe(200);
+        expect((await fetch(`${base}/api/capabilities`)).status).toBe(200);
+        expect((await fetch(`${base}/manifest.webmanifest`)).status).toBe(200);
+        expect((await fetch(`${base}/icons/icon-192.png`)).status).toBe(200);
+        // 拦截：其他 API 无 cookie → 403
+        expect((await fetch(`${base}/api/auth/status`)).status).toBe(403);
+        expect((await fetch(`${base}/api/chat`, {method: "POST", body: "{}"})).status).toBe(403);
+    });
+
+    it("PWA 静态资源：manifest 与图标可访问且类型正确", async () => {
+        await startWithToken();
+        const manifest = await fetch(`${base}/manifest.webmanifest`);
+        expect(manifest.status).toBe(200);
+        expect(manifest.headers.get("content-type")).toContain("application/manifest+json");
+        const manifestJson = (await manifest.json()) as {name?: string; icons?: unknown[]};
+        expect(manifestJson.name).toContain("清灵");
+        expect(manifestJson.icons).toHaveLength(2);
+        const icon = await fetch(`${base}/icons/icon-512.png`);
+        expect(icon.status).toBe(200);
+        expect(icon.headers.get("content-type")).toBe("image/png");
+        // 未提供资源文件的路由 404（如测试注入临时 HTML 时）
+        expect((await fetch(`${base}/icons/icon-absent.png`)).status).toBe(404);
+    });
+
+    it("口令正确种 cookie，之后放行；错误口令 403", async () => {
+        await startWithToken();
+        const bad = await fetch(`${base}/api/ui/auth`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({token: "wrong"}),
+        });
+        expect(bad.status).toBe(403);
+
+        const good = await fetch(`${base}/api/ui/auth`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({token: "secret-pass"}),
+        });
+        expect(good.status).toBe(200);
+        const setCookie = good.headers.get("set-cookie") ?? "";
+        expect(setCookie).toContain("ui_token=secret-pass");
+        expect(setCookie).toContain("SameSite=Strict");
+
+        const cookie = setCookie.split(";")[0];
+        const authed = await fetch(`${base}/api/auth/status`, {headers: {Cookie: cookie}});
+        expect(authed.status).toBe(200);
+    });
+
+    it("未配置口令：一切照旧（不启用鉴权）", async () => {
+        delete process.env.UI_TOKEN;
+        server = createWebServer((confirm: ConfirmFn) =>
+            new Agent([echoSkill], "测试", fakeLlm([textMsg("x")]), async (call, skill) => confirm(call, skill)),
+            {requireLogin: false});
+        await new Promise<void>((r) => server!.listen(0, "127.0.0.1", r));
+        base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+        expect((await fetch(`${base}/api/auth/status`)).status).toBe(200);
+        // 口令端点报告未启用
+        const auth = await fetch(`${base}/api/ui/auth`, {method: "POST", body: "{}"});
+        expect((await auth.json()).enabled).toBe(false);
+    });
+});
+
+describe("登录会话持久化（webServer 集成）", () => {
+    let server: Server | undefined;
+    let base = "";
+    let authFile = "";
+
+    afterEach(async () => {
+        if (server) await new Promise((r) => server!.close(r));
+        server = undefined;
+        if (authFile) {
+            const fs = await import("node:fs");
+            fs.rmSync(authFile, {force: true});
+            authFile = "";
+        }
+    });
+
+    it("有存档时启动即视为已登录；logout 清除存档并回到未登录", async () => {
+        // 伪造一份非空存档
+        authFile = join(tmpdir(), `thu-auth-integration-${randomUUID().slice(0, 8)}.json`);
+        writeFileSync(authFile, JSON.stringify({SFSESSION: "fake-session"}));
+
+        server = createWebServer((confirm: ConfirmFn) =>
+            new Agent([echoSkill], "测试", fakeLlm([textMsg("x")]), async (call, skill) => confirm(call, skill)),
+            {requireLogin: true, authSessionPath: authFile});
+        await new Promise<void>((r) => server!.listen(0, "127.0.0.1", r));
+        base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+        // 重启（新实例）后无需重新登录：requireLogin 模式下 chat 不再 401
+        const chat = await fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question: "你好"}),
+        });
+        expect(chat.status).toBe(200);
+        await chat.text();
+
+        // 登出：清标志 + 删存档
+        const logout = await fetch(`${base}/api/auth/logout`, {method: "POST"});
+        expect(logout.status).toBe(200);
+        expect(existsSync(authFile)).toBe(false);
+        const status = await fetch(`${base}/api/auth/status`);
+        expect((await status.json()).authenticated).toBe(false);
+    });
+
+    it("无存档时启动保持未登录（requireLogin 下 chat 401）", async () => {
+        server = createWebServer((confirm: ConfirmFn) =>
+            new Agent([echoSkill], "测试", fakeLlm([textMsg("x")]), async (call, skill) => confirm(call, skill)),
+            {requireLogin: true, authSessionPath: join(tmpdir(), `thu-auth-absent-${randomUUID().slice(0, 8)}.json`)});
+        await new Promise<void>((r) => server!.listen(0, "127.0.0.1", r));
+        base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+        const resp = await fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question: "你好"}),
+        });
+        expect(resp.status).toBe(401);
+    });
+});
+
+describe("会话持久化（Step 21c）", () => {
+    let server: Server | undefined;
+    let base = "";
+    let storeFile = "";
+
+    afterEach(async () => {
+        if (server) await new Promise((r) => server!.close(r));
+        server = undefined;
+        if (storeFile) {
+            await import("node:fs").then((fs) => fs.rmSync(storeFile, {force: true}));
+            storeFile = "";
+        }
+    });
+
+    /** 起一个带持久化的服务实例；path 缺省时新建临时文件，重启场景显式传同一路径 */
+    async function startPersisted(script: ChatMessage[], path?: string) {
+        storeFile = path ?? join(tmpdir(), `thu-sessions-test-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+        const llm = fakeLlm(script);
+        server = createWebServer((confirm: ConfirmFn) =>
+            new Agent([echoSkill], "测试系统提示", llm, async (call, skill) => confirm(call, skill)),
+            {requireLogin: false, sessionStorePath: storeFile});
+        await new Promise<void>((r) => server!.listen(0, "127.0.0.1", r));
+        base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+        return llm;
+    }
+
+    const askIn = (sessionId: string, question: string) =>
+        fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question, sessionId}),
+        }).then(readSse);
+
+    it("重启（新服务实例）后恢复会话上下文，system 换用新提示词", async () => {
+        const firstFile = join(tmpdir(), `thu-sessions-restart-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+        await startPersisted([textMsg("记住了")], firstFile);
+        await askIn("s_p", "我叫小明");
+        await new Promise((r) => server!.close(r));
+        server = undefined;
+
+        const llm2 = await startPersisted([textMsg("你是小明")], firstFile);
+        await askIn("s_p", "我叫什么？");
+        const restored = JSON.stringify(llm2.seen[0]);
+        expect(restored).toContain("我叫小明");
+        expect(restored).toContain("记住了");
+        // system 是新实例的提示词，不是恢复来的旧文本
+        expect(llm2.seen[0][0].role).toBe("system");
+        expect(llm2.seen[0][0].content).toBe("测试系统提示");
+    });
+
+    it("持久化内容剔除图片 base64，文字保留", async () => {
+        await startPersisted([textMsg("图看到了")]);
+        await fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+                question: "看图",
+                sessionId: "s_img",
+                images: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUg=="],
+            }),
+        }).then(readSse);
+        const raw = readFileSync(storeFile, "utf8");
+        expect(raw).not.toContain("iVBORw0KGgo");
+        expect(raw).toContain("看图");
+    });
+
+    it("destroy 会话同时清除持久化文件中的该会话", async () => {
+        await startPersisted([textMsg("a"), textMsg("b")]);
+        await askIn("s_kill", "橘子暗号");
+        await fetch(`${base}/api/session/destroy`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({sessionId: "s_kill"}),
+        });
+        expect(readFileSync(storeFile, "utf8")).not.toContain("橘子暗号");
     });
 });

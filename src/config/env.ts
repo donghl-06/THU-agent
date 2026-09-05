@@ -46,6 +46,28 @@ export const config = {
         get vision() {
             return process.env.LLM_VISION !== "0";
         },
+        /** 输入/输出单价（元/百万 token），可选；两个都配了才显示估算费用 */
+        get priceIn() {
+            const v = Number(process.env.LLM_PRICE_IN);
+            return Number.isFinite(v) && v > 0 ? v : undefined;
+        },
+        get priceOut() {
+            const v = Number(process.env.LLM_PRICE_OUT);
+            return Number.isFinite(v) && v > 0 ? v : undefined;
+        },
+    },
+    /** Web UI 访问口令（局域网开放时防同网他人使用）。未配置 = 不启用鉴权 */
+    ui: {
+        get token(): string {
+            return process.env.UI_TOKEN ?? "";
+        },
+    },
+    /** 校历：学期第一教学周的周一日期（YYYY-MM-DD）。配置后 system prompt 注入教学周 */
+    calendar: {
+        get semesterStart(): string | undefined {
+            const v = process.env.SEMESTER_START;
+            return v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined;
+        },
     },
     /** 超级鹰打码平台（预约滑块验证码用，单次约 0.01 元）。不预约可不填 */
     chaojiying: {
