@@ -1,4 +1,5 @@
 import {cp, mkdir, rm, writeFile} from "node:fs/promises";
+import {existsSync} from "node:fs";
 import {execFileSync, spawn} from "node:child_process";
 import net from "node:net";
 import {dirname, join, resolve} from "node:path";
@@ -12,6 +13,8 @@ const launcherProject = join(root, "packaging", "WindowsLauncher", "WindowsLaunc
 const launcherPublish = join(root, "packaging", "WindowsLauncher", "bin", "Release", "net8.0-windows", "win-x64", "publish");
 const seaLauncher = join(root, "packaging", "sea-launcher.cjs");
 const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+const frameworkDirectory = join(process.env.SystemRoot ?? "C:\\Windows", "Microsoft.NET", "Framework64", "v4.0.30319");
+const frameworkCompiler = join(frameworkDirectory, "csc.exe");
 
 await rm(release, {recursive: true, force: true});
 await mkdir(runtime, {recursive: true});
@@ -51,6 +54,22 @@ if (dotnetSdk.trim()) {
         "-o", launcherPublish,
     ], {cwd: root, stdio: "inherit"});
     await cp(join(launcherPublish, "清灵.exe"), join(release, "清灵.exe"));
+    hasTrayLauncher = true;
+} else if (existsSync(frameworkCompiler)) {
+    // Windows 自带 .NET Framework 编译器。没有安装 .NET SDK 的打包机也能生成带托盘退出入口的启动器，
+    // 避免误落入 Node SEA 备用路线后只能去任务管理器结束 Node。
+    const references = ["System.dll", "System.Core.dll", "System.Drawing.dll", "System.Windows.Forms.dll", "System.Net.Http.dll"]
+        .map((name) => `/reference:${join(frameworkDirectory, name)}`);
+    execFileSync(frameworkCompiler, [
+        "/nologo",
+        "/target:winexe",
+        "/platform:anycpu",
+        "/codepage:65001",
+        "/optimize+",
+        `/out:${join(release, "清灵.exe")}`,
+        ...references,
+        join(root, "packaging", "WindowsLauncher", "Program.cs"),
+    ], {cwd: root, stdio: "inherit"});
     hasTrayLauncher = true;
 } else {
     const seaConfig = join(release, "sea-config.json");
