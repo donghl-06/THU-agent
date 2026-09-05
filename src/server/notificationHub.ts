@@ -11,11 +11,13 @@ export class NotificationHub {
     private items: TaskNotification[] = [];
     private seq = 0;
     private readonly waiters = new Set<(version: number) => void>();
+    private readonly persistenceHooks = new Set<(notification: TaskNotification) => void>();
 
-    push(taskId: string, title: string, message: string): void {
+    push(taskId: string, title: string, message: string, sessionId?: string): void {
         const notification = {
             id: `n_${++this.seq}`,
             taskId,
+            ...(sessionId ? {sessionId} : {}),
             title,
             message,
             at: Date.now(),
@@ -24,7 +26,13 @@ export class NotificationHub {
         if (this.items.length > MAX_KEEP) {
             this.items.splice(0, this.items.length - MAX_KEEP);
         }
+        for (const persist of this.persistenceHooks) persist(notification);
         for (const wake of this.waiters) wake(this.seq);
+    }
+
+    /** 服务端把提醒回写到目标会话；前端轮询仍然负责即时展示。 */
+    onPersist(hook: (notification: TaskNotification) => void): void {
+        this.persistenceHooks.add(hook);
     }
 
     /** 取走全部未读通知（消费即清空） */

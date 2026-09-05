@@ -54,4 +54,12 @@ describe("Web UI 请求状态", () => {
         expect(html).toContain('register("/service-worker.js")');
         expect(html).toContain('fetch("/api/capabilities", {cache: "no-store"})');
     });
+
+    it("任务通知会回写到对应会话的聊天消息", () => {
+        expect(html).toContain("function appendNotificationToSession");
+        expect(html).toContain("appendNotificationToSession(n)");
+        expect(html).toContain('addMsg("bot", text)');
+        expect(html).toContain('session.messages.push({role: "bot", text})');
+        expect(html).toContain("void pollNotifications();");
+    });
 });

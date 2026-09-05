@@ -61,7 +61,7 @@ const deviceFingerprint = resolveStableFingerprint();
 // 定时抢场执行器：确定性代码路径直接调 book_sports_field 的 execute（不再经过 LLM）
 const scheduler = new TaskScheduler(
     {
-        notify: (task, message) => notificationHub.push(task.id, task.title, message),
+        notify: (task, message) => notificationHub.push(task.id, task.title, message, task.sessionId),
         executeBooking: async (task) => {
             const bookSkill = createBookSportsFieldSkill(
                 new SportsClient(sportsCredentials),

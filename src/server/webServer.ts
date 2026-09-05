@@ -343,6 +343,15 @@ export function createWebServer(
         return created;
     };
 
+    // 任务提醒不只做系统通知：同时作为一条助手消息回写到创建任务的会话，
+    // 浏览器当时未打开也不会丢，后续继续对话时模型也能看到这条任务结果。
+    hub?.onPersist((notification) => {
+        if (!notification.sessionId) return;
+        const agent = getOrCreateAgent(notification.sessionId);
+        agent.appendAssistantMessage(`⏰ ${notification.title}：${notification.message}`);
+        store?.set(notification.sessionId, agent.snapshotMessages());
+    });
+
     const closePendingAuth = (): void => {
         const pending = pendingAuth;
         if (!pending) return;

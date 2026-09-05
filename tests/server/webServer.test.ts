@@ -482,14 +482,15 @@ describe("Web 服务端", () => {
 
     it("通知与任务端点：push 后可取走，drain 即消费", async () => {
         const hub = new NotificationHub();
+        const sessionFile = join(tmpdir(), `thu-notification-session-${randomUUID().slice(0, 8)}.json`);
         const scheduler = new TaskScheduler({
-            notify: (task, message) => hub.push(task.id, task.title, message),
+            notify: (task, message) => hub.push(task.id, task.title, message, task.sessionId),
             executeBooking: async () => "ok",
             checkMonitor: async () => ({triggered: false, message: ""}),
         });
         server = createWebServer((confirm: ConfirmFn) =>
             new Agent([echoSkill], "测试", fakeLlm([textMsg("x")]), async (call, skill) => confirm(call, skill)),
-            {requireLogin: false, notificationHub: hub, scheduler});
+            {requireLogin: false, notificationHub: hub, scheduler, sessionStorePath: sessionFile});
         await new Promise<void>((r) => server!.listen(0, "127.0.0.1", r));
         base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
@@ -501,9 +502,14 @@ describe("Web 服务端", () => {
         scheduler.add({kind: "reminder", title: "电费要充了", sessionId: "s1", nextRunAt: Date.now() - 10});
         await scheduler.tick();
 
+        // 提醒同步回写目标会话，浏览器没开着也不会只停留在一次性通知里
+        const persisted = JSON.parse(readFileSync(sessionFile, "utf8")) as Record<string, {role: string; content: string}[]>;
+        expect(persisted.s1?.at(-1)).toMatchObject({role: "assistant", content: "⏰ 电费要充了：电费要充了"});
+
         resp = await fetch(`${base}/api/notifications`);
-        const drained = (await resp.json()) as {notifications: {title: string; message: string}[]};
+        const drained = (await resp.json()) as {notifications: {sessionId?: string; title: string; message: string}[]};
         expect(drained.notifications).toHaveLength(1);
+        expect(drained.notifications[0].sessionId).toBe("s1");
         expect(drained.notifications[0].message).toBe("电费要充了");
 
         // drain 即消费：再取为空

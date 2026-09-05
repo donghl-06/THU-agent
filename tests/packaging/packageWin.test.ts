@@ -39,6 +39,23 @@ describe("Windows launcher packaging", () => {
         expect(launcherSource).toContain("/api/launcher/shutdown");
     });
 
+    it("opens QingLing with a single left click and keeps right-click menu minimal", () => {
+        expect(launcherSource).toContain("tray.MouseClick");
+        expect(launcherSource).toContain("MouseButtons.Left");
+        expect(launcherSource).not.toContain("menu.Items.Add(\"打开清灵\"");
+        expect(launcherSource).not.toContain("tray.DoubleClick");
+    });
+
+    it("focuses an existing QingLing browser window before opening another tab", () => {
+        expect(launcherSource).toContain("ActivateExistingQingLingWindow()");
+        expect(launcherSource).toContain("const string pageTitle = \"清灵 QingLing - 清华校园智能助手\"");
+        expect(launcherSource).toContain("title.StartsWith(pageTitle, StringComparison.Ordinal)");
+        expect(launcherSource).toContain("EnumWindows");
+        expect(launcherSource).toContain("SetForegroundWindow");
+        expect(launcherSource).toContain("SW_RESTORE");
+        expect(launcherSource).toContain("OpenBrowser(port.Value, false)");
+    });
+
     it("styles the tray menu with QingLing dark theme colors", () => {
         expect(launcherSource).toContain("QingLingMenuRenderer");
         expect(launcherSource).toContain("QingLingColorTable");
