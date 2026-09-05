@@ -6,7 +6,7 @@
  * 末尾同款冒烟验证：用打出来的产物起服务探活 /api/capabilities。
  *
  * 运行：pnpm package:mac
- * 产物：release/清华小助手-macOS/（压缩整个文件夹分发）
+ * 产物：release/清灵-macOS/（压缩整个文件夹分发）
  */
 import {chmod, cp, mkdir, rm, writeFile} from "node:fs/promises";
 import {execFileSync, spawn} from "node:child_process";
@@ -15,7 +15,7 @@ import {dirname, join, resolve} from "node:path";
 import {fileURLToPath} from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const release = join(root, "release", "清华小助手-macOS");
+const release = join(root, "release", "清灵-macOS");
 const app = join(release, "app");
 const runtime = join(release, "runtime");
 const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
@@ -40,9 +40,9 @@ await cp(process.execPath, join(runtime, "node"));
 await chmod(join(runtime, "node"), 0o755);
 
 // 启动器：macOS 双击 .command 即在终端运行；关闭终端窗口或 Ctrl+C 即退出
-const launcher = join(release, "清华小助手.command");
+const launcher = join(release, "清灵.command");
 await writeFile(launcher, `#!/bin/bash
-# 清华小助手（macOS 便携版）启动器
+# 清灵（macOS 便携版）启动器
 cd "$(dirname "$0")"
 export OPENSSL_CONF="$(pwd)/openssl.cnf"
 if [ ! -f .env ]; then
@@ -69,12 +69,12 @@ done
 wait $NODE_PID
 `, {mode: 0o755});
 
-await writeFile(join(release, "README.txt"), `清华小助手（macOS 便携版）
+await writeFile(join(release, "README.txt"), `清灵（macOS 便携版）
 
 1. 将本文件夹中的 .env.example 复制为 .env。
    （以点开头的文件在访达中默认隐藏，按 Cmd+Shift+. 即可显示。）
 2. 打开 .env，至少填写 LLM_API_KEY；按需填写 LLM_BASE_URL、LLM_MODEL。
-3. 双击"清华小助手.command"（首次若被 Gatekeeper 拦截：右键该文件 → 打开 → 确认；
+3. 双击"清灵.command"（首次若被 Gatekeeper 拦截：右键该文件 → 打开 → 确认；
    或在"系统设置 → 隐私与安全性"里允许）。程序会自动启动服务并打开浏览器。
 4. 在网页右上角点击"登录"，输入清华 Info 学号、密码和二次验证码。
 5. 退出：关闭终端窗口，或在终端里按 Ctrl+C。

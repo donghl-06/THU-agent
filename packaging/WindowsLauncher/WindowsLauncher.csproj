@@ -5,7 +5,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AssemblyName>清华小助手</AssemblyName>
+    <AssemblyName>清灵</AssemblyName>
     <RootNamespace>ThuAssistantLauncher</RootNamespace>
   </PropertyGroup>
 </Project>

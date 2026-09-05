@@ -44,7 +44,7 @@ async function waitForServer(child, port) {
 
 async function main() {
     if (!existsSync(nodePath) || !existsSync(scriptPath) || !existsSync(opensslPath)) {
-        throw new Error("程序文件不完整，请重新解压完整的清华小助手发布包。");
+        throw new Error("程序文件不完整，请重新解压完整的清灵发布包。");
     }
     const port = await findAvailablePort(3457, 20);
     const child = spawn(nodePath, [scriptPath], {

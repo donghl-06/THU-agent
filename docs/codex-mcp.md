@@ -1,17 +1,17 @@
-# 在 Codex 中使用清华小助手
+# 在 Codex 中使用清灵
 
-本项目同时发布两个独立的 Windows 包：`清华小助手-EXE` 用于网页聊天，`清华小助手-MCP` 用于让已有的 Codex/Claude Desktop 等 Agent 调用校园能力。用户只下载自己需要的包；MCP 包不包含网页聊天 EXE，EXE 包也不包含 MCP 连接入口。
+本项目同时发布两个独立的 Windows 包：`清灵-EXE` 用于网页聊天，`清灵-MCP` 用于让已有的 Codex/Claude Desktop 等 Agent 调用校园能力。用户只下载自己需要的包；MCP 包不包含网页聊天 EXE，EXE 包也不包含 MCP 连接入口。
 
 ## 能力边界
 
 - 默认向 Codex 暴露只读能力：课表、校园卡、教室、图书馆、体育场馆、成绩单、宿舍电费和我的图书馆预约。
 - MCP 专用工具 `thu_login` 可使用仓库 `.env` 中的凭证登录；`get_user_info` 可检查登录是否成功。
 - 预约、取消、充值等写操作默认不会列出。即使设置 `THU_MCP_INCLUDE_WRITE_TOOLS=1` 让它们显示，也会因为没有安全的用户确认通道而拒绝执行。
-- 需要二次认证时，先使用清华小助手 Web/EXE 界面完成登录，再重启或继续使用 MCP Server。密码、验证码、Cookie 不会返回给 Codex。
+- 需要二次认证时，先运行 MCP 包中的“登录清华账号.cmd”完成登录，再重启或继续使用 MCP Server。密码、验证码、Cookie 不会返回给 Codex。
 
 ## MCP 包用户配置
 
-1. 下载并解压 `清华小助手-MCP`，保持整个文件夹结构。
+1. 下载并解压 `清灵-MCP`，保持整个文件夹结构。
 2. 将 `.env.example` 复制为同目录的 `.env`。
 3. 在 `.env` 中填写 `THU_USERNAME`、`THU_PASSWORD`、`THU_FINGERPRINT`。MCP 包不需要填写 `LLM_API_KEY`。
 4. 用户电脑不需要安装 Node.js、pnpm 或 Git；包内的 `runtime/node.exe` 会被 Codex 直接调用。
@@ -22,8 +22,8 @@
 
 ```toml
 [mcp_servers.thu_assistant]
-command = "D:/Apps/清华小助手-MCP/runtime/node.exe"
-args = ["D:/Apps/清华小助手-MCP/mcp-server.cjs"]
+command = "D:/Apps/清灵-MCP/runtime/node.exe"
+args = ["D:/Apps/清灵-MCP/mcp-server.cjs"]
 startup_timeout_sec = 30
 tool_timeout_sec = 120
 ```

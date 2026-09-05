@@ -12,4 +12,4 @@ const run = (script) => execFileSync(pnpmCommand, ["run", script], {
 
 run("package:win:exe");
 run("package:win:mcp");
-console.log("两个 Windows 发布包均已生成：release/清华小助手-EXE 和 release/清华小助手-MCP");
+console.log("两个 Windows 发布包均已生成：release/清灵-EXE 和 release/清灵-MCP");

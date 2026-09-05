@@ -50,7 +50,7 @@ jobs:
           curl -fsSL "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-darwin-x64.tar.gz" -o /tmp/node-x64.tgz
           mkdir -p /tmp/node-x64
           tar -xzf /tmp/node-x64.tgz -C /tmp/node-x64 --strip-components=1
-          cp /tmp/node-x64/bin/node "release/清华小助手-macOS/runtime/node"
+          cp /tmp/node-x64/bin/node "release/清灵-macOS/runtime/node"
       - uses: actions/upload-artifact@v4
         with:
           include-hidden-files: true # .env.example 是点开头文件，默认会被排除
