@@ -10,18 +10,21 @@ const MAX_KEEP = 50;
 export class NotificationHub {
     private items: TaskNotification[] = [];
     private seq = 0;
+    private readonly waiters = new Set<(version: number) => void>();
 
     push(taskId: string, title: string, message: string): void {
-        this.items.push({
+        const notification = {
             id: `n_${++this.seq}`,
             taskId,
             title,
             message,
             at: Date.now(),
-        });
+        };
+        this.items.push(notification);
         if (this.items.length > MAX_KEEP) {
             this.items.splice(0, this.items.length - MAX_KEEP);
         }
+        for (const wake of this.waiters) wake(this.seq);
     }
 
     /** 取走全部未读通知（消费即清空） */
@@ -29,5 +32,31 @@ export class NotificationHub {
         const out = this.items;
         this.items = [];
         return out;
+    }
+
+    /** 当前通知版本。桌面启动器用它做 long polling，不消费前端通知队列。 */
+    version(): number {
+        return this.seq;
+    }
+
+    /**
+     * 等待 version 变化。桌面启动器只需要“有提醒到了”这个信号，
+     * 具体提醒内容仍由浏览器通过 /api/notifications 取走。
+     */
+    waitForVersion(after: number, timeoutMs: number): Promise<number> {
+        if (this.seq > after) return Promise.resolve(this.seq);
+        return new Promise((resolve) => {
+            let done = false;
+            const finish = (version: number) => {
+                if (done) return;
+                done = true;
+                clearTimeout(timer);
+                this.waiters.delete(wake);
+                resolve(version);
+            };
+            const wake = finish;
+            const timer = setTimeout(() => finish(this.seq), Math.max(0, timeoutMs));
+            this.waiters.add(wake);
+        });
     }
 }

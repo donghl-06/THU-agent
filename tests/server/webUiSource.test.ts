@@ -45,4 +45,13 @@ describe("Web UI 请求状态", () => {
         expect(sessionTitle).toContain("min-width: 0");
         expect(sessionTitle).toContain("text-overflow: ellipsis");
     });
+
+    it("浏览器标签页跟随桌面生命周期并安装离线守卫", () => {
+        expect(html).toContain('new EventSource("/api/events")');
+        expect(html).toContain('addEventListener("shutdown"');
+        expect(html).toContain("window.close()");
+        expect(html).toContain("清灵后台未运行");
+        expect(html).toContain('register("/service-worker.js")');
+        expect(html).toContain('fetch("/api/capabilities", {cache: "no-store"})');
+    });
 });

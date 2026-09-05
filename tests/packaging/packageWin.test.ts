@@ -31,6 +31,14 @@ describe("Windows launcher packaging", () => {
         expect(launcherSource).toContain("ClearInstanceState()");
     });
 
+    it("keeps the desktop alive for notifications and broadcasts tray exit", () => {
+        expect(launcherSource).toContain("StartLauncherEventLoop");
+        expect(launcherSource).toContain("/api/launcher/events");
+        expect(launcherSource).toContain("OpenBrowser(port)");
+        expect(launcherSource).toContain("NotifyShutdown(port.Value)");
+        expect(launcherSource).toContain("/api/launcher/shutdown");
+    });
+
     it("styles the tray menu with QingLing dark theme colors", () => {
         expect(launcherSource).toContain("QingLingMenuRenderer");
         expect(launcherSource).toContain("QingLingColorTable");

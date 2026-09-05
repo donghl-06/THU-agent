@@ -99,12 +99,15 @@ internal static class Program
                     "清灵",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
+                StopServer(child);
                 return;
             }
 
+            StartLauncherEventLoop(child, port.Value);
             OpenBrowser(port.Value);
             Application.Run();
             tray.Visible = false;
+            NotifyShutdown(port.Value);
             StopServer(child);
         }
     }
@@ -159,7 +162,6 @@ internal static class Program
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("退出", null, (sender, e) =>
         {
-            StopServer(child);
             Application.Exit();
         });
         foreach (ToolStripItem item in menu.Items)
@@ -256,6 +258,67 @@ internal static class Program
             }
             return false;
         }
+    }
+
+    private static void StartLauncherEventLoop(Process child, int port)
+    {
+        Task.Factory.StartNew(() => PollLauncherEvents(child, port));
+    }
+
+    private static void PollLauncherEvents(Process child, int port)
+    {
+        var since = 0;
+        while (!child.HasExited)
+        {
+            try
+            {
+                using (var client = new HttpClient {Timeout = TimeSpan.FromSeconds(38)})
+                using (var response = client.GetAsync(
+                    "http://127.0.0.1:" + port +
+                    "/api/launcher/events?since=" + since + "&timeout=30000").GetAwaiter().GetResult())
+                {
+                    if (response.StatusCode == HttpStatusCode.ServiceUnavailable)
+                    {
+                        Thread.Sleep(5000);
+                        continue;
+                    }
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        Thread.Sleep(1000);
+                        continue;
+                    }
+
+                    var body = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                    var match = Regex.Match(body, "\"version\"\\s*:\\s*(\\d+)");
+                    int version;
+                    if (!match.Success || !int.TryParse(match.Groups[1].Value, out version)) continue;
+                    if (version > since)
+                    {
+                        since = version;
+                        // 提醒/抢场结果到了：后台服务仍在，但主动把界面带回用户眼前。
+                        OpenBrowser(port);
+                    }
+                }
+            }
+            catch (HttpRequestException) { Thread.Sleep(1000); }
+            catch (TaskCanceledException) { /* long poll 超时后继续下一轮 */ }
+        }
+    }
+
+    private static void NotifyShutdown(int port)
+    {
+        try
+        {
+            using (var client = new HttpClient {Timeout = TimeSpan.FromSeconds(2)})
+            using (var content = new StringContent(""))
+            {
+                client.PostAsync(
+                    "http://127.0.0.1:" + port + "/api/launcher/shutdown",
+                    content).GetAwaiter().GetResult().Dispose();
+            }
+        }
+        catch (HttpRequestException) { /* 服务已退出时页面本来会进入离线终态 */ }
+        catch (TaskCanceledException) { /* 页面可能已经关闭 */ }
     }
 
     private static int? FindAvailablePort(int start, int count)

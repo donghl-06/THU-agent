@@ -403,6 +403,13 @@
   #ui-token-input:focus { border-color: var(--primary); }
   #ui-token-ok { padding: 10px; border: none; border-radius: 9px; background: var(--primary); color: #fff; font-size: 14px; cursor: pointer; }
   .ui-auth-err { font-size: 12px; color: var(--err); min-height: 16px; }
+  /* 生命周期终态：托盘退出/后台不在时避免用户继续输入然后撞上连接错误 */
+  #lifecycle-mask { position: fixed; inset: 0; z-index: 70; background: var(--bg); display: grid; place-items: center; }
+  #lifecycle-mask[hidden] { display: none; }
+  .lifecycle-card { width: min(360px, 88vw); background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 26px 24px; text-align: center; }
+  .lifecycle-icon { font-size: 34px; line-height: 1; }
+  .lifecycle-title { margin-top: 12px; font-size: 17px; font-weight: 650; color: var(--text); }
+  .lifecycle-text { margin-top: 9px; font-size: 13px; line-height: 1.65; color: var(--text-2); }
   /* Composer：卡片式输入区（文档十二） */
   #composer-wrap { padding: 12px max(24px, calc((100% - 1040px) / 2)) 20px; }
   .quick-chips { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 2px 8px; }
@@ -707,6 +714,13 @@ if(__exports != exports)module.exports = exports;return module.exports}));
     <input id="ui-token-input" type="password" placeholder="访问口令（.env 里的 UI_TOKEN）" autocomplete="off">
     <button id="ui-token-ok" type="button">进入</button>
     <div id="ui-auth-err" class="ui-auth-err"></div>
+  </div>
+</div>
+<div id="lifecycle-mask" hidden>
+  <div class="lifecycle-card">
+    <div class="lifecycle-icon" id="lifecycle-icon">⏹️</div>
+    <div class="lifecycle-title" id="lifecycle-title">清灵已退出</div>
+    <div class="lifecycle-text" id="lifecycle-text">后台服务已停止。请重新双击“清灵.exe”后再使用。</div>
   </div>
 </div>
 <button id="scroll-btn" type="button" title="回到底部" hidden>↓</button>
@@ -2118,6 +2132,59 @@ uiTokenInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") submitUiToken();
 });
 checkUiAuth();
+
+/* ---- 清灵生命周期：EXE/托盘是 owner，浏览器标签页只是界面 ---- */
+const lifecycleMask = document.getElementById("lifecycle-mask");
+const lifecycleIcon = document.getElementById("lifecycle-icon");
+const lifecycleTitle = document.getElementById("lifecycle-title");
+const lifecycleText = document.getElementById("lifecycle-text");
+let lifecycleStopped = false;
+let backendMisses = 0;
+
+function showLifecycleState(icon, title, text) {
+  lifecycleIcon.textContent = icon;
+  lifecycleTitle.textContent = title;
+  lifecycleText.textContent = text;
+  lifecycleMask.hidden = false;
+}
+
+function enterShutdownState() {
+  if (lifecycleStopped) return;
+  lifecycleStopped = true;
+  try { lifecycleEvents.close(); } catch { /* 连接本来已断开 */ }
+  showLifecycleState("⏹️", "清灵已退出", "你已在任务栏托盘中退出清灵，后台服务已停止。请重新双击“清灵.exe”后再使用。");
+  // 对由外部打开、无历史栈的标签页，多数浏览器允许关闭；被拦截时保留终态提示。
+  window.setTimeout(() => window.close(), 250);
+}
+
+async function checkBackendAvailability() {
+  try {
+    const resp = await fetch("/api/capabilities", {cache: "no-store"});
+    if (!resp.ok) throw new Error(String(resp.status));
+    backendMisses = 0;
+    if (!lifecycleStopped) lifecycleMask.hidden = true;
+  } catch {
+    backendMisses += 1;
+    if (!lifecycleStopped && backendMisses >= 2) {
+      showLifecycleState("🔌", "清灵后台未运行", "这个页面来自浏览器历史记录，但清灵本地服务没有启动。请重新双击“清灵.exe”后再使用。");
+    }
+  }
+}
+
+const lifecycleEvents = new EventSource("/api/events");
+lifecycleEvents.addEventListener("shutdown", enterShutdownState);
+lifecycleEvents.onerror = () => {
+  if (!lifecycleStopped) void checkBackendAvailability();
+};
+void checkBackendAvailability();
+setInterval(() => {
+  if (!lifecycleStopped) void checkBackendAvailability();
+}, 3000);
+
+// 缓存一个“壳”：合法 EXE 启动时安装；服务退出后从历史记录打开也能得到明确错误。
+if ("serviceWorker" in navigator && window.isSecureContext) {
+  navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+}
 
 fetch("/api/auth/status").then((resp) => resp.json()).then((data) => {
   authenticated = data.authenticated === true;

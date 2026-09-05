@@ -224,6 +224,7 @@ export function createWebServer(
     const manifest = readOptional(join(publicDir, "manifest.webmanifest"));
     const icon192 = readOptional(join(publicDir, "icons", "icon-192.png"));
     const icon512 = readOptional(join(publicDir, "icons", "icon-512.png"));
+    const serviceWorker = readOptional(join(publicDir, "service-worker.js"));
     const store = opts.sessionStorePath ? new SessionStore(opts.sessionStorePath) : undefined;
     const scheduler = opts.scheduler;
     const hub = opts.notificationHub;
@@ -232,6 +233,8 @@ export function createWebServer(
     let titleLlmClient: LlmClient | undefined;
     /** 已生成过概括式标题的会话（每会话只烧一次轻量调用） */
     const titledSessions = new Set<string>();
+    /** 浏览器生命周期事件连接。托盘退出前向它们广播 shutdown。 */
+    const lifecycleClients = new Set<ServerResponse>();
 
     // ===== Web UI 访问口令（.env 配 UI_TOKEN 才启用；局域网开放时防同网他人使用）=====
     // 豁免清单：首页（要加载页面才能输口令）、capabilities（启动器/打包冒烟的探活端点，
@@ -249,6 +252,14 @@ export function createWebServer(
     const uiAuthorized = (req: IncomingMessage): boolean => {
         if (!uiAuthEnabled()) return true;
         return cookieOf(req, "ui_token") === config.ui.token;
+    };
+    const isLoopback = (req: IncomingMessage): boolean => {
+        const address = req.socket.remoteAddress ?? "";
+        return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+    };
+    const sendLifecycleEvent = (res: ServerResponse, event: string, data: unknown): void => {
+        res.write(`event: ${event}\n`);
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
     };
     const handleUiAuth = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
         if (!uiAuthEnabled()) {
@@ -664,6 +675,53 @@ export function createWebServer(
         res.end(JSON.stringify({notifications: hub ? hub.drain() : []}));
     };
 
+    /** 浏览器生命周期 SSE。只在本地服务退出前推送终态，不复用聊天 SSE。 */
+    const handleLifecycleEvents = (req: IncomingMessage, res: ServerResponse): void => {
+        res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache, no-transform",
+            Connection: "keep-alive",
+            "X-Accel-Buffering": "no",
+        });
+        lifecycleClients.add(res);
+        res.write("retry: 2000\n\n");
+        sendLifecycleEvent(res, "ready", {version: hub?.version() ?? 0});
+        req.once("close", () => lifecycleClients.delete(res));
+    };
+
+    /** 桌面启动器 long polling：只返回通知版本，不泄露提醒内容。 */
+    const handleLauncherEvents = async (req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> => {
+        if (!hub) {
+            res.writeHead(503, {"Content-Type": "application/json"}).end("{}");
+            return;
+        }
+        const rawSince = Number(url.searchParams.get("since") ?? "0");
+        const rawTimeout = Number(url.searchParams.get("timeout") ?? "30000");
+        const since = Number.isFinite(rawSince) ? Math.max(0, Math.floor(rawSince)) : 0;
+        const timeout = Number.isFinite(rawTimeout)
+            ? Math.min(35_000, Math.max(0, Math.floor(rawTimeout)))
+            : 30_000;
+        const version = await hub.waitForVersion(since, timeout);
+        if (req.destroyed) return;
+        res.writeHead(200, {"Content-Type": "application/json"});
+        res.end(JSON.stringify({version}));
+    };
+
+    /** 托盘退出入口：先让页面进入终态/尝试关闭，再由启动器停止 Node。 */
+    const handleLauncherShutdown = (req: IncomingMessage, res: ServerResponse): void => {
+        if (!isLoopback(req)) {
+            res.writeHead(403, {"Content-Type": "application/json"}).end("{}");
+            return;
+        }
+        for (const client of lifecycleClients) {
+            try {
+                sendLifecycleEvent(client, "shutdown", {reason: "tray_exit"});
+            } catch { /* 连接已断开 */ }
+        }
+        res.writeHead(200, {"Content-Type": "application/json"});
+        res.end(JSON.stringify({ok: true}));
+    };
+
     /** 定时任务列表（给前端展示/调试；对话内 list_my_tasks 也可查） */
     const handleTaskList = (res: ServerResponse): void => {
         if (requireLogin && !authenticated) {
@@ -820,10 +878,24 @@ export function createWebServer(
                 res.end(indexHtml);
                 return;
             }
+            if (req.method === "GET" && url.pathname === "/service-worker.js" && serviceWorker) {
+                res.writeHead(200, {
+                    "Content-Type": "text/javascript; charset=utf-8",
+                    "Cache-Control": "no-cache",
+                });
+                res.end(serviceWorker);
+                return;
+            }
             if (req.method === "GET" && url.pathname === "/api/capabilities") {
                 res.writeHead(200, {"Content-Type": "application/json"});
                 res.end(JSON.stringify({vision: config.llm.vision}));
                 return;
+            }
+            if (req.method === "GET" && url.pathname === "/api/launcher/events") {
+                return handleLauncherEvents(req, res, url);
+            }
+            if (req.method === "POST" && url.pathname === "/api/launcher/shutdown") {
+                return handleLauncherShutdown(req, res);
             }
             if (req.method === "GET" && url.pathname === "/manifest.webmanifest" && manifest) {
                 res.writeHead(200, {"Content-Type": "application/manifest+json"});
@@ -840,6 +912,8 @@ export function createWebServer(
                 res.end(icon512);
                 return;
             }
+            // 生命周期事件不携带业务数据；未通过 UI 口令的页面也应能在托盘退出时收到关闭信号。
+            if (req.method === "GET" && url.pathname === "/api/events") return handleLifecycleEvents(req, res);
             // UI 口令守卫：豁免清单之外的一切请求，未携带正确口令 cookie 时 403
             // （前端以 403 区别于清华未登录的 401，据此弹出"输入访问口令"遮罩）
             const uiAuthExempt =
