@@ -19,6 +19,7 @@ import "../../utils/httpProxy"; // 全局 fetch 走 https_proxy（若设置）
 import {config} from "../../config/env";
 import {ThuError} from "../errors";
 import type {LoginCredentials} from "../auth";
+import {resolveStableFingerprint} from "../fingerprintStore";
 
 const SPORTS_BASE = "https://www.sports.tsinghua.edu.cn";
 const SSO_ENTRY =
@@ -276,7 +277,7 @@ export class SportsClient {
         const loginResp = await uFetch(ID_LOGIN_CHECK, {
             i_user: this.credentials?.username ?? config.thu.username,
             i_pass: SM2_MAGIC_NUMBER + sm2.doEncrypt(this.credentials?.password ?? config.thu.password, sm2PublicKey),
-            fingerPrint: this.credentials?.fingerprint ?? config.thu.fingerprint,
+            fingerPrint: resolveStableFingerprint(this.credentials?.fingerprint),
             fingerGenPrint: "",
             i_captcha: "",
         });

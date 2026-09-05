@@ -47,7 +47,6 @@
  * 把转发目标切到本轮 SSE 连接的桥上（busy 互斥保证同时只有一轮）。
  */
 import {createServer, type IncomingMessage, type ServerResponse, type Server} from "node:http";
-import {randomUUID} from "node:crypto";
 import {readFileSync} from "node:fs";
 import {dirname, join} from "node:path";
 import type {Agent} from "../harness/agentLoop";
@@ -422,7 +421,8 @@ export function createWebServer(
             credentials = {
                 username,
                 password,
-                fingerprint: process.env.THU_FINGERPRINT || randomUUID().replace(/-/g, ""),
+                // 留空时 ThuClient/SportsClient 会读取本机持久化设备指纹。
+                fingerprint: undefined,
             };
         } catch {
             res.writeHead(400).end("username and password required");

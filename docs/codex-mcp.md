@@ -13,7 +13,7 @@
 
 1. 下载并解压 `清灵-MCP`，保持整个文件夹结构。
 2. 将 `.env.example` 复制为同目录的 `.env`。
-3. 在 `.env` 中填写 `THU_USERNAME`、`THU_PASSWORD`、`THU_FINGERPRINT`。MCP 包不需要填写 `LLM_API_KEY`。
+3. 在 `.env` 中填写 `THU_USERNAME`、`THU_PASSWORD`。`THU_FINGERPRINT` 可留空，清灵会自动保存在本机；MCP 包不需要填写 `LLM_API_KEY`。
 4. 用户电脑不需要安装 Node.js、pnpm 或 Git；包内的 `runtime/node.exe` 会被 Codex 直接调用。
 
 ## 在已有 Agent 中配置

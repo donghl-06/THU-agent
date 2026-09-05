@@ -11,7 +11,7 @@ import {config} from "../src/config/env";
 const helper = new InfoHelper();
 helper.fingerprint = config.thu.fingerprint;
 helper.trustFingerprintHook = async () => true;
-helper.trustFingerprintNameHook = async () => "thu-assistant-dev";
+helper.trustFingerprintNameHook = async () => "QingLing Desktop";
 
 await helper.login({userId: config.thu.username, password: config.thu.password});
 console.log("登录成功。");

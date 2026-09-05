@@ -23,6 +23,14 @@ describe("Windows launcher packaging", () => {
         expect(launcherSource).toContain("StopServer(child)");
     });
 
+    it("prevents a second launcher from creating another tray instance", () => {
+        expect(launcherSource).toContain("Local\\QingLing.SingleInstance");
+        expect(launcherSource).toContain("ActivateExistingInstance()");
+        expect(launcherSource).toContain("WaitForExistingInstance");
+        expect(launcherSource).toContain("instance.json");
+        expect(launcherSource).toContain("ClearInstanceState()");
+    });
+
     it("styles the tray menu with QingLing dark theme colors", () => {
         expect(launcherSource).toContain("QingLingMenuRenderer");
         expect(launcherSource).toContain("QingLingColorTable");
