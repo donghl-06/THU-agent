@@ -1044,6 +1044,18 @@ describe("会话持久化（Step 21c）", () => {
         expect(llm2.seen[0][0].content).toBe("测试系统提示");
     });
 
+    it("logout 只断开校园服务，不清空持久化聊天上下文", async () => {
+        const llm = await startPersisted([textMsg("记住了"), textMsg("还在")]);
+        await askIn("s_logout", "我叫小明");
+
+        const logout = await fetch(`${base}/api/auth/logout`, {method: "POST"});
+        expect(logout.status).toBe(200);
+        expect(readFileSync(storeFile, "utf8")).toContain("我叫小明");
+
+        await askIn("s_logout", "我叫什么？");
+        expect(JSON.stringify(llm.seen[1])).toContain("我叫小明");
+    });
+
     it("持久化内容剔除图片 base64，文字保留", async () => {
         await startPersisted([textMsg("图看到了")]);
         await fetch(`${base}/api/chat`, {
