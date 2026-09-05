@@ -510,6 +510,32 @@ describe("Web 服务端", () => {
         resp = await fetch(`${base}/api/notifications`);
         expect(((await resp.json()) as {notifications: unknown[]}).notifications).toHaveLength(0);
 
+        // 桌面启动器只拿版本信号，不消费/泄露具体通知内容
+        const launcherEvent = await fetch(`${base}/api/launcher/events?since=0&timeout=0`);
+        expect(launcherEvent.status).toBe(200);
+        expect(((await launcherEvent.json()) as {version: number}).version).toBe(1);
+
+        // 托盘退出前可向已连接页面广播 shutdown
+        const lifecycle = await fetch(`${base}/api/events`);
+        expect(lifecycle.status).toBe(200);
+        const shutdown = await fetch(`${base}/api/launcher/shutdown`, {method: "POST"});
+        expect(shutdown.status).toBe(200);
+        const reader = lifecycle.body!.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let sawShutdown = false;
+        for (;;) {
+            const {done, value} = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, {stream: true});
+            if (buffer.includes("event: shutdown")) {
+                sawShutdown = true;
+                break;
+            }
+        }
+        await reader.cancel();
+        expect(sawShutdown).toBe(true);
+
         // 任务列表可见（含已完成的提醒）
         const tasksResp = await fetch(`${base}/api/tasks`);
         const tasks = (await tasksResp.json()) as {tasks: {id: string; done?: boolean}[]};
@@ -859,6 +885,9 @@ describe("UI 访问口令（UI_TOKEN 鉴权）", () => {
         const icon = await fetch(`${base}/icons/icon-512.png`);
         expect(icon.status).toBe(200);
         expect(icon.headers.get("content-type")).toBe("image/png");
+        const serviceWorker = await fetch(`${base}/service-worker.js`);
+        expect(serviceWorker.status).toBe(200);
+        expect(serviceWorker.headers.get("content-type")).toContain("text/javascript");
         // 未提供资源文件的路由 404（如测试注入临时 HTML 时）
         expect((await fetch(`${base}/icons/icon-absent.png`)).status).toBe(404);
     });
