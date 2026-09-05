@@ -5,7 +5,7 @@
  * Skill 和上层永远不需要接触这些细节。
  */
 import type {InfoHelper} from "@thu-info/lib";
-import {randomUUID} from "node:crypto";
+import {resolveStableFingerprint} from "./fingerprintStore";
 
 /**
  * 二次认证回调。账号触发 2FA 时库会调用它们向用户提问。
@@ -28,13 +28,13 @@ export interface LoginCredentials {
 export function setupAuth(
     helper: InfoHelper,
     hooks: TwoFactorHooks = {},
-    fingerprint = process.env.THU_FINGERPRINT || randomUUID().replace(/-/g, ""),
+    fingerprint?: string,
 ): void {
     // 固定设备指纹 + 信任此设备：首次信任后同指纹登录跳过 2FA。
-    // 会在账号「多因子认证」里登记名为 thu-assistant-dev 的信任设备。
-    helper.fingerprint = fingerprint;
+    // 会在账号「多因子认证」里登记名为 QingLing Desktop 的信任设备。
+    helper.fingerprint = resolveStableFingerprint(fingerprint);
     helper.trustFingerprintHook = async () => true;
-    helper.trustFingerprintNameHook = async () => "thu-assistant-dev";
+    helper.trustFingerprintNameHook = async () => "QingLing Desktop";
     helper.twoFactorAuthLimitHook = async () => {
         throw new Error(
             "信任设备数量已达上限，请到 https://id.tsinghua.edu.cn/ 的「多因子认证」页面删除旧设备。",

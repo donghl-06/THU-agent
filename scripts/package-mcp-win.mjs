@@ -31,7 +31,7 @@ await writeFile(join(release, "README.txt"), `清灵 MCP 连接包（Windows 便
 它不包含“清灵.exe”网页聊天界面，也不需要安装 Node.js、pnpm 或 Git。
 
 1. 将本文件夹中的 .env.example 复制为 .env。
-2. 打开 .env，填写 THU_USERNAME、THU_PASSWORD、THU_FINGERPRINT。
+2. 打开 .env，填写 THU_USERNAME、THU_PASSWORD；THU_FINGERPRINT 可留空，清灵会自动保存在本机。
 3. 在 Codex 的 MCP 配置中添加：
 
 [mcp_servers.thu_assistant]

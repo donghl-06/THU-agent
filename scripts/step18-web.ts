@@ -23,6 +23,7 @@ import {MyhomeClient} from "../src/client/myhome";
 import {TaskScheduler} from "../src/tasks/scheduler";
 import {TaskStore} from "../src/tasks/taskStore";
 import type {LoginCredentials} from "../src/client/auth";
+import {resolveStableFingerprint} from "../src/client/fingerprintStore";
 import {dirname, join} from "node:path";
 
 const scriptDirectory = dirname(process.argv[1] ?? process.cwd());
@@ -55,6 +56,7 @@ let thuClient: ThuClient | undefined;
 let sportsCredentials: LoginCredentials | undefined;
 const notificationHub = new NotificationHub();
 const authSessionPath = join(scriptDirectory, "..", "data", "auth.json");
+const deviceFingerprint = resolveStableFingerprint();
 
 // 定时抢场执行器：确定性代码路径直接调 book_sports_field 的 execute（不再经过 LLM）
 const scheduler = new TaskScheduler(
@@ -89,11 +91,17 @@ scheduler.start();
 
 const server = createWebServer(
     (confirm: ConfirmFn, authHooks, credentials?: LoginCredentials) => {
-        thuClient ??= new ThuClient(authHooks, credentials, authSessionPath);
+        thuClient ??= new ThuClient(
+            authHooks,
+            credentials ? {...credentials, fingerprint: deviceFingerprint} : undefined,
+            authSessionPath,
+        );
         // 用户主动点"登录" = 强制走真实认证（覆盖可能过期的持久会话）；
         // 首次问答等懒创建场景无 credentials，不清登录态
         if (credentials) thuClient.logout();
-        sportsCredentials = credentials ?? sportsCredentials;
+        sportsCredentials = credentials
+            ? {...credentials, fingerprint: deviceFingerprint}
+            : sportsCredentials;
         return new Agent(
             createAllSkills({
                 prewarm: false,

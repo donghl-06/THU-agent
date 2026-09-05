@@ -93,16 +93,20 @@
     cursor: pointer; text-align: left; transition: border-color 0.15s, background 0.15s;
   }
   #new-chat:hover { border-color: var(--primary); background: var(--primary-light); }
-  #session-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+  #session-list {
+    flex: 1; min-width: 0; overflow-x: hidden; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 2px;
+  }
   .session-usage { flex: none; padding: 8px 10px; font-size: var(--fs-xs); color: var(--muted); border-top: 1px solid var(--border); }
   .session-item {
     display: flex; align-items: center; gap: 6px; padding: 9px 10px;
     border-radius: var(--r-md); cursor: pointer; font-size: var(--fs-sm);
     color: var(--text-2); background: transparent; width: 100%;
+    box-sizing: border-box; min-width: 0;
   }
   .session-item:hover { background: var(--card-hover); color: var(--text); }
   .session-item.active { background: var(--primary-light); color: var(--text); }
-  .session-item .s-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .session-item .s-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .session-item .s-del {
     flex: none; border: none; background: transparent; color: var(--muted);
     width: 22px; height: 22px; border-radius: 6px; cursor: pointer; font-size: 12px;

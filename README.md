@@ -43,8 +43,7 @@ cp .env.example .env
 # 编辑 .env，填入：
 #   THU_USERNAME    学号
 #   THU_PASSWORD    密码
-#   THU_FINGERPRINT 设备指纹（32 位 hex，可用以下命令生成）
-node -e "console.log(require('crypto').randomUUID().replace(/-/g,''))"
+#   THU_FINGERPRINT 设备指纹（可选，推荐留空；清灵会自动保存在本机）
 #   LLM_API_KEY / LLM_BASE_URL / LLM_MODEL  LLM 配置（Kimi 示例见 .env.example 注释）
 ```
 
@@ -84,8 +83,9 @@ pnpm step3   # 获取真实课表
 Web UI 启动脚本会自动配置旧版 TLS 所需的 `OPENSSL_CONF`，PowerShell 下无需手动设置。
 
 使用图形化登录时，`THU_USERNAME`、`THU_PASSWORD` 和 `THU_FINGERPRINT` 可以留空；
-它们仍可用于 `pnpm step2`、`pnpm step3` 等命令行验证脚本。每次 Web UI 进程重启后需
-重新登录，除非你自行在 `.env` 配置固定指纹并由清华认证系统信任该设备。
+它们仍可用于 `pnpm step2`、`pnpm step3` 等命令行验证脚本。清灵会把设备指纹保存到
+`%LOCALAPPDATA%/QingLing/device.json`（macOS/Linux 使用系统状态目录），Web、EXE 与 MCP
+在同一台电脑上复用同一个信任设备。
 
 ### Windows 便携版
 
@@ -98,7 +98,8 @@ pnpm package:win:exe
 命令会在 `release/清灵-EXE/` 生成网页聊天发布目录，内置 Node.js 和生产依赖，用户无需安装
 Node.js、pnpm 或 Git。将 `.env.example` 复制为同目录下的 `.env` 并填写 `LLM_API_KEY`
 等模型配置后，双击 `清灵.exe` 即可自动启动本地服务并打开浏览器。程序退出入口位于
-Windows 任务栏托盘图标的右键菜单中。
+Windows 任务栏托盘图标的右键菜单中。再次双击 `清灵.exe` 不会启动第二个后台实例，
+只会打开已运行实例的页面。
 
 打包脚本会优先生成带托盘菜单的启动器：安装 .NET 8 SDK 时使用自包含 .NET 8 版本；
 没有 SDK 的 Windows 打包机则使用系统自带的 .NET Framework 4.x 编译器。只有在极旧的
@@ -165,9 +166,9 @@ pnpm --silent mcp # 以 MCP stdio 模式启动，供 Codex 调用校园 Skill
 - **patches/**：npm 版 `@thu-info/lib@3.15.2` 在 Node 环境存在重定向链 Cookie 丢失、
   重定向次数上限不足等问题，上游仓库（3.16.4）已修复但未发布。
   本仓库通过 pnpm patch 移植了这些修复，重装依赖时自动应用。
-- **设备信任**：登录脚本会向你的清华账号登记一个名为 `thu-assistant-dev` 的
-  信任设备（官方 App 同款机制），可随时到 <https://id.tsinghua.edu.cn/> 的
-  「多因子认证」管理页面删除。
+- **设备信任**：登录会向你的清华账号登记一个名为 `QingLing Desktop` 的信任设备
+  （官方 App 同款机制）。设备指纹保存在本机并跨启动复用；历史测试产生的旧设备
+  可到 <https://id.tsinghua.edu.cn/> 的「多因子认证」管理页面手动删除。
 - **调试脚本**：`pnpm debug:csrf` / `pnpm debug:roam` / `pnpm debug:chain`
   用于诊断登录/漫游链路问题。
 - **体育场馆**：旧系统 50.tsinghua.edu.cn 已于 2026-08 整体下线。

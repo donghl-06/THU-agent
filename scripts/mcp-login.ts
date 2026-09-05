@@ -20,7 +20,7 @@ type AuthMethod = "totp" | "mobile" | "wechat";
 
 async function main(): Promise<void> {
     if (!envPath) {
-        throw new Error("找不到 .env。请先把 .env.example 复制为 .env，并填写清华账号和设备指纹。");
+        throw new Error("找不到 .env。请先把 .env.example 复制为 .env，并填写清华账号。设备指纹会自动保存在本机。");
     }
     const prompt = createInterface({input: stdin, output: stdout});
     try {

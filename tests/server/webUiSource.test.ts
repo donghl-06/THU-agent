@@ -31,4 +31,18 @@ describe("Web UI 请求状态", () => {
         expect(html).toContain("clampSidebarWidth");
         expect(html).toContain("#sidebar-resizer { display: none; }");
     });
+
+    it("会话列表禁止横向溢出，删除按钮始终留在条目右侧", () => {
+        const sessionList = /#session-list \{([\s\S]*?)\n  \}/.exec(html)?.[1] ?? "";
+        expect(sessionList).toContain("min-width: 0");
+        expect(sessionList).toContain("overflow-x: hidden");
+
+        const sessionItem = /\.session-item \{([\s\S]*?)\n  \}/.exec(html)?.[1] ?? "";
+        expect(sessionItem).toContain("box-sizing: border-box");
+        expect(sessionItem).toContain("min-width: 0");
+
+        const sessionTitle = /\.session-item \.s-title \{([\s\S]*?)\}/.exec(html)?.[1] ?? "";
+        expect(sessionTitle).toContain("min-width: 0");
+        expect(sessionTitle).toContain("text-overflow: ellipsis");
+    });
 });

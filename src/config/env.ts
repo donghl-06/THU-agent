@@ -3,6 +3,7 @@
  * 复制 .env.example 为 .env 并填入真实值（.env 已在 .gitignore 中）。
  */
 import "dotenv/config";
+import {resolveStableFingerprint} from "../client/fingerprintStore";
 
 function required(name: string): string {
     const value = process.env[name];
@@ -24,7 +25,7 @@ export const config = {
         },
         /** 固定设备指纹（32 位 hex）。配合信任设备可跳过每次的二次认证 */
         get fingerprint() {
-            return required("THU_FINGERPRINT");
+            return resolveStableFingerprint();
         },
     },
     llm: {

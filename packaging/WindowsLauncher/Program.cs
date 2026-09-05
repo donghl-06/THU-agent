@@ -7,6 +7,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -20,6 +21,33 @@ internal static class Program
     private static void Main()
     {
         EnableHighDpiRendering();
+
+        bool createdNew;
+        using (var mutex = new Mutex(true, @"Local\QingLing.SingleInstance", out createdNew))
+        {
+            if (!createdNew)
+            {
+                ActivateExistingInstance();
+                return;
+            }
+
+            try
+            {
+                RunFirstInstance();
+            }
+            finally
+            {
+                ClearInstanceState();
+                try { mutex.ReleaseMutex(); }
+                catch (ApplicationException) { /* Process is already exiting. */ }
+            }
+        }
+    }
+
+    private static void RunFirstInstance()
+    {
+        // 强杀/崩溃后的 instance.json 可能残留；拿到互斥锁后先清掉旧状态。
+        ClearInstanceState();
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         var baseDirectory = AppContext.BaseDirectory;
@@ -58,6 +86,10 @@ internal static class Program
         })
         {
             tray.DoubleClick += (sender, e) => OpenBrowser(port.Value);
+            child.EnableRaisingEvents = true;
+            child.Exited += (sender, e) => Application.Exit();
+
+            WriteInstanceState(port.Value);
 
             if (!WaitForServer(child, port.Value))
             {
@@ -75,6 +107,22 @@ internal static class Program
             tray.Visible = false;
             StopServer(child);
         }
+    }
+
+    private static void ActivateExistingInstance()
+    {
+        var port = WaitForExistingInstance(TimeSpan.FromSeconds(5));
+        if (port.HasValue)
+        {
+            OpenBrowser(port.Value);
+            return;
+        }
+
+        MessageBox.Show(
+            "清灵已经在启动或运行中。请稍等片刻，或在任务栏托盘中打开已有图标。",
+            "清灵",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Information);
     }
 
     private static Process StartServer(string nodePath, string scriptPath, string baseDirectory, string opensslPath, int port)
@@ -224,6 +272,79 @@ internal static class Program
             catch (SocketException) { }
         }
         return null;
+    }
+
+    private static string GetInstanceStatePath()
+    {
+        var directory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "QingLing");
+        return Path.Combine(directory, "instance.json");
+    }
+
+    private static void WriteInstanceState(int port)
+    {
+        var path = GetInstanceStatePath();
+        Directory.CreateDirectory(Path.GetDirectoryName(path));
+        var temporaryPath = path + ".tmp";
+        File.WriteAllText(
+            temporaryPath,
+            "{\"pid\":" + Process.GetCurrentProcess().Id + ",\"port\":" + port + "}");
+        if (File.Exists(path)) File.Delete(path);
+        File.Move(temporaryPath, path);
+    }
+
+    private static void ClearInstanceState()
+    {
+        try
+        {
+            File.Delete(GetInstanceStatePath());
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+
+    private static int? WaitForExistingInstance(TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            var port = ReadInstanceStatePort();
+            if (port.HasValue && IsServerResponding(port.Value)) return port;
+            Thread.Sleep(250);
+        }
+        return null;
+    }
+
+    private static int? ReadInstanceStatePort()
+    {
+        try
+        {
+            var match = Regex.Match(
+                File.ReadAllText(GetInstanceStatePath()),
+                "\"port\"\\s*:\\s*(\\d+)");
+            int port;
+            return match.Success && int.TryParse(match.Groups[1].Value, out port)
+                ? port
+                : (int?)null;
+        }
+        catch (IOException) { return null; }
+        catch (UnauthorizedAccessException) { return null; }
+        catch (RegexMatchTimeoutException) { return null; }
+    }
+
+    private static bool IsServerResponding(int port)
+    {
+        try
+        {
+            using (var client = new HttpClient {Timeout = TimeSpan.FromMilliseconds(500)})
+            using (var response = client.GetAsync("http://127.0.0.1:" + port + "/api/capabilities").GetAwaiter().GetResult())
+            {
+                return response.IsSuccessStatusCode;
+            }
+        }
+        catch (HttpRequestException) { return false; }
+        catch (TaskCanceledException) { return false; }
     }
 
     private static void OpenBrowser(int port)
