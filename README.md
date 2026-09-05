@@ -1,4 +1,4 @@
-# THU Assistant Agent（清华小助手 Agent）
+# THU Assistant Agent（清灵 Agent）
 
 面向清华大学校园生活场景的 LLM Agent 项目（开发中）。
 
@@ -95,14 +95,14 @@ Web UI 启动脚本会自动配置旧版 TLS 所需的 `OPENSSL_CONF`，PowerShe
 pnpm package:win:exe
 ```
 
-命令会在 `release/清华小助手-EXE/` 生成网页聊天发布目录，内置 Node.js 和生产依赖，用户无需安装
+命令会在 `release/清灵-EXE/` 生成网页聊天发布目录，内置 Node.js 和生产依赖，用户无需安装
 Node.js、pnpm 或 Git。将 `.env.example` 复制为同目录下的 `.env` 并填写 `LLM_API_KEY`
-等模型配置后，双击 `清华小助手.exe` 即可自动启动本地服务并打开浏览器。程序退出入口
+等模型配置后，双击 `清灵.exe` 即可自动启动本地服务并打开浏览器。程序退出入口
 使用 .NET 8 SDK 打包时，程序退出入口位于 Windows 任务栏托盘图标的右键菜单中。
 
 如果打包机额外安装了 .NET 8 SDK，脚本会优先生成带托盘菜单的启动器；没有 SDK 时会
 自动使用 Node.js SEA 生成启动 EXE；该备用启动器不提供托盘菜单，退出时可在任务管理器
-中结束“清华小助手”目录下的 Node.js 进程。无论采用哪条路径，普通用户都不需要安装
+中结束“清灵”目录下的 Node.js 进程。无论采用哪条路径，普通用户都不需要安装
 .NET 或 Node.js。
 
 ### Codex MCP 独立连接包
@@ -113,12 +113,12 @@ Node.js、pnpm 或 Git。将 `.env.example` 复制为同目录下的 `.env` 并�
 pnpm package:win:mcp
 ```
 
-命令会在 `release/清华小助手-MCP/` 生成独立连接包，只包含 MCP 服务、内置 Node.js
+命令会在 `release/清灵-MCP/` 生成独立连接包，只包含 MCP 服务、内置 Node.js
 运行时和配置模板。用户将 `.env.example` 复制为 `.env`，填写清华账号配置，再按照
 `docs/codex-mcp.md` 注册到已有 Agent 即可。两个发布包互不依赖，用户按使用场景选择一个下载。
 
 需要同时生成两个发布包时，开发者可运行 `pnpm package:win:all`；发布到 GitHub Release
-时分别压缩并上传 `release/清华小助手-EXE/` 和 `release/清华小助手-MCP/`。
+时分别压缩并上传 `release/清灵-EXE/` 和 `release/清灵-MCP/`。
 
 其他命令：
 
@@ -134,7 +134,7 @@ pnpm --silent mcp # 以 MCP stdio 模式启动，供 Codex 调用校园 Skill
 
 项目同时提供本地 MCP Server，可让 Codex 直接调用清华校园查询 Skill。MCP Server 不替代现有 Web/EXE 模式：Codex 负责理解和规划，服务器复用 `src/skills/` 与 `src/client/`；预约、取消、充值等写操作在 MCP 模式下默认拒绝，继续使用 Web/EXE 的确认界面完成。
 
-详细配置步骤见 [docs/codex-mcp.md](docs/codex-mcp.md)。开发者构建后的 MCP 入口为 `dist/scripts/mcp-server.cjs`，普通用户应直接下载 `清华小助手-MCP` 发布包。
+详细配置步骤见 [docs/codex-mcp.md](docs/codex-mcp.md)。开发者构建后的 MCP 入口为 `dist/scripts/mcp-server.cjs`，普通用户应直接下载 `清灵-MCP` 发布包。
 
 ## 注意事项
 

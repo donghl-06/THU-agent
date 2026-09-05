@@ -5,7 +5,7 @@ import {dirname, join, resolve} from "node:path";
 import {fileURLToPath} from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const release = join(root, "release", "清华小助手-EXE");
+const release = join(root, "release", "清灵-EXE");
 const app = join(release, "app");
 const runtime = join(release, "runtime");
 const launcherProject = join(root, "packaging", "WindowsLauncher", "WindowsLauncher.csproj");
@@ -50,12 +50,12 @@ if (dotnetSdk.trim()) {
         "-p:DebugType=None",
         "-o", launcherPublish,
     ], {cwd: root, stdio: "inherit"});
-    await cp(join(launcherPublish, "清华小助手.exe"), join(release, "清华小助手.exe"));
+    await cp(join(launcherPublish, "清灵.exe"), join(release, "清灵.exe"));
     hasTrayLauncher = true;
 } else {
     const seaConfig = join(release, "sea-config.json");
     const seaBlob = join(release, "sea-prep.blob");
-    const launcherExe = join(release, "清华小助手.exe");
+    const launcherExe = join(release, "清灵.exe");
     await writeFile(seaConfig, JSON.stringify({
         main: seaLauncher,
         output: seaBlob,
@@ -75,13 +75,13 @@ if (dotnetSdk.trim()) {
     await rm(seaBlob, {force: true});
 }
 const exitInstructions = hasTrayLauncher
-    ? "5. 退出程序请右键任务栏托盘中的清华小助手图标，选择“退出”。"
+    ? "5. 退出程序请右键任务栏托盘中的清灵图标，选择“退出”。"
     : "5. 当前启动器不含托盘菜单；退出程序时，请在任务管理器中结束本目录下的 Node.js 进程。";
-await writeFile(join(release, "README.txt"), `清华小助手（Windows 便携版）
+await writeFile(join(release, "README.txt"), `清灵（Windows 便携版）
 
 1. 将本文件夹中的 .env.example 复制为 .env。
 2. 打开 .env，填写 LLM_API_KEY；按需填写 LLM_BASE_URL、LLM_MODEL。清华账号也可以直接在网页右上角登录时填写。
-3. 双击“清华小助手.exe”，程序会自动启动服务并打开浏览器。
+3. 双击“清灵.exe”，程序会自动启动服务并打开浏览器。
 4. 在网页右上角点击“登录”，输入清华 Info 学号、密码和二次验证码。
 ${exitInstructions}
 

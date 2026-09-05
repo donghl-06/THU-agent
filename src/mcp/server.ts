@@ -91,7 +91,7 @@ function toolResult(result: SkillResult): {content: {type: "text"; text: string}
     const normalized = result.error?.code === "AUTH_REQUIRED"
         ? fail(
             "AUTH_REQUIRED",
-            "当前设备尚未完成二次认证。请运行清华小助手 MCP 包中的“登录清华账号.cmd”，" +
+            "当前设备尚未完成二次认证。请运行清灵 MCP 包中的“登录清华账号.cmd”，" +
             "按提示完成一次认证，然后回到 Agent 重试。",
         )
         : result;
@@ -130,7 +130,7 @@ function builtInTools(client: ThuClient): ToolEntry[] {
                 name: "thu_login",
                 description:
                     "使用本地 .env 中的清华 Info 凭证登录校园服务。" +
-                    "凭证不会返回给 Codex。若账号触发二次认证，请先在清华小助手 Web/EXE 界面完成登录；" +
+                    "凭证不会返回给 Codex。若账号触发二次认证，请先运行清灵 MCP 包中的“登录清华账号.cmd”；" +
                     "MCP stdio 模式当前不会把验证码交互窗口直接弹到 Codex。",
                 inputSchema: {type: "object", properties: {}, required: []},
                 annotations: {readOnlyHint: false, destructiveHint: false, openWorldHint: true},
@@ -215,7 +215,7 @@ export class McpServer {
                 capabilities: {tools: {listChanged: false}},
                 serverInfo: {name: this.serverName, version: this.serverVersion},
                 instructions:
-                    "清华校园查询工具已连接。实时校园数据必须通过工具获取；预约、取消和充值等写操作请使用清华小助手 Web/EXE 完成确认。",
+                    "清灵的清华校园查询工具已连接。实时校园数据必须通过工具获取；预约、取消和充值等写操作请使用清灵 Web/EXE 完成确认。",
             });
         }
         if (method === "tools/list") {
@@ -245,7 +245,7 @@ export class McpServer {
         if (entry.requiresConfirmation) {
             return this.success(id, failedCall(
                 "CONFIRMATION_REQUIRED",
-                "这是预约、取消或充值等写操作。MCP stdio 当前没有安全的用户确认通道，已拒绝执行；请在清华小助手 Web/EXE 界面完成该操作。",
+                "这是预约、取消或充值等写操作。MCP stdio 当前没有安全的用户确认通道，已拒绝执行；请在清灵 Web/EXE 界面完成该操作。",
             ));
         }
         try {
