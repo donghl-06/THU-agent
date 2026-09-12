@@ -21,13 +21,17 @@ import {
 } from "thu-learn-lib";
 import {ThuError} from "../errors";
 import {normalizeLearnError} from "./errors";
-import {LearnDownloadSession, type LearnCredentials} from "./downloadSession";
+import {LearnDownloadSession} from "./downloadSession";
 
 /** 课程列表缓存 TTL：选课一周内可能变动，缓存 10 分钟 */
 const COURSE_CACHE_TTL_MS = 10 * 60 * 1000;
 
 export interface LearnClientOptions {
-    credentials: LearnCredentials;
+    /**
+     * 登录凭证。username/password 允许缺省（纯 Web 场景 .env 未配置时），
+     * 首次调用时报 AUTH_FAILED 提示，不会在构造时抛错。
+     */
+    credentials: {username?: string; password?: string; fingerprint: string};
     /**
      * 二次认证兜底回调：学堂登录报需要 2FA 时调用一次（通常就是 ThuClient.login，
      * 它会走 2FA 交互并把本设备登记为信任设备），随后自动重试学堂登录。
@@ -37,20 +41,29 @@ export interface LearnClientOptions {
 
 export class LearnClient {
     private readonly helper: Learn2018Helper;
-    private readonly downloads: LearnDownloadSession;
+    private readonly downloads?: LearnDownloadSession;
     private readonly ensureDeviceTrusted?: () => Promise<void>;
     /** 本次进程是否已做过 2FA 兜底（避免每堂课都触发一次完整登录） */
     private trustAttempted = false;
     private readonly courseCache = new Map<string, {value: CourseInfo[]; expireAt: number}>();
     private semesterCache?: {value: SemesterInfo; expireAt: number};
+    private readonly missingCredential?: boolean;
 
     constructor(opts: LearnClientOptions) {
         const {username, password, fingerprint} = opts.credentials;
         this.ensureDeviceTrusted = opts.ensureDeviceTrusted;
+        this.missingCredential = !username || !password;
         this.helper = new Learn2018Helper({
             provider: () => ({username, password, fingerPrint: fingerprint}),
         });
-        this.downloads = new LearnDownloadSession(opts.credentials);
+        // 下载会话同样走 SSO,凭证缺失时干脆不建（downloadFile 会先过 missingCredential 检查）
+        if (!this.missingCredential) {
+            this.downloads = new LearnDownloadSession({
+                username: username!,
+                password: password!,
+                fingerprint,
+            });
+        }
     }
 
     /**
@@ -58,6 +71,12 @@ export class LearnClient {
      * （lib 内部会自动登录/会话过期重登，这里只补它解决不了的设备信任场景）
      */
     private async call<T>(fn: (helper: Learn2018Helper) => Promise<T>): Promise<T> {
+        if (this.missingCredential) {
+            throw new ThuError(
+                "AUTH_FAILED",
+                "缺少登录凭证（.env 未配置 THU_USERNAME/THU_PASSWORD，也未在网页登录）。",
+            );
+        }
         try {
             return await fn(this.helper);
         } catch (e) {
@@ -129,6 +148,12 @@ export class LearnClient {
 
     /** 带登录态下载文件（独立下载会话，懒登录、失效自动重登一次） */
     async downloadFile(url: string) {
+        if (this.missingCredential || !this.downloads) {
+            throw new ThuError(
+                "AUTH_FAILED",
+                "缺少登录凭证（.env 未配置 THU_USERNAME/THU_PASSWORD，也未在网页登录）。",
+            );
+        }
         try {
             return await this.downloads.download(url);
         } catch (e) {

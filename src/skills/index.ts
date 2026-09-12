@@ -24,6 +24,15 @@ import {createPaySportsOrderSkill} from "./sports/paySportsOrder";
 import {createRechargeCampusCardSkill} from "./card/rechargeCampusCard";
 import {createGetNetworkStatusSkill} from "./network/getNetworkStatus";
 import {MyhomeClient} from "../client/myhome";
+import {LearnClient} from "../client/learn/LearnClient";
+import {createGetLearnCoursesSkill} from "./learn/getLearnCourses";
+import {createGetLearnNoticesSkill} from "./learn/getLearnNotices";
+import {createGetLearnHomeworkSkill} from "./learn/getLearnHomework";
+import {createSubmitLearnHomeworkSkill} from "./learn/submitLearnHomework";
+import {createGetLearnFilesSkill} from "./learn/getLearnFiles";
+import {createDownloadLearnFileSkill} from "./learn/downloadLearnFile";
+import {createGetLearnCalendarSkill} from "./learn/getLearnCalendar";
+import {resolveStableFingerprint} from "../client/fingerprintStore";
 import {createChaojiyingSolver, createChaojiyingCodeSolver} from "../client/captcha/chaojiying";
 import {UseregClient, UseregAuthError} from "../client/usereg";
 import {config} from "../config/env";
@@ -91,6 +100,18 @@ export function createAllSkills(opts: SkillAssemblyOptions = {}): Skill[] {
         // 后台预热登录态，失败不影响启动（首个工具调用会重试登录）
         void thu.login().catch(() => {});
     }
+    // 网络学堂（learn.tsinghua.edu.cn）：独立客户端，走 thu-learn-lib。
+    // 复用同一账号密码 + 同一稳定设备指纹（已信任设备免 2FA）；
+    // 凭证可能缺失（纯 Web 登录场景），缺时首次调用报 AUTH_FAILED 而非构造时炸。
+    // 2FA 兜底：学堂 SSO 报需要二次认证时先走 thu.login() 完成设备信任再重试。
+    const learn = new LearnClient({
+        credentials: {
+            username: opts.credentials?.username ?? optionalThuCredential("username"),
+            password: opts.credentials?.password ?? optionalThuCredential("password"),
+            fingerprint: resolveStableFingerprint(opts.credentials?.fingerprint),
+        },
+        ensureDeviceTrusted: () => thu.login(),
+    });
     return [
         createGetScheduleSkill(thu),
         createGetCampusCardInfoSkill(thu),
@@ -107,7 +128,15 @@ export function createAllSkills(opts: SkillAssemblyOptions = {}): Skill[] {
         createGetNetworkStatusSkill(usereg),
         // Step 16：我的图书馆预约（取消场景前置查询）
         createGetMyLibraryBookingsSkill(thu),
+        // 网络学堂：课程/通知/作业/课件/日历（读），提交作业/下载课件（写,需确认）
+        createGetLearnCoursesSkill(learn),
+        createGetLearnNoticesSkill(learn),
+        createGetLearnHomeworkSkill(learn),
+        createGetLearnFilesSkill(learn),
+        createGetLearnCalendarSkill(learn),
         // 写操作：Harness 会在执行前向用户确认（requiresConfirmation）
+        createSubmitLearnHomeworkSkill(learn),
+        createDownloadLearnFileSkill(learn),
         createBookSportsFieldSkill(sports, {captchaSolver}),
         createBookLibrarySeatSkill(thu),
         createBookLibraryRoomSkill(thu),
