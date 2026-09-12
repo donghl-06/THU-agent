@@ -15,3 +15,16 @@ export function formatBeijing(date: Date): string {
     const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
     return `${get("year")}-${get("month")}-${get("day")} ${get("hour")}:${get("minute")}`;
 }
+
+/** 北京时间的 YYYY-MM-DD 日期串。offsetDays 用于「N 天后」（可为负） */
+export function beijingDateString(offsetDays = 0, base = new Date()): string {
+    const shifted = new Date(base.getTime() + offsetDays * 24 * 3600 * 1000);
+    const parts = new Intl.DateTimeFormat("zh-CN", {
+        timeZone: "Asia/Shanghai",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+    }).formatToParts(shifted);
+    const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+    return `${get("year")}-${get("month")}-${get("day")}`;
+}
