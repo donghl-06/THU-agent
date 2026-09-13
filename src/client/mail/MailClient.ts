@@ -12,6 +12,7 @@
 import {ImapFlow, type MessageEnvelopeObject} from "imapflow";
 import nodemailer, {type Transporter} from "nodemailer";
 import {simpleParser} from "mailparser";
+import {htmlToText} from "../../utils/htmlToText";
 import {ThuError} from "../errors";
 
 export interface MailConfig {
@@ -172,13 +173,16 @@ export class MailClient {
                         a.name ? `${a.name} <${a.address ?? ""}>` : (a.address ?? ""),
                     ).join(", ") ?? "";
                 // 顺手标记已读（read-write 模式下 fetch source 默认会置 \Seen，Coremail 行为一致）
+                const html = typeof parsed.html === "string" ? parsed.html : undefined;
+                // 纯 HTML 邮件（网络学堂公告全是这类）降级：HTML 剥成纯文本
+                const text = parsed.text || (html ? htmlToText(html) : "");
                 return {
                     subject: parsed.subject ?? "(无主题)",
                     from: formatAddr(parsed.from),
                     to: parsed.to ? formatAddr(parsed.to as typeof parsed.from) : "",
                     date: parsed.date ?? new Date(0),
-                    text: parsed.text ?? "",
-                    html: typeof parsed.html === "string" ? parsed.html : undefined,
+                    text,
+                    html,
                     attachments: parsed.attachments.map((a: {filename?: string; size: number}) => ({
                         filename: a.filename ?? "(未命名附件)",
                         size: a.size,

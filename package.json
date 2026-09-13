@@ -15,6 +15,7 @@
     "debug:roam": "OPENSSL_CONF=${PWD}/openssl.cnf tsx scripts/debug-roam.ts",
     "debug:chain": "OPENSSL_CONF=${PWD}/openssl.cnf tsx scripts/debug-chain.ts",
     "learn": "OPENSSL_CONF=${PWD}/openssl.cnf tsx scripts/step-learn.ts",
+    "mail": "OPENSSL_CONF=${PWD}/openssl.cnf tsx scripts/step-mail.ts",
     "agent": "OPENSSL_CONF=${PWD}/openssl.cnf tsx scripts/step10-agent.ts",
     "eval": "tsx eval/runner.ts",
     "benchmark": "OPENSSL_CONF=${PWD}/openssl.cnf tsx eval/benchmark.ts",

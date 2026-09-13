@@ -32,6 +32,9 @@ import {createSubmitLearnHomeworkSkill} from "./learn/submitLearnHomework";
 import {createGetLearnFilesSkill} from "./learn/getLearnFiles";
 import {createDownloadLearnFileSkill} from "./learn/downloadLearnFile";
 import {createGetLearnCalendarSkill} from "./learn/getLearnCalendar";
+import {MailClient} from "../client/mail/MailClient";
+import {createGetEmailsSkill} from "./mail/getEmails";
+import {createSendEmailSkill} from "./mail/sendEmail";
 import {resolveStableFingerprint} from "../client/fingerprintStore";
 import {createChaojiyingSolver, createChaojiyingCodeSolver} from "../client/captcha/chaojiying";
 import {UseregClient, UseregAuthError} from "../client/usereg";
@@ -112,6 +115,15 @@ export function createAllSkills(opts: SkillAssemblyOptions = {}): Skill[] {
         },
         ensureDeviceTrusted: () => thu.login(),
     });
+    // 清华邮箱（IMAP/SMTP + 客户端授权码）：凭证缺失时技能内报 AUTH_FAILED 提示配置
+    const mail = new MailClient({
+        username: config.email.username,
+        password: config.email.password,
+        imapHost: config.email.imapHost,
+        imapPort: config.email.imapPort,
+        smtpHost: config.email.smtpHost,
+        smtpPort: config.email.smtpPort,
+    });
     return [
         createGetScheduleSkill(thu),
         createGetCampusCardInfoSkill(thu),
@@ -137,6 +149,9 @@ export function createAllSkills(opts: SkillAssemblyOptions = {}): Skill[] {
         // 写操作：Harness 会在执行前向用户确认（requiresConfirmation）
         createSubmitLearnHomeworkSkill(learn),
         createDownloadLearnFileSkill(learn),
+        // 清华邮箱：读信（列表/正文），发信（写，需确认）
+        createGetEmailsSkill(mail),
+        createSendEmailSkill(mail),
         createBookSportsFieldSkill(sports, {captchaSolver}),
         createBookLibrarySeatSkill(thu),
         createBookLibraryRoomSkill(thu),
