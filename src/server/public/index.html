@@ -1595,7 +1595,10 @@ const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 const PLACEHOLDER = "有什么想让清灵帮你查的？";
 let rec = null;
 let wantListen = false;   // 用户是否处于聆听状态（区分主动停止与服务端自动断开）
-let voiceBase = "";       // 开始聆听时输入框已有内容
+let voiceBefore = "";     // 开始聆听时光标前的内容（语音插入到光标位置，不是末尾）
+let voiceAfter = "";      // 开始聆听时光标后的内容
+let voiceSepL = "";       // before 与语音文本之间的连接空格（开始时定好，避免重复加）
+let voiceSepR = "";       // 语音文本与 after 之间的连接空格
 let voiceText = "";       // 跨实例累计的最终识别文本
 let instanceFinal = "";   // 当前识别实例内已定稿的文本
 if (!SR) {
@@ -1605,7 +1608,11 @@ if (!SR) {
     toast("当前访问方式不支持语音输入：请用 http://127.0.0.1:3457 打开本页后再试", "err");
 } else {
   const renderVoice = (interim) => {
-    q.value = (voiceBase ? voiceBase + " " : "") + voiceText + instanceFinal + interim;
+    const inserted = voiceText + instanceFinal + interim;
+    q.value = voiceBefore + voiceSepL + inserted + voiceSepR + voiceAfter;
+    // 光标跟随已插入语音文本的末尾
+    const pos = (voiceBefore + voiceSepL + inserted).length;
+    try { q.setSelectionRange(pos, pos); } catch {}
     resizeQ();
   };
   const resetMicUi = () => {
@@ -1657,7 +1664,14 @@ if (!SR) {
   micBtn.onclick = () => {
     if (rec) { wantListen = false; rec.stop(); return; }
     wantListen = true;
-    voiceBase = q.value.trim();
+    // 锚定光标位置：语音文本插入到这里，而不是追加到整段文字末尾
+    const selStart = q.selectionStart ?? q.value.length;
+    const selEnd = q.selectionEnd ?? selStart;
+    voiceBefore = q.value.slice(0, selStart);
+    voiceAfter = q.value.slice(selEnd);
+    // 前后各补一个空格（已有空白/为空时不补），避免语音和原文字粘连
+    voiceSepL = voiceBefore && !/\s$/.test(voiceBefore) ? " " : "";
+    voiceSepR = voiceAfter && !/^\s/.test(voiceAfter) ? " " : "";
     voiceText = "";
     try {
       listenOnce();
