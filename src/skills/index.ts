@@ -35,6 +35,8 @@ import {createGetLearnCalendarSkill} from "./learn/getLearnCalendar";
 import {MailClient} from "../client/mail/MailClient";
 import {createGetEmailsSkill} from "./mail/getEmails";
 import {createSendEmailSkill} from "./mail/sendEmail";
+import {createShowEmailImageSkill} from "./mail/showEmailImage";
+import type {TempImageStore} from "../utils/tempImageStore";
 import {resolveStableFingerprint} from "../client/fingerprintStore";
 import {createChaojiyingSolver, createChaojiyingCodeSolver} from "../client/captcha/chaojiying";
 import {UseregClient, UseregAuthError} from "../client/usereg";
@@ -62,6 +64,8 @@ export interface SkillAssemblyOptions {
     thuClient?: ThuClient;
     /** 任务调度器（Step 23）。提供时装配任务类技能（提醒/定时抢场/任务管理） */
     scheduler?: TaskScheduler;
+    /** 对话内图片通道（Web UI 提供）。缺失时 show_email_image 报 NOT_SUPPORTED */
+    imageStore?: TempImageStore;
 }
 
 /** 求解器决策：显式传入优先，其次 .env 里的超级鹰配置（导出以便单测） */
@@ -149,9 +153,10 @@ export function createAllSkills(opts: SkillAssemblyOptions = {}): Skill[] {
         // 写操作：Harness 会在执行前向用户确认（requiresConfirmation）
         createSubmitLearnHomeworkSkill(learn),
         createDownloadLearnFileSkill(learn),
-        // 清华邮箱：读信（列表/正文），发信（写，需确认）
+        // 清华邮箱：读信（列表/正文），发信（写，需确认），图片附件对话内显示
         createGetEmailsSkill(mail),
         createSendEmailSkill(mail),
+        createShowEmailImageSkill(mail, opts.imageStore),
         createBookSportsFieldSkill(sports, {captchaSolver}),
         createBookLibrarySeatSkill(thu),
         createBookLibraryRoomSkill(thu),

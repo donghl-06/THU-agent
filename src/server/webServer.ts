@@ -49,7 +49,7 @@
  * 把转发目标切到本轮 SSE 连接的桥上（busy 互斥保证同时只有一轮）。
  */
 import {createServer, type IncomingMessage, type ServerResponse, type Server} from "node:http";
-import {mkdirSync, readFileSync, writeFileSync} from "node:fs";
+import {createReadStream, mkdirSync, readFileSync, writeFileSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {randomUUID} from "node:crypto";
 import type {Agent} from "../harness/agentLoop";
@@ -64,6 +64,7 @@ import {extractCalendarEvent} from "./calendar";
 import {generateTitle} from "./titleGen";
 import {AuthSessionStore} from "../client/authPersist";
 import {taskSessionContext} from "../tasks/sessionContext";
+import {removeServedImage, type TempImageStore} from "../utils/tempImageStore";
 import type {TaskScheduler} from "../tasks/scheduler";
 import type {LoginCredentials, TwoFactorHooks} from "../client/auth";
 
@@ -209,6 +210,8 @@ export interface WebServerOptions {
     sessionStorePath?: string;
     /** 上传文件保存目录（/api/upload）。默认 <cwd>/data/uploads */
     uploadDir?: string;
+    /** 对话内一次性图片通道（/api/temp-image/<token>，show_email_image 用）。不提供则该路由 404 */
+    imageStore?: TempImageStore;
     /** 任务调度器（Step 23）。提供时暴露 /api/tasks 查询与取消端点 */
     scheduler?: TaskScheduler;
     /** 通知中心（Step 23）。提供时暴露 /api/notifications 轮询端点 */
@@ -697,6 +700,42 @@ export function createWebServer(
         res.end(JSON.stringify({name: base, path: savedPath, sizeBytes: body.length}));
     };
 
+    /**
+     * GET /api/temp-image/<token> —— 一次性临时图片（show_email_image 的产物）。
+     * 取件即注销 token，流式发完立即删本地文件——「展示后本地无残留」。
+     * 需要登录（与 /api/upload 同级）；token 是 randomUUID，不暴露真实路径。
+     */
+    const imageStore = opts.imageStore;
+    const handleTempImage = async (req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> => {
+        if (requireLogin && !authenticated) {
+            res.writeHead(401).end("请先登录");
+            return;
+        }
+        if (!imageStore) {
+            res.writeHead(404).end("not found");
+            return;
+        }
+        const token = decodeURIComponent(url.pathname.slice("/api/temp-image/".length));
+        const entry = imageStore.take(token);
+        if (!entry) {
+            res.writeHead(404).end("图片不存在或已被清理（临时图片展示后即删除）");
+            return;
+        }
+        res.writeHead(200, {
+            "Content-Type": entry.contentType,
+            // 一次性资源：禁止缓存，刷新历史时浏览器会重新请求并拿到 404（前端有兜底文案）
+            "Cache-Control": "no-store",
+        });
+        const stream = createReadStream(entry.path);
+        stream.on("error", () => {
+            removeServedImage(entry.path);
+            if (!res.headersSent) res.writeHead(404);
+            res.end();
+        });
+        res.on("finish", () => removeServedImage(entry.path));
+        stream.pipe(res);
+    };
+
     const handleChatCancel = async (res: ServerResponse): Promise<void> => {
         const controller = activeChatAbort;
         const done = activeChatDone;
@@ -1004,6 +1043,7 @@ export function createWebServer(
             if (req.method === "POST" && url.pathname === "/api/session/title") return handleSessionTitle(req, res);
             if (req.method === "POST" && url.pathname === "/api/chat") return handleChat(req, res);
             if (req.method === "POST" && url.pathname === "/api/upload") return handleUpload(req, res, url);
+            if (req.method === "GET" && url.pathname.startsWith("/api/temp-image/")) return handleTempImage(req, res, url);
             if (req.method === "POST" && url.pathname === "/api/confirm") return handleConfirm(req, res);
             if (req.method === "POST" && url.pathname === "/api/auth/method") return handleAuthMethod(req, res);
             if (req.method === "POST" && url.pathname === "/api/auth/code") return handleAuthCode(req, res);

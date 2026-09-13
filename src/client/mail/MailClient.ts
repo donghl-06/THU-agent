@@ -44,6 +44,72 @@ export interface MailDetail {
     attachments: {filename: string; size: number}[];
 }
 
+/** 附件完整内容（对话内显示图片等场景用） */
+export interface MailAttachmentContent {
+    filename: string;
+    contentType: string;
+    content: Buffer;
+    size: number;
+}
+
+/** 附件选择条件：index 从 1 数起（用户视角）；filename 先精确后包含匹配 */
+export interface AttachmentSelector {
+    filename?: string;
+    index?: number;
+}
+
+interface AttachmentLike {
+    filename?: string;
+    contentType?: string;
+    content: Buffer;
+    size: number;
+}
+
+/**
+ * 从附件列表中挑出目标附件（纯函数，导出以便单测）：
+ * - index：1-based 序号，越界 NOT_FOUND
+ * - filename：精确匹配优先，其次包含匹配；多个命中 AMBIGUOUS（带候选）
+ * - 都不给：自动选唯一的图片附件；没有或多张图片报 NOT_FOUND/AMBIGUOUS
+ */
+export function selectAttachment(list: AttachmentLike[], sel: AttachmentSelector): AttachmentLike {
+    const name = (a: AttachmentLike) => a.filename ?? "(未命名附件)";
+    if (sel.index !== undefined) {
+        const hit = list[sel.index - 1];
+        if (!hit) {
+            throw new ThuError("NOT_FOUND", `附件序号 ${sel.index} 不存在（这封邮件共 ${list.length} 个附件）。`);
+        }
+        return hit;
+    }
+    if (sel.filename) {
+        const exact = list.filter((a) => name(a) === sel.filename);
+        const fuzzy = exact.length > 0 ? exact : list.filter((a) => name(a).includes(sel.filename!));
+        if (fuzzy.length === 0) {
+            throw new ThuError(
+                "NOT_FOUND",
+                `找不到附件“${sel.filename}”。现有附件：${list.map(name).join("、") || "（无）"}`,
+            );
+        }
+        if (fuzzy.length > 1) {
+            throw new ThuError(
+                "AMBIGUOUS",
+                `“${sel.filename}”匹配到 ${fuzzy.length} 个附件：${fuzzy.map(name).join("、")}。请说全文件名或用序号指定。`,
+            );
+        }
+        return fuzzy[0];
+    }
+    const images = list.filter((a) => a.contentType?.startsWith("image/"));
+    if (images.length === 0) {
+        throw new ThuError("NOT_FOUND", "这封邮件没有图片附件（可用文件名或序号指定其他附件）。");
+    }
+    if (images.length > 1) {
+        throw new ThuError(
+            "AMBIGUOUS",
+            `这封邮件有 ${images.length} 张图片：${images.map(name).join("、")}。请用文件名或序号指定要哪张。`,
+        );
+    }
+    return images[0];
+}
+
 /** 把底层异常归一化为 ThuError（只认邮件场景的常见形态） */
 function normalizeMailError(e: unknown): ThuError {
     if (e instanceof ThuError) return e;
@@ -187,6 +253,33 @@ export class MailClient {
                         filename: a.filename ?? "(未命名附件)",
                         size: a.size,
                     })),
+                };
+            } finally {
+                lock.release();
+            }
+        } catch (e) {
+            throw normalizeMailError(e);
+        } finally {
+            await client.logout().catch(() => {});
+        }
+    }
+
+    /** 取附件完整内容（默认自动选唯一图片附件，见 selectAttachment）。uid 不存在返回 undefined */
+    async getAttachment(uid: number, sel: AttachmentSelector = {}, mailbox = "INBOX"): Promise<MailAttachmentContent | undefined> {
+        const client = this.newImap();
+        try {
+            await client.connect();
+            const lock = await client.getMailboxLock(mailbox);
+            try {
+                const msg = await client.fetchOne(String(uid), {source: true}, {uid: true});
+                if (!msg || !msg.source) return undefined;
+                const parsed = await simpleParser(msg.source);
+                const hit = selectAttachment(parsed.attachments as AttachmentLike[], sel);
+                return {
+                    filename: hit.filename ?? "(未命名附件)",
+                    contentType: hit.contentType ?? "application/octet-stream",
+                    content: hit.content,
+                    size: hit.size,
                 };
             } finally {
                 lock.release();

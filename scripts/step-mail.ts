@@ -41,6 +41,11 @@ if (first) {
             for (const a of detail.attachments) {
                 console.log(`- ${a.filename}（${a.size} 字节）`);
             }
+            // 附件取件链路：自动选唯一图片附件，只验证字节数，不落盘
+            const att = await mail.getAttachment(first.uid);
+            if (att) {
+                console.log(`取附件成功：${att.filename}（${att.contentType}，实收 ${att.content.length} 字节）`);
+            }
         }
     }
 }

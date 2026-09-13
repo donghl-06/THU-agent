@@ -344,6 +344,9 @@
   @media (max-width: 560px) { .w-grid { grid-template-columns: 1fr; } }
   /* Markdown 渲染样式（文档十九）：层级清晰、克制 */
   .msg.md { white-space: normal; }
+  /* 对话内图片（show_email_image 的一次性临时图）：限宽、圆角、可点开放大 */
+  .md img { max-width: min(260px, 100%); border-radius: var(--r-md); display: block; margin: 8px 0; cursor: zoom-in; }
+  .md .img-gone { font-size: var(--fs-xs); color: var(--muted); margin: 8px 0; }
   .md > :first-child { margin-top: 0; }
   .md > :last-child { margin-bottom: 0; }
   .md p { margin: 0 0 10px; }
@@ -1792,7 +1795,7 @@ const TOOL_LABELS = {
   get_learn_homework: "学堂作业", submit_learn_homework: "提交学堂作业",
   get_learn_files: "学堂课件", download_learn_file: "下载学堂课件",
   get_learn_calendar: "学堂日历",
-  get_emails: "清华邮箱", send_email: "发送邮件",
+  get_emails: "清华邮箱", send_email: "发送邮件", show_email_image: "邮件图片",
 };
 const toolLabel = (name) => TOOL_LABELS[name] ?? name;
 
@@ -1889,6 +1892,17 @@ function renderMd(el, raw) {
     }
   });
   el.querySelectorAll("a").forEach((a) => { a.target = "_blank"; a.rel = "noopener noreferrer"; });
+  // 一次性临时图：刷新历史后源文件已被服务端删除（404），把破图换成说明文字；
+  // 能加载时点击放大到新标签页看原图
+  el.querySelectorAll("img").forEach((img) => {
+    img.addEventListener("error", () => {
+      const note = document.createElement("div");
+      note.className = "img-gone";
+      note.textContent = "（临时图片已清理——展示后即从本地删除，可让清灵重新获取）";
+      img.replaceWith(note);
+    });
+    img.addEventListener("click", () => { if (img.src) window.open(img.src, "_blank"); });
+  });
   if (el.classList.contains("bot")) attachMsgActions(el);
 }
 
