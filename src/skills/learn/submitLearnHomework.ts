@@ -12,6 +12,7 @@ import {basename} from "node:path";
 import type {Homework} from "thu-learn-lib";
 import {ThuError} from "../../client/errors";
 import type {LearnClient} from "../../client/learn/LearnClient";
+import {resolveUserPath} from "../../utils/localPath";
 import {fail, ok, type Skill, type SkillResult} from "../base/types";
 import {courseDisplayName, resolveUniqueCourse, type CourseSource} from "./courseResolve";
 import {formatBeijing} from "./format";
@@ -81,7 +82,9 @@ export function createSubmitLearnHomeworkSkill(client: SubmitSource): Skill {
                 },
                 filePath: {
                     type: "string",
-                    description: "本地文件绝对路径（如 /home/user/hw3.pdf），将作为作业附件上传",
+                    description:
+                        "本地文件路径（如 /home/user/hw3.pdf 或 D:\\作业\\hw3.pdf），将作为作业附件上传。" +
+                        "支持 ~ 开头；Windows 盘符路径在 WSL 下自动翻译为 /mnt/盘符/...",
                 },
                 content: {
                     type: "string",
@@ -134,8 +137,10 @@ export function createSubmitLearnHomeworkSkill(client: SubmitSource): Skill {
                     );
                 }
 
-                // 读文件
-                const filePath = (raw.filePath as string).trim();
+                // 读文件（~ 展开、Windows 盘符路径翻译——用户常直接给 D:\...\xx.pdf）
+                const resolved = resolveUserPath(raw.filePath as string);
+                if (!resolved.ok) return fail("INVALID_INPUT", resolved.error);
+                const filePath = resolved.path;
                 let buffer: Buffer;
                 try {
                     buffer = await readFile(filePath);

@@ -150,11 +150,8 @@ export class LearnDownloadSession {
             throw new DownloadLoginError(`下载失败（HTTP ${resp.status}），会话可能已失效。`);
         }
         const disposition = resp.headers.get("content-disposition") ?? "";
-        const filename =
-            /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1] ??
-            /filename="?([^";]+)"?/i.exec(disposition)?.[1];
         const buffer = Buffer.from(await resp.arrayBuffer());
-        return {buffer, filename: filename ? decodeURIComponent(filename) : undefined, contentType};
+        return {buffer, filename: decodeDispositionFilename(disposition), contentType};
     }
 
     /** 弹回登录页的特征：HTML 页面（正常下载是文件流） */
@@ -162,6 +159,29 @@ export class LearnDownloadSession {
         const type = resp.headers.get("content-type") ?? "";
         return type.includes("text/html") || resp.url.includes("login_timeout");
     }
+}
+
+/**
+ * 解析 Content-Disposition 里的文件名。
+ * undici 把 header 字节按 latin1 解码，中文文件名会变成 mojibake
+ * （2026-09-13 实测："大纲….doc" 变成 "å¤§çº²….doc"）：
+ *   - filename*=UTF-8''<percent>  百分号编码是 ASCII，decodeURIComponent 直接解
+ *   - filename="..."              原始字节按 latin1 → utf8 还原；含替换符说明
+ *                                 不是 UTF-8（可能是 GBK），放弃让调用方用标题兜底
+ */
+export function decodeDispositionFilename(disposition: string): string | undefined {
+    const star = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1]?.trim();
+    if (star) {
+        try {
+            return decodeURIComponent(star);
+        } catch {
+            // 非法百分号编码，继续尝试普通形式
+        }
+    }
+    const plain = /filename="?([^";]+)"?/i.exec(disposition)?.[1]?.trim();
+    if (!plain) return undefined;
+    const recovered = Buffer.from(plain, "latin1").toString("utf8");
+    return recovered.includes("�") ? undefined : recovered;
 }
 
 /** 统一错误出口：与 LearnClient 相同的归一化 */

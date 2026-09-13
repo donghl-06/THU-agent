@@ -8,13 +8,12 @@
  * 下载走 LearnClient 的独立下载会话（带学堂登录态），链接直接给浏览器
  * 无法绕过登录，所以本地保存必须经过这个技能。
  */
-import {existsSync} from "node:fs";
 import {mkdir, writeFile} from "node:fs/promises";
-import {homedir} from "node:os";
 import {join} from "node:path";
 import type {File as LearnFile} from "thu-learn-lib";
 import {ThuError} from "../../client/errors";
 import type {LearnClient} from "../../client/learn/LearnClient";
+import {defaultDownloadDir, resolveUserPath} from "../../utils/localPath";
 import {fail, ok, type Skill, type SkillResult} from "../base/types";
 import {courseDisplayName, resolveUniqueCourse, type CourseSource} from "./courseResolve";
 
@@ -27,12 +26,6 @@ export interface DownloadLearnFileData {
 }
 
 type DownloadSource = CourseSource & Pick<LearnClient, "getFileList" | "downloadFile">;
-
-/** 默认保存目录：~/Downloads 存在就用它，否则用户主目录 */
-function defaultSaveDir(): string {
-    const downloads = join(homedir(), "Downloads");
-    return existsSync(downloads) ? downloads : homedir();
-}
 
 /** 文件名清洗：去掉路径分隔符与控制字符，防止写穿目录 */
 function sanitizeFilename(name: string): string {
@@ -88,7 +81,9 @@ export function createDownloadLearnFileSkill(client: DownloadSource): Skill {
                 },
                 saveDir: {
                     type: "string",
-                    description: "可选，保存目录的绝对路径；省略时为 ~/Downloads",
+                    description:
+                        "可选，保存目录。支持 ~ 开头和 Windows 盘符路径（WSL 下自动翻译成 /mnt/盘符/...）；" +
+                        "省略时保存到系统的「下载」目录（WSL 下是 Windows 的下载文件夹）",
                 },
             },
             required: ["course", "file"],
@@ -114,7 +109,17 @@ export function createDownloadLearnFileSkill(client: DownloadSource): Skill {
                 const {file, error: fileError} = matchFile(list, raw.file as string, courseName);
                 if (fileError) return fileError;
 
-                const saveDir = (raw.saveDir as string | undefined)?.trim() || defaultSaveDir();
+                // 归一化保存目录（~ 展开、Windows 盘符翻译），目录不存在时创建
+                let saveDir: string;
+                let pathNote: string | undefined;
+                if (typeof raw.saveDir === "string" && raw.saveDir.trim()) {
+                    const resolved = resolveUserPath(raw.saveDir);
+                    if (!resolved.ok) return fail("INVALID_INPUT", resolved.error);
+                    saveDir = resolved.path;
+                    pathNote = resolved.note;
+                } else {
+                    saveDir = defaultDownloadDir();
+                }
                 await mkdir(saveDir, {recursive: true});
 
                 const downloaded = await client.downloadFile(file!.downloadUrl);
@@ -129,7 +134,9 @@ export function createDownloadLearnFileSkill(client: DownloadSource): Skill {
                     title: file!.title,
                     savedPath,
                     sizeBytes: downloaded.buffer.length,
-                    message: `已下载「${courseName}」的课件 ${file!.title} → ${savedPath}`,
+                    message:
+                        `已下载「${courseName}」的课件 ${file!.title} → ${savedPath}` +
+                        (pathNote ? `（${pathNote}）` : ""),
                 });
             } catch (e) {
                 if (e instanceof ThuError) return fail(e.code, e.message);
