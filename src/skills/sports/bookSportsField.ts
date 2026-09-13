@@ -17,6 +17,7 @@ import type {BookResult, SportsClient} from "../../client/sports/SportsClient";
 import {ThuError} from "../../client/errors";
 import {fail, ok, type Skill, type SkillResult} from "../base/types";
 import {formatDate, parseDate} from "../base/dateUtils";
+import {matchScenes} from "./sceneMatch";
 
 /** 滑块验证码求解器：拿到背景图/拼图块（base64 PNG）和一个验证回调，
  *  逐个候选 X 调 tryX 验证，返回通过验证的缺口 X 坐标。
@@ -114,14 +115,18 @@ export function createBookSportsFieldSkill(client: SportsBooker, opts: {captchaS
             const dateStr = formatDate(target);
 
             try {
-                // 写操作的场景匹配必须唯一——宁可报错让用户说清楚，也不能订错场馆
+                // 写操作的场景匹配必须唯一——宁可报错让用户说清楚，也不能订错场馆。
+                // 精确匹配为空时允许模糊兜底（平台场景名有错别字"北体兵乓球"），
+                // 但模糊命中仍必须唯一，多个近似场景时照常报错让用户澄清
                 const scenes = await client.listScenes();
                 const keyword = raw.resourceName.trim();
-                const matched = scenes.filter((s) => s.sceneName.includes(keyword));
+                const {exact, fuzzy} = matchScenes(scenes, keyword);
+                const matched = exact.length > 0 ? exact : fuzzy;
                 if (matched.length === 0) {
                     return fail(
                         "INVALID_INPUT",
-                        `找不到与“${keyword}”匹配的场馆。可选：${scenes.map((s) => s.sceneName).join("、")}`,
+                        `找不到与“${keyword}”匹配的场馆。可选：${scenes.map((s) => s.sceneName).join("、")}。` +
+                        "请从以上名称中选用后重试，不要自行推测失败原因。",
                     );
                 }
                 if (matched.length > 1) {

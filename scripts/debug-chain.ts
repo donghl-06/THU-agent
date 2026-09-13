@@ -12,7 +12,7 @@ import {config} from "../src/config/env";
 const helper = new InfoHelper();
 helper.fingerprint = config.thu.fingerprint;
 helper.trustFingerprintHook = async () => true;
-helper.trustFingerprintNameHook = async () => "thu-assistant-dev";
+helper.trustFingerprintNameHook = async () => "QingLing Desktop";
 helper.twoFactorMethodHook = async () => "mobile";
 helper.twoFactorAuthHook = async () => {
     throw new Error("不应再需要 2FA");

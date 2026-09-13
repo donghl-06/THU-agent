@@ -1,6 +1,6 @@
 {
   "name": "thu-assistant",
-  "version": "0.1.0",
+  "version": "0.2.2",
   "description": "THU Assistant Agent — 清华校园生活 LLM Agent",
   "private": true,
   "type": "module",
@@ -18,11 +18,21 @@
     "skill": "OPENSSL_CONF=${PWD}/openssl.cnf tsx src/skillCli.ts",
     "eval": "tsx eval/runner.ts",
     "benchmark": "OPENSSL_CONF=${PWD}/openssl.cnf tsx eval/benchmark.ts",
-    "web": "OPENSSL_CONF=${PWD}/openssl.cnf tsx scripts/step18-web.ts"
+    "build": "node scripts/build-release.mjs",
+    "package:win": "node scripts/package-win.mjs",
+    "package:win:exe": "node scripts/package-win.mjs",
+    "package:win:mcp": "node scripts/package-mcp-win.mjs",
+    "package:win:all": "node scripts/package-all-win.mjs",
+    "gen:icons": "node scripts/gen-icons.mjs",
+    "package:mac": "node scripts/package-mac.mjs",
+    "web": "tsx scripts/step18-web.ts",
+    "mcp": "tsx scripts/mcp-server.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/qrcode": "^1.5.6",
+    "esbuild": "^0.28.2",
+    "postject": "1.0.0-alpha.6",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"
@@ -30,6 +40,7 @@
   "dependencies": {
     "@thu-info/lib": "^3.15.2",
     "dotenv": "^16.4.0",
+    "marked": "^18.0.11",
     "qrcode": "^1.5.4",
     "sm-crypto": "^0.5.7",
     "undici": "^8.10.0"

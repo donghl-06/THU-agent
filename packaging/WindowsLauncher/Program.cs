@@ -1,0 +1,694 @@
+using System;
+using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.IO;
+using System.Net;
+using System.Net.Http;
+using System.Net.Sockets;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+
+namespace ThuAssistantLauncher
+{
+
+internal static class Program
+{
+    [STAThread]
+    private static void Main()
+    {
+        EnableHighDpiRendering();
+
+        bool createdNew;
+        using (var mutex = new Mutex(true, @"Local\QingLing.SingleInstance", out createdNew))
+        {
+            if (!createdNew)
+            {
+                ActivateExistingInstance();
+                return;
+            }
+
+            try
+            {
+                RunFirstInstance();
+            }
+            finally
+            {
+                ClearInstanceState();
+                try { mutex.ReleaseMutex(); }
+                catch (ApplicationException) { /* Process is already exiting. */ }
+            }
+        }
+    }
+
+    private static void RunFirstInstance()
+    {
+        // 强杀/崩溃后的 instance.json 可能残留；拿到互斥锁后先清掉旧状态。
+        ClearInstanceState();
+        Application.EnableVisualStyles();
+        Application.SetCompatibleTextRenderingDefault(false);
+        var baseDirectory = AppContext.BaseDirectory;
+        var nodePath = Path.Combine(baseDirectory, "runtime", "node.exe");
+        var scriptPath = Path.Combine(baseDirectory, "app", "dist", "scripts", "step18-web.cjs");
+        var opensslPath = Path.Combine(baseDirectory, "openssl.cnf");
+
+        if (!File.Exists(nodePath) || !File.Exists(scriptPath) || !File.Exists(opensslPath))
+        {
+            MessageBox.Show(
+                "程序文件不完整，请重新解压完整的清灵发布包。",
+                "清灵",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+            return;
+        }
+
+        var port = FindAvailablePort(3457, 20);
+        if (!port.HasValue)
+        {
+            MessageBox.Show(
+                "找不到可用的本地端口，请关闭其他程序后重试。",
+                "清灵",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+            return;
+        }
+
+        using (var child = StartServer(nodePath, scriptPath, baseDirectory, opensslPath, port.Value))
+        using (var tray = new NotifyIcon
+        {
+            Icon = System.Drawing.SystemIcons.Application,
+            Text = "清灵",
+            Visible = true,
+            ContextMenuStrip = CreateMenu(child, port.Value)
+        })
+        {
+            tray.MouseClick += (sender, e) =>
+            {
+                if (e.Button == MouseButtons.Left) OpenBrowser(port.Value);
+            };
+            child.EnableRaisingEvents = true;
+            child.Exited += (sender, e) => Application.Exit();
+
+            WriteInstanceState(port.Value);
+
+            if (!WaitForServer(child, port.Value))
+            {
+                tray.Visible = false;
+                MessageBox.Show(
+                    "本地服务启动失败，请检查 .env 配置和程序目录中的日志。",
+                    "清灵",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                StopServer(child);
+                return;
+            }
+
+            StartLauncherEventLoop(child, port.Value);
+            OpenBrowser(port.Value, false);
+            Application.Run();
+            tray.Visible = false;
+            NotifyShutdown(port.Value);
+            StopServer(child);
+        }
+    }
+
+    private static void ActivateExistingInstance()
+    {
+        var port = WaitForExistingInstance(TimeSpan.FromSeconds(5));
+        if (port.HasValue)
+        {
+            OpenBrowser(port.Value);
+            return;
+        }
+
+        MessageBox.Show(
+            "清灵已经在启动或运行中。请稍等片刻，或在任务栏托盘中打开已有图标。",
+            "清灵",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Information);
+    }
+
+    private static Process StartServer(string nodePath, string scriptPath, string baseDirectory, string opensslPath, int port)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = nodePath,
+            WorkingDirectory = baseDirectory,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            Arguments = "\"" + scriptPath + "\""
+        };
+        startInfo.EnvironmentVariables["PORT"] = port.ToString();
+        startInfo.EnvironmentVariables["OPENSSL_CONF"] = opensslPath;
+        var process = Process.Start(startInfo);
+        if (process == null) throw new InvalidOperationException("无法启动内置 Node.js。");
+        return process;
+    }
+
+    private static ContextMenuStrip CreateMenu(Process child, int port)
+    {
+        var menu = new RoundedContextMenuStrip();
+        var scale = GetUiScale(menu);
+        menu.Font = new Font(
+            "Microsoft YaHei UI",
+            14F * scale,
+            FontStyle.Regular,
+            GraphicsUnit.Pixel);
+        menu.BackColor = Color.FromArgb(0x1E, 0x1E, 0x22);
+        menu.Padding = new Padding(Scale(8, scale));
+        menu.ShowImageMargin = false;
+        menu.Renderer = new QingLingMenuRenderer(scale);
+        menu.Items.Add("退出", null, (sender, e) =>
+        {
+            Application.Exit();
+        });
+        foreach (ToolStripItem item in menu.Items)
+        {
+            item.Font = menu.Font;
+            item.ForeColor = Color.FromArgb(0xEC, 0xEC, 0xF1);
+            item.Margin = new Padding(0);
+            item.Padding = new Padding(0);
+
+            var separator = item as ToolStripSeparator;
+            if (separator != null)
+            {
+                separator.AutoSize = false;
+                separator.Size = new Size(Scale(144, scale), Scale(13, scale));
+                separator.Margin = new Padding(0);
+                separator.Padding = new Padding(0);
+            }
+            else
+            {
+                item.AutoSize = false;
+                item.Size = new Size(Scale(144, scale), Scale(38, scale));
+                item.TextAlign = ContentAlignment.MiddleCenter;
+            }
+        }
+        return menu;
+    }
+
+    private static void EnableHighDpiRendering()
+    {
+        // 没有 DPI 声明时，Windows 会把 WinForms 菜单先按 96 DPI 绘制再整体位图放大，
+        // 高缩放屏幕上中文会明显发虚。优先启用 Per-Monitor V2，失败则退回系统级 DPI。
+        try
+        {
+            if (SetProcessDpiAwarenessContext(new IntPtr(-4)) == 0)
+            {
+                return;
+            }
+        }
+        catch (EntryPointNotFoundException) { }
+        catch (DllNotFoundException) { }
+
+        try
+        {
+            SetProcessDPIAware();
+        }
+        catch (EntryPointNotFoundException) { }
+        catch (DllNotFoundException) { }
+    }
+
+    private static float GetUiScale(Control menu)
+    {
+        using (var graphics = menu.CreateGraphics())
+        {
+            return graphics.DpiX / 96F;
+        }
+    }
+
+    private static int Scale(int value, float scale)
+    {
+        return (int)Math.Round(value * scale);
+    }
+
+    [DllImport("Shcore.dll")]
+    private static extern int SetProcessDpiAwarenessContext(IntPtr value);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetProcessDPIAware();
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(
+        IntPtr hwnd,
+        int attribute,
+        ref int value,
+        int size);
+
+    private static bool WaitForServer(Process child, int port)
+    {
+        using (var client = new HttpClient {Timeout = TimeSpan.FromMilliseconds(500)})
+        {
+            var url = "http://127.0.0.1:" + port + "/api/capabilities";
+            for (var i = 0; i < 60; i++)
+            {
+                if (child.HasExited) return false;
+                try
+                {
+                    using (var response = client.GetAsync(url).GetAwaiter().GetResult())
+                    {
+                        if (response.IsSuccessStatusCode) return true;
+                    }
+                }
+                catch (HttpRequestException) { }
+                catch (TaskCanceledException) { }
+                Thread.Sleep(250);
+            }
+            return false;
+        }
+    }
+
+    private static void StartLauncherEventLoop(Process child, int port)
+    {
+        Task.Factory.StartNew(() => PollLauncherEvents(child, port));
+    }
+
+    private static void PollLauncherEvents(Process child, int port)
+    {
+        var since = 0;
+        while (!child.HasExited)
+        {
+            try
+            {
+                using (var client = new HttpClient {Timeout = TimeSpan.FromSeconds(38)})
+                using (var response = client.GetAsync(
+                    "http://127.0.0.1:" + port +
+                    "/api/launcher/events?since=" + since + "&timeout=30000").GetAwaiter().GetResult())
+                {
+                    if (response.StatusCode == HttpStatusCode.ServiceUnavailable)
+                    {
+                        Thread.Sleep(5000);
+                        continue;
+                    }
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        Thread.Sleep(1000);
+                        continue;
+                    }
+
+                    var body = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                    var match = Regex.Match(body, "\"version\"\\s*:\\s*(\\d+)");
+                    int version;
+                    if (!match.Success || !int.TryParse(match.Groups[1].Value, out version)) continue;
+                    if (version > since)
+                    {
+                        since = version;
+                        // 提醒/抢场结果到了：后台服务仍在，但主动把界面带回用户眼前。
+                        OpenBrowser(port);
+                    }
+                }
+            }
+            catch (HttpRequestException) { Thread.Sleep(1000); }
+            catch (TaskCanceledException) { /* long poll 超时后继续下一轮 */ }
+        }
+    }
+
+    private static void NotifyShutdown(int port)
+    {
+        try
+        {
+            using (var client = new HttpClient {Timeout = TimeSpan.FromSeconds(2)})
+            using (var content = new StringContent(""))
+            {
+                client.PostAsync(
+                    "http://127.0.0.1:" + port + "/api/launcher/shutdown",
+                    content).GetAwaiter().GetResult().Dispose();
+            }
+        }
+        catch (HttpRequestException) { /* 服务已退出时页面本来会进入离线终态 */ }
+        catch (TaskCanceledException) { /* 页面可能已经关闭 */ }
+    }
+
+    private static int? FindAvailablePort(int start, int count)
+    {
+        for (var port = start; port < start + count; port++)
+        {
+            try
+            {
+                var listener = new TcpListener(IPAddress.Loopback, port);
+                listener.Start();
+                listener.Stop();
+                return port;
+            }
+            catch (SocketException) { }
+        }
+        return null;
+    }
+
+    private static string GetInstanceStatePath()
+    {
+        var directory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "QingLing");
+        return Path.Combine(directory, "instance.json");
+    }
+
+    private static void WriteInstanceState(int port)
+    {
+        var path = GetInstanceStatePath();
+        Directory.CreateDirectory(Path.GetDirectoryName(path));
+        var temporaryPath = path + ".tmp";
+        File.WriteAllText(
+            temporaryPath,
+            "{\"pid\":" + Process.GetCurrentProcess().Id + ",\"port\":" + port + "}");
+        if (File.Exists(path)) File.Delete(path);
+        File.Move(temporaryPath, path);
+    }
+
+    private static void ClearInstanceState()
+    {
+        try
+        {
+            File.Delete(GetInstanceStatePath());
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+
+    private static int? WaitForExistingInstance(TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            var port = ReadInstanceStatePort();
+            if (port.HasValue && IsServerResponding(port.Value)) return port;
+            Thread.Sleep(250);
+        }
+        return null;
+    }
+
+    private static int? ReadInstanceStatePort()
+    {
+        try
+        {
+            var match = Regex.Match(
+                File.ReadAllText(GetInstanceStatePath()),
+                "\"port\"\\s*:\\s*(\\d+)");
+            int port;
+            return match.Success && int.TryParse(match.Groups[1].Value, out port)
+                ? port
+                : (int?)null;
+        }
+        catch (IOException) { return null; }
+        catch (UnauthorizedAccessException) { return null; }
+        catch (RegexMatchTimeoutException) { return null; }
+    }
+
+    private static bool IsServerResponding(int port)
+    {
+        try
+        {
+            using (var client = new HttpClient {Timeout = TimeSpan.FromMilliseconds(500)})
+            using (var response = client.GetAsync("http://127.0.0.1:" + port + "/api/capabilities").GetAwaiter().GetResult())
+            {
+                return response.IsSuccessStatusCode;
+            }
+        }
+        catch (HttpRequestException) { return false; }
+        catch (TaskCanceledException) { return false; }
+    }
+
+    private static void OpenBrowser(int port, bool allowExistingWindow = true)
+    {
+        if (allowExistingWindow && ActivateExistingQingLingWindow()) return;
+
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = "http://127.0.0.1:" + port + "/",
+            UseShellExecute = true
+        });
+    }
+
+    private static bool ActivateExistingQingLingWindow()
+    {
+        const string pageTitle = "清灵 QingLing - 清华校园智能助手";
+        var match = IntPtr.Zero;
+        EnumWindows((handle, state) =>
+        {
+            if (!IsWindowVisible(handle)) return true;
+            var title = GetWindowTitle(handle);
+            // 浏览器会在网页标题后追加浏览器名；资源管理器文件夹“清灵-EXE”
+            // 只是在本地目录名里包含“清灵”，不能被误认成网页窗口。
+            if (title.StartsWith(pageTitle, StringComparison.Ordinal))
+            {
+                match = handle;
+                return false;
+            }
+            return true;
+        }, IntPtr.Zero);
+
+        if (match == IntPtr.Zero) return false;
+
+        // 最小化时先恢复；保持最大化状态时只做置前，避免把窗口误还原成普通大小。
+        if (IsIconic(match)) ShowWindow(match, 9); // SW_RESTORE
+        SetForegroundWindow(match);
+        return true;
+    }
+
+    private static string GetWindowTitle(IntPtr handle)
+    {
+        var length = GetWindowTextLength(handle);
+        if (length <= 0) return "";
+        var builder = new StringBuilder(length + 1);
+        GetWindowText(handle, builder, builder.Capacity);
+        return builder.ToString();
+    }
+
+    private delegate bool EnumWindowsProc(IntPtr handle, IntPtr state);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr state);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetWindowText(IntPtr handle, StringBuilder text, int capacity);
+
+    [DllImport("user32.dll")]
+    private static extern int GetWindowTextLength(IntPtr handle);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr handle);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsIconic(IntPtr handle);
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr handle, int command);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr handle);
+
+    private static void StopServer(Process child)
+    {
+        if (child.HasExited) return;
+        // 兼容 .NET Framework 打包兜底：旧运行时没有 Kill(entireProcessTree)。
+        // taskkill 同时覆盖 Node 自身和它可能派生的子进程。
+        try
+        {
+            using (var killer = Process.Start(new ProcessStartInfo
+            {
+                FileName = "taskkill.exe",
+                Arguments = "/PID " + child.Id + " /T /F",
+                CreateNoWindow = true,
+                UseShellExecute = false,
+            }))
+            {
+                if (killer != null) killer.WaitForExit(5000);
+            }
+        }
+        catch (InvalidOperationException) { }
+        catch (System.ComponentModel.Win32Exception) { }
+        }
+
+    private sealed class RoundedContextMenuStrip : ContextMenuStrip
+    {
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+
+            // Windows 11 的 DWM 圆角。Windows 10 会返回错误，此时保持系统默认外形。
+            var preference = 2; // DWMWCP_ROUND
+            DwmSetWindowAttribute(Handle, 33, ref preference, sizeof(int));
+        }
+    }
+
+    private sealed class QingLingMenuRenderer : ToolStripProfessionalRenderer
+    {
+        private readonly float scale;
+
+        public QingLingMenuRenderer(float scale)
+            : base(new QingLingColorTable())
+        {
+            this.scale = scale;
+        }
+
+        protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
+        {
+            var bounds = new Rectangle(Point.Empty, e.Item.Size);
+            var background = e.Item.Selected || e.Item.Pressed
+                ? Color.FromArgb(38, 0x8F, 0x3F, 0xA3)
+                : Color.FromArgb(0x1E, 0x1E, 0x22);
+            using (var path = CreateRoundedRectangle(bounds, Scale(8)))
+            using (var brush = new SolidBrush(background))
+            {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                e.Graphics.FillPath(brush, path);
+            }
+        }
+
+        protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
+        {
+            var menuItem = e.Item as ToolStripMenuItem;
+            if (menuItem == null)
+            {
+                base.OnRenderItemText(e);
+                return;
+            }
+
+            var flags = TextFormatFlags.Left |
+                TextFormatFlags.VerticalCenter |
+                TextFormatFlags.NoPrefix |
+                TextFormatFlags.SingleLine |
+                TextFormatFlags.EndEllipsis;
+            var color = e.Item.Selected || e.Item.Pressed
+                ? Color.White
+                : Color.FromArgb(0xEC, 0xEC, 0xF1);
+
+            // TextRenderer 走 GDI 绘制，中文边缘比 GDI+ 在深色背景上更稳。
+            // 绘制矩形必须使用整个 item bounds，而不是 WinForms 默认的 TextRectangle；
+            // 后者会受隐藏图片栏/默认内边距影响，导致文字看起来偏上或偏左。
+            // ToolStrip 在进入文字渲染阶段前可能带着较窄的旧 clip；不重置时，
+            // 文字实际会被裁掉左侧/右侧，看起来整体偏移或截断。
+            e.Graphics.ResetClip();
+            var textBounds = new Rectangle(
+                Scale(14),
+                0,
+                Math.Max(0, e.Item.Width - Scale(28)),
+                e.Item.Height);
+            TextRenderer.DrawText(
+                e.Graphics,
+                e.Text,
+                e.Item.Font,
+                textBounds,
+                color,
+                flags);
+        }
+
+        protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
+        {
+            using (var brush = new SolidBrush(Color.FromArgb(0x1E, 0x1E, 0x22)))
+            {
+                e.Graphics.FillRectangle(brush, e.AffectedBounds);
+            }
+        }
+
+        protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
+        {
+            var bounds = new Rectangle(
+                Point.Empty,
+                new Size(e.ToolStrip.Width - 1, e.ToolStrip.Height - 1));
+            using (var path = CreateRoundedRectangle(bounds, Scale(10)))
+            using (var pen = new Pen(Color.FromArgb(0x2C, 0x2C, 0x33)))
+            {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                e.Graphics.DrawPath(pen, path);
+            }
+        }
+
+        protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
+        {
+            var bounds = e.Vertical
+                ? new Rectangle(e.Item.Width / 2, 3, 1, e.Item.Height - 6)
+                : new Rectangle(Scale(10), e.Item.Height / 2, e.Item.Width - Scale(20), 1);
+            using (var brush = new SolidBrush(Color.FromArgb(0x2C, 0x2C, 0x33)))
+            {
+                e.Graphics.FillRectangle(brush, bounds);
+            }
+        }
+
+        private static GraphicsPath CreateRoundedRectangle(Rectangle bounds, int radius)
+        {
+            var path = new GraphicsPath();
+            if (bounds.Width <= 0 || bounds.Height <= 0)
+            {
+                path.AddRectangle(bounds);
+                return path;
+            }
+
+            var corner = Math.Min(radius, Math.Min(bounds.Width, bounds.Height) / 2);
+            path.AddArc(bounds.Left, bounds.Top, corner * 2, corner * 2, 180, 90);
+            path.AddArc(bounds.Right - corner * 2, bounds.Top, corner * 2, corner * 2, 270, 90);
+            path.AddArc(bounds.Right - corner * 2, bounds.Bottom - corner * 2, corner * 2, corner * 2, 0, 90);
+            path.AddArc(bounds.Left, bounds.Bottom - corner * 2, corner * 2, corner * 2, 90, 90);
+            path.CloseFigure();
+            return path;
+        }
+
+        private int Scale(int value)
+        {
+            return (int)Math.Round(value * scale);
+        }
+    }
+
+    private sealed class QingLingColorTable : ProfessionalColorTable
+    {
+        public override Color MenuBorder
+        {
+            get { return Color.FromArgb(0x2C, 0x2C, 0x33); }
+        }
+
+        public override Color MenuItemBorder
+        {
+            get { return Color.Transparent; }
+        }
+
+        public override Color MenuItemSelected
+        {
+            get { return Color.FromArgb(38, 0x8F, 0x3F, 0xA3); }
+        }
+
+        public override Color MenuItemSelectedGradientBegin
+        {
+            get { return Color.FromArgb(38, 0x8F, 0x3F, 0xA3); }
+        }
+
+        public override Color MenuItemSelectedGradientEnd
+        {
+            get { return Color.FromArgb(38, 0x8F, 0x3F, 0xA3); }
+        }
+
+        public override Color MenuItemPressedGradientBegin
+        {
+            get { return Color.FromArgb(64, 0x82, 0x31, 0x8E); }
+        }
+
+        public override Color MenuItemPressedGradientEnd
+        {
+            get { return Color.FromArgb(64, 0x82, 0x31, 0x8E); }
+        }
+
+        public override Color ToolStripDropDownBackground
+        {
+            get { return Color.FromArgb(0x1E, 0x1E, 0x22); }
+        }
+
+        public override Color ImageMarginGradientBegin
+        {
+            get { return Color.FromArgb(0x1E, 0x1E, 0x22); }
+        }
+
+        public override Color ImageMarginGradientMiddle
+        {
+            get { return Color.FromArgb(0x1E, 0x1E, 0x22); }
+        }
+
+        public override Color ImageMarginGradientEnd
+        {
+            get { return Color.FromArgb(0x1E, 0x1E, 0x22); }
+        }
+    }
+}
+}

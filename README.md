@@ -1,4 +1,4 @@
-# THU Assistant Agent（清华小助手 Agent）
+# THU Assistant Agent（清灵 Agent）
 
 面向清华大学校园生活场景的 LLM Agent 项目（开发中）。
 
@@ -43,8 +43,7 @@ cp .env.example .env
 # 编辑 .env，填入：
 #   THU_USERNAME    学号
 #   THU_PASSWORD    密码
-#   THU_FINGERPRINT 设备指纹（32 位 hex，可用以下命令生成）
-node -e "console.log(require('crypto').randomUUID().replace(/-/g,''))"
+#   THU_FINGERPRINT 设备指纹（可选，推荐留空；清灵会自动保存在本机）
 #   LLM_API_KEY / LLM_BASE_URL / LLM_MODEL  LLM 配置（Kimi 示例见 .env.example 注释）
 ```
 
@@ -94,6 +93,76 @@ pnpm step2   # 真实登录 + 获取用户信息
 pnpm step3   # 获取真实课表
 ```
 
+### Web UI 图形化登录
+
+运行 `pnpm web` 后打开 <http://127.0.0.1:3457>，点击右上角“登录”，
+即可在页面输入清华 Info 学号和密码。需要二次认证时，页面会弹出 TOTP、短信或微信
+认证方式选择，并在同一窗口输入验证码；凭证只通过本机回环地址传给后端，不会写入
+浏览器本地存储。Web UI 登录成功后才会开放校园 Skill 查询。
+
+Web UI 启动脚本会自动配置旧版 TLS 所需的 `OPENSSL_CONF`，PowerShell 下无需手动设置。
+
+使用图形化登录时，`THU_USERNAME`、`THU_PASSWORD` 和 `THU_FINGERPRINT` 可以留空；
+它们仍可用于 `pnpm step2`、`pnpm step3` 等命令行验证脚本。清灵会把设备指纹保存到
+`%LOCALAPPDATA%/QingLing/device.json`（macOS/Linux 使用系统状态目录），Web、EXE 与 MCP
+在同一台电脑上复用同一个信任设备。
+
+### Windows 便携版
+
+开发者可在 Windows 且已安装 Node.js 和 pnpm 的电脑上运行：
+
+```bash
+pnpm package:win:exe
+```
+
+命令会在 `release/清灵-EXE/` 生成网页聊天发布目录，内置 Node.js 和生产依赖，用户无需安装
+Node.js、pnpm 或 Git。将 `.env.example` 复制为同目录下的 `.env` 并填写 `LLM_API_KEY`
+等模型配置后，双击 `清灵.exe` 即可自动启动本地服务并打开浏览器。程序退出入口位于
+Windows 任务栏托盘图标的右键菜单中。再次双击 `清灵.exe` 不会启动第二个后台实例，
+只会打开已运行实例的页面。
+
+打包脚本会优先生成带托盘菜单的启动器：安装 .NET 8 SDK 时使用自包含 .NET 8 版本；
+没有 SDK 的 Windows 打包机则使用系统自带的 .NET Framework 4.x 编译器。只有在极旧的
+Windows 环境找不到上述编译器时，才会退回 Node.js SEA 启动器。无论采用哪条路径，
+普通用户都不需要安装 .NET 或 Node.js。
+
+### Codex MCP 独立连接包
+
+如果用户已经安装 Codex、Claude Desktop 等 MCP Agent，不需要下载网页聊天 EXE，直接运行：
+
+```bash
+pnpm package:win:mcp
+```
+
+命令会在 `release/清灵-MCP/` 生成独立连接包，只包含 MCP 服务、内置 Node.js
+运行时和配置模板。用户将 `.env.example` 复制为 `.env`，填写清华账号配置，再按照
+`docs/codex-mcp.md` 注册到已有 Agent 即可。两个发布包互不依赖，用户按使用场景选择一个下载。
+
+需要同时生成两个发布包时，开发者可运行 `pnpm package:win:all`；发布到 GitHub Release
+时分别压缩并上传 `release/清灵-EXE/` 和 `release/清灵-MCP/`。
+
+### 自动打包（GitHub Actions）
+
+仓库内置了云打包流水线（`.github/workflows/release.yml`）：无需本机装任何环境，
+由 GitHub 的云机器自动打出四个便携包——
+
+| 产物 | 云机器 | 说明 |
+| --- | --- | --- |
+| `QingLing-macOS-arm64` | macOS（M 系列芯片） | Apple Silicon 原生 |
+| `QingLing-macOS-x64` | macOS（运行时换官方 Intel 版 Node） | Intel Mac 原生 |
+| `QingLing-Windows-EXE` | Windows | 网页聊天 EXE 包 |
+| `QingLing-Windows-MCP` | Windows | Codex / Claude Desktop 等 Agent 的 MCP 连接包 |
+
+**触发方式（二选一）**：
+
+1. **发版本（推荐）**：本地执行 `git tag v0.2.0 && git push origin v0.2.0`——
+   四个包并行打出后自动压缩，发布到仓库的 **Releases** 页面（永久保留，任何人可下载）；
+2. **手动试跑**：GitHub 仓库页 → Actions → 选"发布便携包" → Run workflow——
+   只出产物（Artifacts，保留 90 天，需登录 GitHub 下载），不发布 Release。
+
+macOS 包的芯片适配：arm64 包给 M 系列 Mac；x64 包给 Intel Mac（构建后运行时
+替换为官方同版本 Intel 版 Node，两种芯片各自原生运行，无需 Rosetta）。
+
 其他命令：
 
 ```bash
@@ -101,7 +170,14 @@ pnpm agent       # 命令行对话 Agent（需要 LLM_* 配置）
 pnpm dev         # 项目入口（当前为占位）
 pnpm test        # 全部测试（Skill + Harness 单测 + 真实链路集成测试）
 pnpm typecheck   # TypeScript 类型检查
+pnpm --silent mcp # 以 MCP stdio 模式启动，供 Codex 调用校园 Skill
 ```
+
+### Codex MCP 模式
+
+项目同时提供本地 MCP Server，可让 Codex 直接调用清华校园查询 Skill。MCP Server 不替代现有 Web/EXE 模式：Codex 负责理解和规划，服务器复用 `src/skills/` 与 `src/client/`；预约、取消、充值等写操作在 MCP 模式下默认拒绝，继续使用 Web/EXE 的确认界面完成。
+
+详细配置步骤见 [docs/codex-mcp.md](docs/codex-mcp.md)。开发者构建后的 MCP 入口为 `dist/scripts/mcp-server.cjs`，普通用户应直接下载 `清灵-MCP` 发布包。
 
 ## 注意事项
 
@@ -110,9 +186,9 @@ pnpm typecheck   # TypeScript 类型检查
 - **patches/**：npm 版 `@thu-info/lib@3.15.2` 在 Node 环境存在重定向链 Cookie 丢失、
   重定向次数上限不足等问题，上游仓库（3.16.4）已修复但未发布。
   本仓库通过 pnpm patch 移植了这些修复，重装依赖时自动应用。
-- **设备信任**：登录脚本会向你的清华账号登记一个名为 `thu-assistant-dev` 的
-  信任设备（官方 App 同款机制），可随时到 <https://id.tsinghua.edu.cn/> 的
-  「多因子认证」管理页面删除。
+- **设备信任**：登录会向你的清华账号登记一个名为 `QingLing Desktop` 的信任设备
+  （官方 App 同款机制）。设备指纹保存在本机并跨启动复用；历史测试产生的旧设备
+  可到 <https://id.tsinghua.edu.cn/> 的「多因子认证」管理页面手动删除。
 - **调试脚本**：`pnpm debug:csrf` / `pnpm debug:roam` / `pnpm debug:chain`
   用于诊断登录/漫游链路问题。
 - **体育场馆**：旧系统 50.tsinghua.edu.cn 已于 2026-08 整体下线。

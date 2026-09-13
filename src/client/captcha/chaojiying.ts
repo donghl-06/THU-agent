@@ -65,3 +65,34 @@ export function createChaojiyingSolver(): CaptchaSolver {
         throw new Error(`超级鹰返回的 ${candidates.length} 个候选均未通过验证`);
     };
 }
+
+/**
+ * 字符验证码识别（Step 22b 校园网登录用）：图 base64 → 识别文本。
+ * codetype 1902 = 常见 4~6 位英文数字（usereg 登录验证码样式）。
+ */
+export function createChaojiyingCodeSolver(
+    codetype = "1902",
+): (imageBase64: string) => Promise<string> {
+    return async (imageBase64) => {
+        const form = new FormData();
+        form.append("user", config.chaojiying.user);
+        form.append("pass", config.chaojiying.password);
+        form.append("softid", config.chaojiying.softId);
+        form.append("codetype", codetype);
+        form.append(
+            "userfile",
+            new Blob([Buffer.from(imageBase64, "base64")], {type: "image/png"}),
+            "captcha.png",
+        );
+        const resp = await fetch(API_URL, {
+            method: "POST",
+            body: form,
+            signal: AbortSignal.timeout(TIMEOUT_MS),
+        });
+        const data = (await resp.json()) as {err_no?: number; err_str?: string; pic_str?: string};
+        if (data.err_no !== 0 || !data.pic_str) {
+            throw new Error(`超级鹰识别失败：[${data.err_no}] ${data.err_str ?? "空结果"}`);
+        }
+        return data.pic_str.trim();
+    };
+}
