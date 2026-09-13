@@ -6,19 +6,28 @@
 Agent 自主判断并组合多个校园能力（查课表 → 推理空闲时间 → 查体育场馆 → 综合建议），
 而不是把已有 App 换成聊天界面。
 
-> 详细架构原则见 [plan4ai.md](plan4ai.md)，阶段规划见 [plan4me.md](plan4me.md)，
-> 新手向落地路线图见 [ROADMAP.md](ROADMAP.md)。
+> 当前入口、能力边界与数据流见 [项目架构](docs/architecture.md)，
+> 开发约定见 [AGENTS.md](AGENTS.md)。[ROADMAP.md](ROADMAP.md) 仅保留历史开发与排障记录。
 
 ## 架构分层
 
 ```text
-LLM（Kimi/GLM/DeepSeek，OpenAI 兼容协议）← 推理与决策
-Harness             ← Agent 运行时：工具注册、Agent Loop（src/harness/）
-THU Skills          ← Agent 可调用的原子能力（src/skills/）
-ThuClient           ← 统一封装登录/会话/重试（src/client/）
-SportsClient        ← 新版体育场馆系统客户端（src/client/sports/，独立链路）
-@thu-info/lib       ← 清华校园服务 SDK（npm 依赖 + 本地补丁）
+交互式 CLI / Web 聊天 ── Harness ↔ OpenAI 兼容 LLM ──┐
+外部 Agent ── Agent Skill + JSON CLI / MCP ─────────┤
+                                                   ▼
+                                        createAllSkills() 统一装配
+                                          │                │
+                                     校园原子工具       可选任务工具
+                                          │                │
+                             ThuClient / SportsClient   Web 常驻调度器
+                              / MyhomeClient / UseregClient
+                                          │
+                                  SDK / 校园系统接口
 ```
+
+交互式 CLI 提供 18 个校园工具；Web 与外部 Skill CLI 提供 22 个工具（含 4 个任务工具）。
+外部 CLI 的任务调用转交常驻 Web 服务。MCP 默认提供 11 个校园只读工具和 2 个登录/用户信息工具，
+不支持写操作或任务调度。各入口复用业务实现，不自动共享跨进程的登录会话。
 
 ## 环境要求
 
@@ -26,7 +35,7 @@ SportsClient        ← 新版体育场馆系统客户端（src/client/sports/�
 - Node.js ≥ 22
 - pnpm 10（`npm install -g pnpm`）
 - 清华大学 Info 账号（用于登录校园服务）
-- 任意 OpenAI 兼容的 LLM API Key（Kimi / GLM / DeepSeek 均可）
+- 使用内置 CLI / Web 自然语言对话时，需配置 OpenAI 兼容的 LLM API；直接 Skill / MCP 调用不需要
 
 ## 配置步骤
 
@@ -47,10 +56,10 @@ cp .env.example .env
 #   LLM_API_KEY / LLM_BASE_URL / LLM_MODEL  LLM 配置（Kimi 示例见 .env.example 注释）
 ```
 
-## 和小助手对话（V0.1 里程碑 🎉）
+## 命令行对话
 
 ```bash
-pnpm agent   # 命令行 Agent：注册全部 5 个查询技能，模型自主决定调哪个
+pnpm agent   # 18 个校园查询/操作工具，写操作须在终端确认；不包含定时任务
 ```
 
 试试这些问法：
@@ -117,8 +126,12 @@ pnpm step3   # 获取真实课表
 
 运行 `pnpm web` 后打开 <http://127.0.0.1:3457>，点击右上角“登录”，
 即可在页面输入清华 Info 学号和密码。需要二次认证时，页面会弹出 TOTP、短信或微信
-认证方式选择，并在同一窗口输入验证码；凭证只通过本机回环地址传给后端，不会写入
-浏览器本地存储。Web UI 登录成功后才会开放校园 Skill 查询。
+认证方式选择，并在同一窗口输入验证码；登录凭证传给本地后端，不会写入浏览器本地存储。
+Web UI 登录成功后才会开放校园 Skill 查询。
+
+非 WSL 环境默认监听 `127.0.0.1`，WSL 默认监听 `0.0.0.0`，可通过 `HOST` / `PORT` 覆盖。
+WSL 或自行开放其他网卡时不能假定仅本机可访问，应核对网络范围并配置 `UI_TOKEN`；
+不要将单用户 HTTP 服务直接暴露到公网。
 
 Web UI 启动脚本会自动配置旧版 TLS 所需的 `OPENSSL_CONF`，PowerShell 下无需手动设置。
 
@@ -175,7 +188,7 @@ pnpm package:win:mcp
 
 **触发方式（二选一）**：
 
-1. **发版本（推荐）**：本地执行 `git tag v0.2.0 && git push origin v0.2.0`——
+1. **发版本（推荐）**：创建尚未使用的 `v` 前缀版本标签并推送（版本与 `package.json` 对齐）——
    四个包并行打出后自动压缩，发布到仓库的 **Releases** 页面（永久保留，任何人可下载）；
 2. **手动试跑**：GitHub 仓库页 → Actions → 选"发布便携包" → Run workflow——
    只出产物（Artifacts，保留 90 天，需登录 GitHub 下载），不发布 Release。

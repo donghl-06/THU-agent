@@ -2,7 +2,7 @@
  * 工具注册表：把 Skill 列表转成 OpenAI tools schema，并按名字分发执行。
  *
  * 模型只能通过 name/description/inputSchema 认识工具——这三个字段的
- * 质量直接决定模型会不会用对工具（plan4ai.md 第 5 节）。
+ * 质量直接决定模型会不会用对工具。
  *
  * 写操作安全闸：标了 requiresConfirmation 的 Skill，执行前必须过
  * confirm 回调（由 UI 层实现，向用户展示操作并等明确同意）。

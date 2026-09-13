@@ -1,7 +1,7 @@
 /**
  * Skill: book_sports_field —— 预约体育场馆的一个场次（写操作，会真实下单）。
  *
- * 安全红线（plan4ai.md）：requiresConfirmation = true，Harness 必须先向用户
+ * 安全红线：requiresConfirmation = true，调用入口必须先向用户
  * 展示操作详情并拿到明确同意才会执行到这里。
  *
  * 模型不需要也不应该传 uuid——输入全是人能读懂的语义参数

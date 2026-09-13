@@ -1,7 +1,7 @@
 /**
  * Skill: get_schedule —— 查询指定日期（默认今天）的课程安排。
  *
- * 职责（plan4ai.md 第 4 节）：校验输入 → 调 ThuClient → 规范化输出。
+ * 职责：校验输入 → 调 ThuClient → 规范化输出。
  * 不包含任何 LLM 推理，可脱离 Harness 独立执行和测试。
  *
  * 库的 getSchedule() 返回整学期课表（课程块 + 活跃周），

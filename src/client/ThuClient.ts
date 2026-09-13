@@ -1,5 +1,5 @@
 /**
- * ThuClient —— Agent 项目与 @thu-info/lib 之间的统一适配层（plan4ai.md 第 4.2 节）。
+ * ThuClient —— Agent 项目与 @thu-info/lib 之间的统一适配层。
  *
  * 职责：
  *   - InfoHelper 生命周期与登录会话管理

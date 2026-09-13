@@ -221,7 +221,7 @@
     background: var(--card); border: 1px solid var(--border-soft);
     border-radius: var(--r-lg) var(--r-lg) var(--r-lg) 4px;
   }
-  /* AI 消息的轻量身份标识（UI.md 第六条）：连续多条 bot 消息只在第一条显示 */
+  /* AI 消息的轻量身份标识：连续多条 bot 消息只在第一条显示 */
   .msg.bot::before {
     content: "✦ 清灵"; display: block;
     font-size: 11.5px; font-weight: 600; letter-spacing: 0.02em;
@@ -545,7 +545,7 @@
   }
   #auth-cancel { color: var(--text); background: var(--bg); border: 1px solid var(--border) !important; }
   #auth-submit { color: #fff; background: var(--primary); }
-  /* 关于清灵（UI.md 第十六/十七条）：Header 品牌区与欢迎页"探索清灵"均可打开 */
+  /* 关于清灵：Header 品牌区与欢迎页"探索清灵"均可打开 */
   #about-mask {
     position: fixed; inset: 0; background: rgba(8, 12, 24, 0.58);
     display: none; align-items: center; justify-content: center; z-index: 20;
@@ -793,7 +793,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
 </div>
 
 <script>
-/* 品牌常量（UI.md 第二十条）：动态文案统一从这里取，改名只改这一处。
+/* 品牌常量：动态文案统一从这里取，改名只改这一处。
  * 静态 HTML（标题/Header/欢迎页）直接写死，避免首屏闪烁。 */
 const BRAND = {
   name: "清灵",
@@ -1520,7 +1520,7 @@ welcome.querySelectorAll(".w-card").forEach((card) => {
   };
 });
 
-/* ---- 关于清灵（UI.md 第十六/十七条）：Header 品牌区与"探索清灵"打开 ---- */
+/* ---- 关于清灵：Header 品牌区与"探索清灵"打开 ---- */
 function openAbout() {
   aboutMask.classList.add("show");
   aboutMask.setAttribute("aria-hidden", "false");
@@ -1869,7 +1869,7 @@ function attachMsgActions(el) {
   el.appendChild(bar);
 }
 
-/* ---- 错误卡片：技术错误转人话 + 可折叠详情 + 重新生成（品牌语言见 UI.md 第十二条） ---- */
+/* ---- 错误卡片：技术错误转人话 + 可折叠详情 + 重新生成 ---- */
 const ERROR_HINTS = [
   {re: /concurrent request limit|HTTP 429/i, title: `${BRAND.name}暂时有点忙`, body: "当前请求较多，这次没有成功完成，你可以稍后再试一次。"},
   {re: /HTTP 40[13]/, title: `${BRAND.name}暂时无法完成这次请求`, body: "可能是服务配置或额度问题，请稍后再试。"},

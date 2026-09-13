@@ -1,5 +1,5 @@
 /**
- * get_schedule Skill 独立测试（plan4ai.md 第 9 节）。
+ * get_schedule Skill 独立测试。
  *
  * 本文件不依赖网络、不依赖 DeepSeek/Harness：
  * 通过注入假的 ScheduleSource 验证 Skill 的输入校验与日期过滤逻辑。

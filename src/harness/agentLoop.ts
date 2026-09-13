@@ -1,12 +1,12 @@
 /**
- * Agent Loop：plan4ai.md 第 11 节的最基础闭环。
+ * Agent Loop：内置自然语言对话的工具调用闭环。
  *
  *   用户消息 → 模型 → 要调工具？→ 是 → 执行 Skill → 结果塞回对话 → 模型继续
  *                          ↓ 否
  *                        返回文字回答
  *
- * 明确不做（plan4ai.md 红线）：多 Agent、Planner、长期记忆、RAG、工作流引擎。
- * 会话就是内存里的 messages 数组（Basic Session），进程结束即消失。
+ * 本模块不承担多 Agent、独立 Planner、长期记忆、RAG 或工作流引擎。
+ * 会话本体为内存 messages 数组；Web 层可通过快照接口单独持久化与恢复。
  *
  * Step 17 性能优化（基准见 eval/benchmark.ts）：
  *   - 流式：ask 带 onToken 时走 SSE，首字延迟从"整段生成"降到"首个 token"

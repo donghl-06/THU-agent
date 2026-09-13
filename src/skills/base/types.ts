@@ -1,5 +1,5 @@
 /**
- * Skill 层统一类型定义 —— 全项目的"宪法"（plan4ai.md 第 5 节）。
+ * Skill 层统一类型定义（架构与安全边界见 docs/architecture.md）。
  *
  * 每个 Skill 是 Agent 可调用的原子校园能力：
  *   validate input → call ThuClient → normalize output → return SkillResult
@@ -23,7 +23,7 @@ export interface Skill {
     /**
      * 为 true 表示这是写操作（预约/取消/充值等）。
      * Harness 必须在执行前把操作详情展示给用户、拿到明确同意；
-     * 没有确认通道的环境必须拒绝执行（fail closed，plan4ai.md 安全红线）。
+     * 没有确认通道的环境必须拒绝执行（fail closed）。
      */
     requiresConfirmation?: boolean;
 
