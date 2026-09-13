@@ -66,20 +66,40 @@ pnpm agent   # 命令行 Agent：注册全部 5 个查询技能，模型自主�
 仓库内置了一个遵循 Agent Skills 目录结构的项目级 Skill：
 `.agents/skills/thu-agent/SKILL.md`。兼容 Agent Skills 且能运行本地命令的
 AI Agent 可以自动发现它，并通过机器可读 CLI 使用 `createAllSkills()` 中装配的
-全部校园能力，不需要接入本项目自己的 LLM。
+校园能力，不需要接入本项目自己的 LLM。目前包含 18 个直接调用的校园能力，以及
+通过常驻 Web 调度器执行的 4 个任务能力（提醒、定时抢场、任务查询与取消）。
 
 也可以直接检查这层接口：
 
 ```bash
 pnpm --silent skill list
 pnpm --silent skill describe get_schedule
-pnpm --silent skill call get_schedule --input '{"date":"2026-08-31"}'
+pnpm --silent skill call get_schedule --input '{}'
 ```
 
-输出统一为 JSON。查询调用只需要 `THU_*` 凭证，不需要 `LLM_*` 配置。
+输出统一为 JSON。直接校园调用需要 `THU_USERNAME` / `THU_PASSWORD`，
+`THU_FINGERPRINT` 可留空使用自动持久化的设备身份；不需要 `LLM_*` 配置。
+校园网状态查询另需 `CJY_*` 识别验证码。宿舍卫生成绩返回公示图，可使用 Skill 中的
+`scripts/extract-images.mjs` 解码成私有临时图片，再由调用方的看图能力读取。
 所有 `requiresConfirmation: true` 的预约、取消、充值和支付类操作默认拒绝执行；
 外部 Agent 必须先向用户展示完整操作参数并取得本次明确同意，之后才能为该次调用
 附加 `--confirmed-by-user`。确认不能跨调用复用，失败或结果不明确时也不能自动重试。
+
+任务调用复用已运行的 `pnpm web` 服务：在服务和 CLI 使用的 `.env` 配置相同的
+非空 `UI_TOKEN`，并在 Web 页面完成登录。默认连接 `http://127.0.0.1:3457`
+（或 `PORT` 指定端口）；`THU_SKILL_SERVER_URL` 可覆盖为另一个本机回环 HTTP 地址。
+`POST /api/skills/tasks` 仅接受本机、无浏览器 Origin、携带正确 Bearer 口令且已登录的请求，
+只开放任务能力，并在服务端再次检查写操作确认。
+
+任务由 Web 服务持久化和执行，通知回写到 `external_skill` 会话；必须保持服务运行至执行时间。
+`list_my_tasks` 的 `includeFinished` 参数可查询已完成/取消任务及执行结果：
+
+```bash
+pnpm --silent skill call list_my_tasks --input '{"includeFinished":true}'
+```
+
+定时抢场在创建时确认具体目标、执行时间和支付方式，到点无需再次确认；返回 `taskId`
+只表示登记成功。详细运行条件见 [Skill 运行说明](.agents/skills/thu-agent/references/runtime.md)。
 
 ⚠️ `.env` 已在 `.gitignore` 中，**绝不要**把真实凭证写进 `.env.example` 或任何会被提交的文件。
 

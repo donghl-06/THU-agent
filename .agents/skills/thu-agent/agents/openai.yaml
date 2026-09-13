@@ -1,4 +1,4 @@
 interface:
   display_name: "THU Agent"
-  short_description: "查询课表、教室、图书馆、体育场地、校园卡与宿舍电费，并安全执行已确认操作"
+  short_description: "清华校园查询、宿舍卫生与校园网，支持预约支付、定时提醒及任务管理"
   default_prompt: "Use $thu-agent to handle my Tsinghua campus request safely."

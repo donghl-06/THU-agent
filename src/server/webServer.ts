@@ -63,6 +63,7 @@ import {AuthSessionStore} from "../client/authPersist";
 import {taskSessionContext} from "../tasks/sessionContext";
 import type {TaskScheduler} from "../tasks/scheduler";
 import type {LoginCredentials, TwoFactorHooks} from "../client/auth";
+import {handleTaskSkillCall} from "./taskSkillBridge";
 
 /** 确认请求 5 分钟不应答按拒绝处理（防 Promise 悬挂） */
 const CONFIRM_TIMEOUT_MS = 5 * 60 * 1000;
@@ -923,6 +924,12 @@ export function createWebServer(
             }
             // 生命周期事件不携带业务数据；未通过 UI 口令的页面也应能在托盘退出时收到关闭信号。
             if (req.method === "GET" && url.pathname === "/api/events") return handleLifecycleEvents(req, res);
+            // Agent 任务桥使用同一 UI_TOKEN 的 Bearer 认证，另行限制本机和已登录状态。
+            if (req.method === "POST" && url.pathname === "/api/skills/tasks") {
+                return handleTaskSkillCall(req, res, {
+                    scheduler, authenticated: !requireLogin || authenticated, token: config.ui.token,
+                });
+            }
             // UI 口令守卫：豁免清单之外的一切请求，未携带正确口令 cookie 时 403
             // （前端以 403 区别于清华未登录的 401，据此弹出"输入访问口令"遮罩）
             const uiAuthExempt =

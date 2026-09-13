@@ -4,7 +4,7 @@
  */
 import {ThuClient} from "../client/ThuClient";
 import {SportsClient} from "../client/sports/SportsClient";
-import type {Skill} from "./base/types";
+import type {Skill, SkillResult} from "./base/types";
 import {createGetScheduleSkill} from "./schedule/getSchedule";
 import {createGetCampusCardInfoSkill} from "./card/getCampusCardInfo";
 import {createGetClassroomStateSkill} from "./classroom/getClassroomState";
@@ -29,12 +29,7 @@ import {UseregClient, UseregAuthError} from "../client/usereg";
 import {config} from "../config/env";
 import type {LoginCredentials, TwoFactorHooks} from "../client/auth";
 import type {TaskScheduler} from "../tasks/scheduler";
-import {
-    createCancelTaskSkill,
-    createCreateReminderSkill,
-    createListMyTasksSkill,
-    createScheduleSportsBookingSkill,
-} from "../tasks/createTaskSkills";
+import {createTaskSkills} from "../tasks/createTaskSkills";
 
 export interface SkillAssemblyOptions {
     /** 滑块验证码求解器。不提供且 .env 配了超级鹰（CJY_*）时自动用超级鹰；
@@ -50,6 +45,8 @@ export interface SkillAssemblyOptions {
     thuClient?: ThuClient;
     /** 任务调度器（Step 23）。提供时装配任务类技能（提醒/定时抢场/任务管理） */
     scheduler?: TaskScheduler;
+    /** 外部 Agent 把任务转交常驻服务；调用方仍须在 execute 前完成写操作确认。 */
+    taskExecutor?: (name: string, input: unknown) => Promise<SkillResult>;
 }
 
 /** 求解器决策：显式传入优先，其次 .env 里的超级鹰配置（导出以便单测） */
@@ -118,12 +115,11 @@ export function createAllSkills(opts: SkillAssemblyOptions = {}): Skill[] {
         createPaySportsOrderSkill(sports),
         // 校园卡充值：微信/支付宝扫码二维码（扫码前钱不动）
         createRechargeCampusCardSkill(thu),
-        // Step 23：任务类技能（只在装配了调度器的环境提供——CLI/评测没有通知通道）
-        ...(opts.scheduler ? [
-            createCreateReminderSkill(opts.scheduler),
-            createScheduleSportsBookingSkill(opts.scheduler),
-            createListMyTasksSkill(opts.scheduler),
-            createCancelTaskSkill(opts.scheduler),
-        ] : []),
+        // 常驻环境直接使用调度器；一次性 CLI 代理到已运行的 Web 服务。
+        ...(opts.scheduler ? createTaskSkills(opts.scheduler) : opts.taskExecutor
+            ? createTaskSkills().map((skill) => ({
+                ...skill,
+                execute: (input: unknown) => opts.taskExecutor!(skill.name, input),
+            })) : []),
     ];
 }

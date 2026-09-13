@@ -10,6 +10,7 @@ import {resolve} from "node:path";
 import type {Skill, SkillResult} from "./skills/base/types";
 import {fail, ok} from "./skills/base/types";
 import {createAllSkills} from "./skills/index";
+import {callTaskSkill} from "./client/taskSkillClient";
 
 export interface SkillCliRun {
     exitCode: number;
@@ -141,7 +142,7 @@ export async function runSkillCli(args: string[], skills: Skill[]): Promise<Skil
 }
 
 async function main(): Promise<void> {
-    const result = await runSkillCli(process.argv.slice(2), createAllSkills());
+    const result = await runSkillCli(process.argv.slice(2), createAllSkills({taskExecutor: callTaskSkill}));
     process.stdout.write(`${JSON.stringify(result.body, null, 2)}\n`);
     process.exitCode = result.exitCode;
 }
