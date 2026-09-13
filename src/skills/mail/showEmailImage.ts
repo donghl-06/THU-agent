@@ -3,8 +3,9 @@
  *
  * 场景：课程群二维码、通知截图这类图片附件，用户想在聊天里直接看到，
  * 而不是下载到磁盘自己翻。流程（本地前后一致，不留残余）：
- *   取附件字节 → TempImageStore 落临时文件换一次性 URL → 模型把返回的
- *   markdown 原样写进回复 → 浏览器取图后端点立即删除临时文件。
+ *   取附件字节 → TempImageStore 落临时文件换 URL → 模型把返回的
+ *   markdown 原样写进回复 → 图片旁有「已用完」按钮，用户点击确认后
+ *   服务端才删本地文件（15 分钟 TTL 做不点的兜底）。
  * 非图片附件不在这里处理（提示用户用下载场景）；Web UI 之外的环境
  * （CLI/MCP）没有图片端点，报 NOT_SUPPORTED。
  */
@@ -20,7 +21,7 @@ export interface ShowEmailImageData {
     filename: string;
     contentType: string;
     sizeBytes: number;
-    /** 一次性图片 URL（浏览器取一次后服务端即删临时文件） */
+    /** 临时图片 URL（用户在图片旁点「已用完」后服务端才删本地文件） */
     imageUrl: string;
     /** 原样写进最终回复即可在对话中显示图片 */
     markdown: string;
@@ -36,7 +37,7 @@ export function createShowEmailImageSkill(client: AttachmentSource, images?: Tem
             "把邮件中的图片附件（如课程群二维码、通知截图）直接显示在对话里。" +
             "uid 从 get_emails 获得；邮件有多张图片时用 filename 或 index（从 1 数起）指定。" +
             "成功后必须把返回的 markdown 字段原样写进回复，图片才会显示；" +
-            "图片是临时文件，展示后服务端自动删除。非图片附件不要用这个工具。",
+            "图片是临时文件，用户在图片旁点「已用完」后服务端才删除。非图片附件不要用这个工具。",
         inputSchema: {
             type: "object",
             properties: {
@@ -97,7 +98,7 @@ export function createShowEmailImageSkill(client: AttachmentSource, images?: Tem
                     sizeBytes: att.content.length,
                     imageUrl: url,
                     markdown: `![${att.filename}](${url})`,
-                    note: "把 markdown 字段原样写进回复，用户就能在对话里看到图片；图片为一次性临时文件，展示后自动删除，刷新历史后不可再取。",
+                    note: "把 markdown 字段原样写进回复，用户就能在对话里看到图片；图片为临时文件，用户在图片旁点「已用完」后服务端才从本地删除（在此之前刷新历史也能看）。",
                 });
             } catch (e) {
                 if (e instanceof ThuError) return fail(e.code, e.message);

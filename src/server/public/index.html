@@ -344,9 +344,18 @@
   @media (max-width: 560px) { .w-grid { grid-template-columns: 1fr; } }
   /* Markdown 渲染样式（文档十九）：层级清晰、克制 */
   .msg.md { white-space: normal; }
-  /* 对话内图片（show_email_image 的一次性临时图）：限宽、圆角、可点开放大 */
+  /* 对话内图片（show_email_image / show_learn_image 的临时图）：限宽、圆角、可点开放大 */
   .md img { max-width: min(260px, 100%); border-radius: var(--r-md); display: block; margin: 8px 0; cursor: zoom-in; }
   .md .img-gone { font-size: var(--fs-xs); color: var(--muted); margin: 8px 0; }
+  /* 临时图容器：图 + 「已用完」按钮，用户点击确认后服务端才删本地文件 */
+  .md .inline-img { margin: 8px 0; }
+  .md .inline-img img { margin: 0 0 4px; }
+  .md .img-done {
+    font-size: var(--fs-xs); color: var(--muted); background: var(--inset);
+    border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; cursor: pointer;
+  }
+  .md .img-done:hover { color: var(--ok); border-color: var(--ok); }
+  .md .img-done:disabled { opacity: .5; cursor: default; }
   .md > :first-child { margin-top: 0; }
   .md > :last-child { margin-bottom: 0; }
   .md p { margin: 0 0 10px; }
@@ -1796,6 +1805,7 @@ const TOOL_LABELS = {
   get_learn_files: "学堂课件", download_learn_file: "下载学堂课件",
   get_learn_calendar: "学堂日历",
   get_emails: "清华邮箱", send_email: "发送邮件", show_email_image: "邮件图片",
+  show_learn_image: "学堂图片",
 };
 const toolLabel = (name) => TOOL_LABELS[name] ?? name;
 
@@ -1892,16 +1902,35 @@ function renderMd(el, raw) {
     }
   });
   el.querySelectorAll("a").forEach((a) => { a.target = "_blank"; a.rel = "noopener noreferrer"; });
-  // 一次性临时图：刷新历史后源文件已被服务端删除（404），把破图换成说明文字；
-  // 能加载时点击放大到新标签页看原图
+  // 图片处理：临时图（/api/temp-image/）加「✓ 已用完」按钮——本地文件在用户
+  // 点击确认后才删除（DELETE 端点）；在此之前刷新历史也能正常显示。
+  // 已清理的图（404）替换为说明文字；能加载时点击放大到新标签页看原图。
   el.querySelectorAll("img").forEach((img) => {
-    img.addEventListener("error", () => {
+    const src = img.getAttribute("src") || "";
+    img.addEventListener("click", () => { if (img.src) window.open(img.src, "_blank"); });
+    if (!src.startsWith("/api/temp-image/")) return;
+    const wrap = document.createElement("div");
+    wrap.className = "inline-img";
+    img.replaceWith(wrap);
+    wrap.appendChild(img);
+    const btn = document.createElement("button");
+    btn.className = "img-done";
+    btn.textContent = "✓ 已用完，删除";
+    wrap.appendChild(btn);
+    const toNote = (text) => {
       const note = document.createElement("div");
       note.className = "img-gone";
-      note.textContent = "（临时图片已清理——展示后即从本地删除，可让清灵重新获取）";
-      img.replaceWith(note);
+      note.textContent = text;
+      wrap.replaceWith(note);
+    };
+    img.addEventListener("error", () => toNote("（临时图片已清理，可让清灵重新获取）"));
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      try {
+        await fetch(src, {method: "DELETE"});
+      } catch { /* 网络失败也按已清理展示；服务端 TTL 会兜底删文件 */ }
+      toNote("（图片已按你的确认从本地删除）");
     });
-    img.addEventListener("click", () => { if (img.src) window.open(img.src, "_blank"); });
   });
   if (el.classList.contains("bot")) attachMsgActions(el);
 }

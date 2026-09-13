@@ -32,6 +32,7 @@ import {createSubmitLearnHomeworkSkill} from "./learn/submitLearnHomework";
 import {createGetLearnFilesSkill} from "./learn/getLearnFiles";
 import {createDownloadLearnFileSkill} from "./learn/downloadLearnFile";
 import {createGetLearnCalendarSkill} from "./learn/getLearnCalendar";
+import {createShowLearnImageSkill} from "./learn/showLearnImage";
 import {MailClient} from "../client/mail/MailClient";
 import {createGetEmailsSkill} from "./mail/getEmails";
 import {createSendEmailSkill} from "./mail/sendEmail";
@@ -153,6 +154,8 @@ export function createAllSkills(opts: SkillAssemblyOptions = {}): Skill[] {
         // 写操作：Harness 会在执行前向用户确认（requiresConfirmation）
         createSubmitLearnHomeworkSkill(learn),
         createDownloadLearnFileSkill(learn),
+        // 学堂图片课件对话内显示（与邮件图片同一临时图通道）
+        createShowLearnImageSkill(learn, opts.imageStore),
         // 清华邮箱：读信（列表/正文），发信（写，需确认），图片附件对话内显示
         createGetEmailsSkill(mail),
         createSendEmailSkill(mail),

@@ -32,8 +32,8 @@ function sanitizeFilename(name: string): string {
     return name.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").trim() || "download";
 }
 
-/** 文件名关键词唯一匹配（写操作规则同课程匹配） */
-function matchFile(
+/** 文件名关键词唯一匹配（写操作规则同课程匹配；show_learn_image 也复用） */
+export function matchLearnFile(
     list: LearnFile[],
     keyword: string,
     courseName: string,
@@ -106,7 +106,7 @@ export function createDownloadLearnFileSkill(client: DownloadSource): Skill {
                 const courseName = courseDisplayName(course!);
 
                 const list = await client.getFileList(course!.id);
-                const {file, error: fileError} = matchFile(list, raw.file as string, courseName);
+                const {file, error: fileError} = matchLearnFile(list, raw.file as string, courseName);
                 if (fileError) return fileError;
 
                 // 归一化保存目录（~ 展开、Windows 盘符翻译），目录不存在时创建

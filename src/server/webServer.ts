@@ -64,7 +64,7 @@ import {extractCalendarEvent} from "./calendar";
 import {generateTitle} from "./titleGen";
 import {AuthSessionStore} from "../client/authPersist";
 import {taskSessionContext} from "../tasks/sessionContext";
-import {removeServedImage, type TempImageStore} from "../utils/tempImageStore";
+import type {TempImageStore} from "../utils/tempImageStore";
 import type {TaskScheduler} from "../tasks/scheduler";
 import type {LoginCredentials, TwoFactorHooks} from "../client/auth";
 
@@ -701,8 +701,9 @@ export function createWebServer(
     };
 
     /**
-     * GET /api/temp-image/<token> —— 一次性临时图片（show_email_image 的产物）。
-     * 取件即注销 token，流式发完立即删本地文件——「展示后本地无残留」。
+     * GET /api/temp-image/<token> —— 对话内临时图片（show_email_image / show_learn_image 的产物）。
+     * 取图不删除：用户刷新历史、反复查看都还在；只有用户在图片旁点「已用完」
+     * （DELETE 同路径）确认使用完毕后才删本地文件。TTL（store 内）做不点的兜底。
      * 需要登录（与 /api/upload 同级）；token 是 randomUUID，不暴露真实路径。
      */
     const imageStore = opts.imageStore;
@@ -716,23 +717,32 @@ export function createWebServer(
             return;
         }
         const token = decodeURIComponent(url.pathname.slice("/api/temp-image/".length));
-        const entry = imageStore.take(token);
+        // DELETE：用户点「已用完」——确认后才删本地文件并注销
+        if (req.method === "DELETE") {
+            if (!imageStore.consume(token)) {
+                res.writeHead(404).end("图片不存在或已被清理");
+                return;
+            }
+            res.writeHead(200, {"Content-Type": "application/json"});
+            res.end(JSON.stringify({ok: true}));
+            return;
+        }
+        // GET：展示，不删除（生命周期由用户按钮掌控）
+        const entry = imageStore.peek(token);
         if (!entry) {
-            res.writeHead(404).end("图片不存在或已被清理（临时图片展示后即删除）");
+            res.writeHead(404).end("图片不存在或已被清理（用户确认或超时自动清理）");
             return;
         }
         res.writeHead(200, {
             "Content-Type": entry.contentType,
-            // 一次性资源：禁止缓存，刷新历史时浏览器会重新请求并拿到 404（前端有兜底文案）
+            // 不缓存：用户点「已用完」后刷新历史应拿到 404，前端有兜底文案
             "Cache-Control": "no-store",
         });
         const stream = createReadStream(entry.path);
         stream.on("error", () => {
-            removeServedImage(entry.path);
             if (!res.headersSent) res.writeHead(404);
             res.end();
         });
-        res.on("finish", () => removeServedImage(entry.path));
         stream.pipe(res);
     };
 
@@ -1043,7 +1053,9 @@ export function createWebServer(
             if (req.method === "POST" && url.pathname === "/api/session/title") return handleSessionTitle(req, res);
             if (req.method === "POST" && url.pathname === "/api/chat") return handleChat(req, res);
             if (req.method === "POST" && url.pathname === "/api/upload") return handleUpload(req, res, url);
-            if (req.method === "GET" && url.pathname.startsWith("/api/temp-image/")) return handleTempImage(req, res, url);
+            if ((req.method === "GET" || req.method === "DELETE") && url.pathname.startsWith("/api/temp-image/")) {
+                return handleTempImage(req, res, url);
+            }
             if (req.method === "POST" && url.pathname === "/api/confirm") return handleConfirm(req, res);
             if (req.method === "POST" && url.pathname === "/api/auth/method") return handleAuthMethod(req, res);
             if (req.method === "POST" && url.pathname === "/api/auth/code") return handleAuthCode(req, res);

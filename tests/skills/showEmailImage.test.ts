@@ -45,7 +45,7 @@ const exec = async (skill: ReturnType<typeof setup>, input?: unknown) =>
     (await skill.execute(input)) as {success: boolean; data?: ShowEmailImageData; error?: {code: string; message: string}};
 
 describe("show_email_image Skill（假数据，无网络）", () => {
-    it("成功：落临时文件、返回一次性 URL 与 markdown，URL 里的 token 可取件", async () => {
+    it("成功：落临时文件、返回 URL 与 markdown，URL 里的 token 可取件", async () => {
         const skill = setup();
         const r = await exec(skill, {uid: 123});
         expect(r.success).toBe(true);
@@ -54,9 +54,10 @@ describe("show_email_image Skill（假数据，无网络）", () => {
         expect(r.data!.markdown).toBe(`![智能电子产品-课程二维码.jpg](${r.data!.imageUrl})`);
         // token 对应的文件真实存在，且内容一致
         const token = r.data!.imageUrl.split("/").pop()!;
-        const entry = store.take(token)!;
+        const entry = store.peek(token)!;
         expect(entry.contentType).toBe("image/jpeg");
         expect(existsSync(entry.path)).toBe(true);
+        expect(store.consume(token)).toBe(true);
         expect(store.pendingCount).toBe(0);
     });
 

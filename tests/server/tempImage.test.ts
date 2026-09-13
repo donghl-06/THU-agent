@@ -1,8 +1,8 @@
 /**
  * /api/temp-image/<token> 端点测试：真实 HTTP 服务 + 临时目录，不碰外网。
  *
- * 验证一次性语义：取图成功 → 本地文件立即删除 → 再次请求 404；
- * 未知 token 404；未登录 401；未装配 imageStore 时 404。
+ * 验证用户确认式生命周期：GET 可反复取图（不删文件）→ 用户点「已用完」
+ * （DELETE）后才删本地文件 → 再 GET 404；未登录 401；未装配 imageStore 404。
  */
 import {afterEach, describe, expect, it} from "vitest";
 import type {AddressInfo} from "node:net";
@@ -59,34 +59,50 @@ async function start(options: {requireLogin?: boolean; withStore?: boolean} = {}
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 }
 
-describe("/api/temp-image 一次性临时图片", () => {
-    it("取图成功：字节与 Content-Type 正确，随后本地文件被删除", async () => {
+describe("/api/temp-image 临时图片（用户确认后删除）", () => {
+    it("GET 取图不删文件，可反复取（刷新历史也能看）", async () => {
         await start();
         const {token, url} = store.put(Buffer.from("jpeg-bytes"), "image/jpeg", "二维码.jpg");
         const path = join(workDir, "tmp-images", `${token}.jpg`);
-        expect(existsSync(path)).toBe(true);
 
-        const resp = await fetch(`${base}${url}`);
-        expect(resp.status).toBe(200);
-        expect(resp.headers.get("content-type")).toBe("image/jpeg");
-        expect(Buffer.from(await resp.arrayBuffer()).toString()).toBe("jpeg-bytes");
-        // 展示即删：本地前后一致
+        for (let i = 0; i < 2; i++) {
+            const resp = await fetch(`${base}${url}`);
+            expect(resp.status).toBe(200);
+            expect(resp.headers.get("content-type")).toBe("image/jpeg");
+            expect(Buffer.from(await resp.arrayBuffer()).toString()).toBe("jpeg-bytes");
+        }
+        // 展示不删：本地文件仍在
+        expect(existsSync(path)).toBe(true);
+        expect(store.pendingCount).toBe(1);
+    });
+
+    it("DELETE（用户点「已用完」）后才删本地文件，之后 GET 404", async () => {
+        await start();
+        const {token, url} = store.put(Buffer.from("x"), "image/png", "a.png");
+        const path = join(workDir, "tmp-images", `${token}.png`);
+        expect((await fetch(`${base}${url}`)).status).toBe(200);
+
+        const del = await fetch(`${base}${url}`, {method: "DELETE"});
+        expect(del.status).toBe(200);
         expect(existsSync(path)).toBe(false);
         expect(store.pendingCount).toBe(0);
 
-        // 二次请求（如刷新历史）→ 404，前端有兜底文案
         expect((await fetch(`${base}${url}`)).status).toBe(404);
+        // 重复 DELETE 也 404（前端视作已清理）
+        expect((await fetch(`${base}${url}`, {method: "DELETE"})).status).toBe(404);
     });
 
-    it("未知 token 404", async () => {
+    it("未知 token：GET 与 DELETE 都 404", async () => {
         await start();
         expect((await fetch(`${base}/api/temp-image/nope`)).status).toBe(404);
+        expect((await fetch(`${base}/api/temp-image/nope`, {method: "DELETE"})).status).toBe(404);
     });
 
     it("未登录 401", async () => {
         await start({requireLogin: true});
         const {url} = store.put(Buffer.from("x"), "image/png", "a.png");
         expect((await fetch(`${base}${url}`)).status).toBe(401);
+        expect((await fetch(`${base}${url}`, {method: "DELETE"})).status).toBe(401);
     });
 
     it("未装配 imageStore 时 404", async () => {
