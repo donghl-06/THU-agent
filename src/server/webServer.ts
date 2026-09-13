@@ -13,6 +13,8 @@
  *   POST /api/ui/auth   → {token} → 正确则种 ui_token cookie（.env 配 UI_TOKEN 才启用鉴权；
  *                          启用时豁免清单之外的所有请求都需携带该 cookie，否则 403）
  *   POST /api/chat      → {question, sessionId?, images?} → SSE 流，事件：
+ *   POST /api/upload    → ?name=<文件名> + 原始字节 body → {name, path, sizeBytes}
+ *                         把文件交给清灵（交作业等场景），需登录，单文件 ≤ 50MB
  *       （sessionId 标识前端会话，缺省/非法落到 "default"；每个会话一个
  *         Agent 各自延续上下文，但共享同一登录态——见 agentFactory 实现）
  *       （images 为 data URL 数组，最多 4 张、每张 base64 不超过 6MB 字符；
@@ -47,8 +49,9 @@
  * 把转发目标切到本轮 SSE 连接的桥上（busy 互斥保证同时只有一轮）。
  */
 import {createServer, type IncomingMessage, type ServerResponse, type Server} from "node:http";
-import {readFileSync} from "node:fs";
+import {mkdirSync, readFileSync, writeFileSync} from "node:fs";
 import {dirname, join} from "node:path";
+import {randomUUID} from "node:crypto";
 import type {Agent} from "../harness/agentLoop";
 import type {LlmClient} from "../harness/llmClient";
 import {createLlmClient} from "../harness/llmClient";
@@ -70,6 +73,8 @@ const CONFIRM_TIMEOUT_MS = 5 * 60 * 1000;
 const MAX_IMAGES = 4;
 const MAX_IMAGE_CHARS = 6_000_000;
 const MAX_BODY_CHARS = 25_000_000;
+/** 文件上传限制：单个文件 ≤ 50MB（交作业的 PDF/压缩包足够；图片走 /api/chat 的 images 通道） */
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 const IMAGE_DATA_URL_RE = /^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/;
 const AUTH_TIMEOUT_MS = 5 * 60 * 1000;
 type AuthMethod = "totp" | "mobile" | "wechat";
@@ -179,6 +184,18 @@ async function readBody(req: IncomingMessage): Promise<string> {
     return body;
 }
 
+/** 读二进制请求体（文件上传用），超过 maxBytes 抛错 */
+async function readBinaryBody(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    for await (const chunk of req as AsyncIterable<Buffer>) {
+        total += chunk.length;
+        if (total > maxBytes) throw new Error("body too large");
+        chunks.push(chunk);
+    }
+    return Buffer.concat(chunks);
+}
+
 export interface WebServerOptions {
     port?: number;
     /** 单页 HTML 的路径（测试可注入临时文件） */
@@ -190,6 +207,8 @@ export interface WebServerOptions {
      * 重启恢复；不提供则纯内存（测试默认不落盘）。
      */
     sessionStorePath?: string;
+    /** 上传文件保存目录（/api/upload）。默认 <cwd>/data/uploads */
+    uploadDir?: string;
     /** 任务调度器（Step 23）。提供时暴露 /api/tasks 查询与取消端点 */
     scheduler?: TaskScheduler;
     /** 通知中心（Step 23）。提供时暴露 /api/notifications 轮询端点 */
@@ -638,6 +657,46 @@ export function createWebServer(
         }
     };
 
+    /**
+     * POST /api/upload?name=<urlencoded 文件名> —— 上传文件到本机（body 是原始字节）。
+     * 用途：用户把作业 PDF 等文件交给清灵，之后 Agent 可用返回的绝对路径
+     * 调 submit_learn_homework 等需要本地文件的工具。
+     * 需要登录（与 /api/chat 同级）；单文件 ≤ 50MB。
+     */
+    const uploadDir = opts.uploadDir ?? join(process.cwd(), "data", "uploads");
+    const handleUpload = async (req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> => {
+        if (requireLogin && !authenticated) {
+            res.writeHead(401).end("请先登录后再上传文件");
+            return;
+        }
+        const rawName = url.searchParams.get("name") ?? "";
+        // 清洗文件名：去路径成分、控制字符与 Windows 非法字符，防空名/写穿目录
+        const base = rawName.split(/[\\/]/).pop()?.replace(/[\u0000-\u001f:*?"<>|]/g, "_").trim() ?? "";
+        if (!base || base === "." || base === "..") {
+            res.writeHead(400).end("invalid file name");
+            return;
+        }
+        let body: Buffer;
+        try {
+            body = await readBinaryBody(req, MAX_UPLOAD_BYTES);
+        } catch {
+            res.writeHead(413).end(`文件超过 ${MAX_UPLOAD_BYTES / 1024 / 1024}MB 上限`);
+            return;
+        }
+        if (body.length === 0) {
+            res.writeHead(400).end("empty file");
+            return;
+        }
+        mkdirSync(uploadDir, {recursive: true});
+        // 时间戳 + 随机串前缀避免同名覆盖；原始文件名保留在后半截方便认
+        const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 12);
+        const savedName = `${stamp}_${randomUUID().slice(0, 6)}_${base}`;
+        const savedPath = join(uploadDir, savedName);
+        writeFileSync(savedPath, body);
+        res.writeHead(200, {"Content-Type": "application/json"});
+        res.end(JSON.stringify({name: base, path: savedPath, sizeBytes: body.length}));
+    };
+
     const handleChatCancel = async (res: ServerResponse): Promise<void> => {
         const controller = activeChatAbort;
         const done = activeChatDone;
@@ -944,6 +1003,7 @@ export function createWebServer(
             if (req.method === "POST" && url.pathname === "/api/tasks/cancel") return handleTaskCancel(req, res);
             if (req.method === "POST" && url.pathname === "/api/session/title") return handleSessionTitle(req, res);
             if (req.method === "POST" && url.pathname === "/api/chat") return handleChat(req, res);
+            if (req.method === "POST" && url.pathname === "/api/upload") return handleUpload(req, res, url);
             if (req.method === "POST" && url.pathname === "/api/confirm") return handleConfirm(req, res);
             if (req.method === "POST" && url.pathname === "/api/auth/method") return handleAuthMethod(req, res);
             if (req.method === "POST" && url.pathname === "/api/auth/code") return handleAuthCode(req, res);
