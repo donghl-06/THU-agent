@@ -215,7 +215,7 @@ export class McpServer {
                 capabilities: {tools: {listChanged: false}},
                 serverInfo: {name: this.serverName, version: this.serverVersion},
                 instructions:
-                    "清灵的清华校园查询工具已连接。实时校园数据必须通过工具获取；预约、取消和充值等写操作请使用清灵 Web/EXE 完成确认。",
+                    "清灵的清华校园查询工具已连接。实时校园数据（含校园动态/资讯）必须通过工具获取；预约、取消和充值等写操作请使用清灵 Web/EXE 完成确认。",
             });
         }
         if (method === "tools/list") {
