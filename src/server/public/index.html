@@ -702,7 +702,9 @@ if(__exports != exports)module.exports = exports;return module.exports}));
       <button class="w-card" type="button" data-q="我今天有什么课？"><span class="w-ico">📚</span><span>查今天的课表</span></button>
       <button class="w-card" type="button" data-q="今晚哪里可以打羽毛球？"><span class="w-ico">🏃</span><span>查场馆空位</span></button>
       <button class="w-card" type="button" data-q="帮我看看图书馆哪里有位置"><span class="w-ico">📖</span><span>图书馆座位</span></button>
+      <button class="w-card" type="button" data-q="最近有什么重要的校园通知或资讯？"><span class="w-ico">📢</span><span>看校园动态</span></button>
       <button class="w-card" type="button" data-q="我明天下午有什么空闲时间？"><span class="w-ico">🗓️</span><span>找空闲时间</span></button>
+      <button class="w-card" type="button" data-q="我的校园卡余额是多少？"><span class="w-ico">💳</span><span>查校园卡余额</span></button>
     </div>
     <button id="explore-btn" type="button">探索清灵 →</button>
   </div>
@@ -783,6 +785,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
     <p class="about-ver">Version 0.1.0</p>
     <div class="about-caps">
       <div class="cap"><b>课程</b><span>查询课表、上课地点</span></div>
+      <div class="cap"><b>资讯</b><span>浏览校园动态和通知详情</span></div>
       <div class="cap"><b>日程</b><span>寻找空闲时间</span></div>
       <div class="cap"><b>图书馆</b><span>查询座位情况</span></div>
       <div class="cap"><b>体育</b><span>查询场馆开放和空位</span></div>
@@ -1494,6 +1497,7 @@ const wLoginHint = document.getElementById("w-login-hint");
 const QUICK_ACTIONS = [
   {label: "今晚羽毛球场", q: "今晚哪里可以打羽毛球？现在还有场吗？"},
   {label: "图书馆座位", q: "现在图书馆哪里还有座位？"},
+  {label: "校园动态", q: "最近有什么重要的校园通知或资讯？"},
   {label: "校园卡余额", q: "我的校园卡余额是多少？"},
   {label: "今天有课吗", q: "我今天有什么课？"},
   {label: "宿舍电量", q: "宿舍还剩多少电？"},
@@ -1714,6 +1718,7 @@ function renderThumbs() {
 /* ---- Thinking Card：发送后立即给出可见反馈，真实工具事件驱动状态行 ---- */
 const TOOL_LABELS = {
   get_schedule: "课表", get_classroom_state: "教室空闲情况", get_report: "成绩单",
+  get_campus_news: "校园动态", get_campus_news_detail: "动态详情",
   get_campus_card_info: "校园卡信息", recharge_campus_card: "校园卡充值",
   get_electricity: "宿舍电费", recharge_electricity: "电费充值",
   get_library_seats: "图书馆座位", get_library_rooms: "研讨间",

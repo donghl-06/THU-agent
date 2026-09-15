@@ -50,7 +50,7 @@ cp .env.example .env
 ## 和小助手对话（V0.1 里程碑 🎉）
 
 ```bash
-pnpm agent   # 命令行 Agent：注册全部 5 个查询技能，模型自主决定调哪个
+pnpm agent   # 命令行 Agent：注册全部查询技能，模型自主决定调哪个
 ```
 
 试试这些问法：
@@ -59,6 +59,7 @@ pnpm agent   # 命令行 Agent：注册全部 5 个查询技能，模型自主�
 我今天下午有什么课？
 现在图书馆还有座位吗？
 今晚气膜馆羽毛球还有场吗？
+最近有什么重要的校园通知或资讯？
 ```
 
 ⚠️ `.env` 已在 `.gitignore` 中，**绝不要**把真实凭证写进 `.env.example` 或任何会被提交的文件。
@@ -157,7 +158,7 @@ pnpm --silent mcp # 以 MCP stdio 模式启动，供 Codex 调用校园 Skill
 
 项目同时提供本地 MCP Server，可让 Codex 直接调用清华校园查询 Skill。MCP Server 不替代现有 Web/EXE 模式：Codex 负责理解和规划，服务器复用 `src/skills/` 与 `src/client/`；预约、取消、充值等写操作在 MCP 模式下默认拒绝，继续使用 Web/EXE 的确认界面完成。
 
-详细配置步骤见 [docs/codex-mcp.md](docs/codex-mcp.md)。开发者构建后的 MCP 入口为 `dist/scripts/mcp-server.cjs`，普通用户应直接下载 `清灵-MCP` 发布包。
+详细配置步骤见 [docs/codex-mcp.md](docs/codex-mcp.md)。开发者构建后的 MCP 入口为 `dist/scripts/mcp-server.cjs`，普通用户应直接下载 `清灵-MCP` 发布包。MCP 模式同样支持查询校园动态/资讯详情。
 
 ## 注意事项
 

@@ -6,6 +6,8 @@ import {ThuClient} from "../client/ThuClient";
 import {SportsClient} from "../client/sports/SportsClient";
 import type {Skill} from "./base/types";
 import {createGetScheduleSkill} from "./schedule/getSchedule";
+import {createGetCampusNewsSkill} from "./news/getCampusNews";
+import {createGetCampusNewsDetailSkill} from "./news/getCampusNewsDetail";
 import {createGetCampusCardInfoSkill} from "./card/getCampusCardInfo";
 import {createGetClassroomStateSkill} from "./classroom/getClassroomState";
 import {createGetLibrarySeatsSkill} from "./library/getLibrarySeats";
@@ -93,6 +95,8 @@ export function createAllSkills(opts: SkillAssemblyOptions = {}): Skill[] {
     }
     return [
         createGetScheduleSkill(thu),
+        createGetCampusNewsSkill(thu),
+        createGetCampusNewsDetailSkill(thu),
         createGetCampusCardInfoSkill(thu),
         createGetClassroomStateSkill(thu),
         createGetLibrarySeatsSkill(thu),
