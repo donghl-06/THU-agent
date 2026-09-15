@@ -39,7 +39,8 @@ export function createGetLearnNoticesSkill(client: NoticeSource): Skill {
         name: "get_learn_notices",
         description:
             "查询网络学堂（learn.tsinghua.edu.cn）的课程通知/公告：标题、正文、发布人、时间、附件。" +
-            "正文里直接贴的图片会提取到 images 字段（正文留 [图片N] 占位），用户要看图时用 show_learn_image 的 notice 参数显示。" +
+            "正文里直接贴的图片会提取到 images 字段（正文留 [图片N] 占位），附件是图片时也一样：" +
+            "用户要看图时用 show_learn_image 的 notice 参数显示（附件配 attachment=true）。" +
             "course 给出课名关键词（如“数据结构”）时查对应课程，省略时聚合本学期全部课程的通知。" +
             "unreadOnly=true 只看未读。",
         inputSchema: {
