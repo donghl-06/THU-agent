@@ -5,7 +5,7 @@ import {mkdtempSync, rmSync, existsSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {afterEach, describe, expect, it} from "vitest";
-import {CourseType, type CourseInfo, type File as LearnFile, type SemesterInfo} from "thu-learn-lib";
+import {CourseType, type CourseInfo, type File as LearnFile, type Notification, type Homework, type SemesterInfo} from "thu-learn-lib";
 import {createShowLearnImageSkill, type ShowLearnImageData} from "../../src/skills/learn/showLearnImage";
 import {TempImageStore} from "../../src/utils/tempImageStore";
 
@@ -71,6 +71,9 @@ const fakeClient = {
     getCurrentSemester: async () => fakeSemester,
     getCourses: async () => courses,
     getFileList: async (courseId: string) => filesByCourse[courseId] ?? [],
+    // 正文内嵌图模式才用到，课件模式给空桩即可
+    getNotifications: async () => [] as Notification[],
+    getHomeworkList: async () => [] as Homework[],
     downloadFile: async (url: string) => ({
         buffer: Buffer.from(`bytes of ${url}`),
         filename: undefined as string | undefined,
@@ -142,5 +145,85 @@ describe("show_learn_image Skill（假数据，无网络）", () => {
     it("非法输入：course 缺失", async () => {
         const skill = setup();
         expect((await exec(skill, {})).error!.code).toBe("INVALID_INPUT");
+    });
+});
+
+describe("show_learn_image 公告/作业正文内嵌图（假数据，无网络）", () => {
+    const makeNotice = (title: string, content: string): Notification => ({
+        id: `n-${title}`,
+        title,
+        content,
+        hasRead: false,
+        url: "",
+        markedImportant: false,
+        publishTime: new Date("2026-09-10T02:00:00Z"),
+        publisher: "李老师",
+        isFavorite: false,
+    });
+
+    const notices = [
+        makeNotice("分组名单", `<p>名单见图：</p><img src="/upload/group.png"><p>群二维码：</p><img src="https://learn.tsinghua.edu.cn/upload/qr.jpg">`),
+        makeNotice("纯文字公告", `<p>没有图片</p>`),
+        makeNotice("名单补充说明", `<p>补一张</p><img src="/upload/extra.png">`),
+    ];
+    const homeworks = [
+        {title: "上机作业", description: `<p>按下图连线：</p><img src="/upload/topo.jpg">`} as unknown as Homework,
+    ];
+
+    const inlineClient = {
+        ...fakeClient,
+        getNotifications: async () => notices,
+        getHomeworkList: async () => homeworks,
+    };
+
+    it("notice 模式默认取第 1 张，相对路径解析为学堂绝对 URL", async () => {
+        const skill = setup(inlineClient);
+        const r = await exec(skill, {course: "数据结构", notice: "分组名单"});
+        expect(r.success).toBe(true);
+        expect(r.data!.title).toBe("分组名单（图片1）");
+        // octet-stream 按 URL 扩展名 .png 归一化
+        expect(r.data!.contentType).toBe("image/png");
+        expect(r.data!.markdown).toBe(`![分组名单（图片1）](${r.data!.imageUrl})`);
+    });
+
+    it("notice 模式 index 指定第 2 张", async () => {
+        const skill = setup(inlineClient);
+        const r = await exec(skill, {course: "数据结构", notice: "分组名单", index: 2});
+        expect(r.success).toBe(true);
+        expect(r.data!.title).toBe("分组名单（图片2）");
+        expect(r.data!.contentType).toBe("image/jpeg");
+    });
+
+    it("notice 公告无内嵌图 NOT_FOUND；index 越界 INVALID_INPUT", async () => {
+        const skill = setup(inlineClient);
+        const noImg = await exec(skill, {course: "数据结构", notice: "纯文字"});
+        expect(noImg.error!.code).toBe("NOT_FOUND");
+        expect(noImg.error!.message).toContain("没有内嵌图片");
+        const outOfRange = await exec(skill, {course: "数据结构", notice: "分组名单", index: 3});
+        expect(outOfRange.error!.code).toBe("INVALID_INPUT");
+        expect(outOfRange.error!.message).toContain("只有 2 张");
+    });
+
+    it("notice 标题歧义报 AMBIGUOUS 带候选", async () => {
+        const skill = setup(inlineClient);
+        const r = await exec(skill, {course: "数据结构", notice: "名单"});
+        expect(r.error!.code).toBe("AMBIGUOUS");
+        expect(r.error!.message).toContain("名单补充说明");
+    });
+
+    it("homework 模式显示作业描述内嵌图", async () => {
+        const skill = setup(inlineClient);
+        const r = await exec(skill, {course: "数据结构", homework: "上机"});
+        expect(r.success).toBe(true);
+        expect(r.data!.title).toBe("上机作业（图片1）");
+        expect(r.data!.contentType).toBe("image/jpeg");
+    });
+
+    it("file/notice/homework 互斥；index 非法被拒", async () => {
+        const skill = setup(inlineClient);
+        const both = await exec(skill, {course: "数据结构", file: "二维码", notice: "名单"});
+        expect(both.error!.code).toBe("INVALID_INPUT");
+        expect(both.error!.message).toContain("三选一");
+        expect((await exec(skill, {course: "数据结构", notice: "分组名单", index: 0})).error!.code).toBe("INVALID_INPUT");
     });
 });

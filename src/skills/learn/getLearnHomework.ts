@@ -8,6 +8,7 @@
 import type {Homework} from "thu-learn-lib";
 import {ThuError} from "../../client/errors";
 import type {LearnClient} from "../../client/learn/LearnClient";
+import {extractInlineImages, type InlineImage} from "../../utils/htmlImages";
 import {htmlToText} from "../../utils/htmlToText";
 import {fail, ok, type Skill, type SkillResult} from "../base/types";
 import {courseDisplayName, resolveCourses, type CourseSource} from "./courseResolve";
@@ -24,8 +25,10 @@ export interface LearnHomeworkItem {
     overdue: boolean;
     /** online=线上提交 / offline=线下完成（如实验报告交纸质版） */
     submissionType: "online" | "offline";
-    /** 作业要求（纯文本） */
+    /** 作业要求（纯文本，正文内嵌图片留 [图片N] 占位） */
     description?: string;
+    /** 作业要求里直接贴的内嵌图片；可用 show_learn_image 的 homework 参数显示 */
+    images?: InlineImage[];
     /** 提交时间（已交时） */
     submittedAt?: string;
     /** 成绩（分数或等级如 A-/已阅，已批改时） */
@@ -44,6 +47,9 @@ type HomeworkSource = CourseSource & Pick<LearnClient, "getHomeworkList">;
 const STATUS_VALUES = ["unsubmitted", "submitted", "graded", "all"] as const;
 type StatusFilter = (typeof STATUS_VALUES)[number];
 
+/** 学堂域名：作业描述内嵌图片的相对路径按它解析成绝对 URL */
+const LEARN_BASE_URL = "https://learn.tsinghua.edu.cn";
+
 function statusOf(h: Homework): "unsubmitted" | "submitted" | "graded" {
     if (h.graded) return "graded";
     if (h.submitted) return "submitted";
@@ -60,6 +66,7 @@ export function createGetLearnHomeworkSkill(client: HomeworkSource): Skill {
         name: "get_learn_homework",
         description:
             "查询网络学堂（learn.tsinghua.edu.cn）的课程作业：标题、截止时间、提交状态、成绩评语。" +
+            "作业要求里直接贴的图片会提取到 images 字段，用户要看图时用 show_learn_image 的 homework 参数显示。" +
             "course 给课名关键词查对应课程，省略时聚合本学期全部课程，按截止时间升序（最紧急在前）。" +
             "status 可过滤 unsubmitted（未交，问“有什么作业要交”时用）/ submitted / graded（问成绩时用）。",
         inputSchema: {
@@ -121,6 +128,9 @@ export function createGetLearnHomeworkSkill(client: HomeworkSource): Skill {
                     .map(({course, raw: h}): LearnHomeworkItem => {
                         const deadline = validDeadline(h);
                         const s = statusOf(h);
+                        const desc = h.description
+                            ? extractInlineImages(h.description, LEARN_BASE_URL)
+                            : undefined;
                         return {
                             course,
                             title: h.title,
@@ -129,9 +139,8 @@ export function createGetLearnHomeworkSkill(client: HomeworkSource): Skill {
                             overdue: s === "unsubmitted" && deadline !== null && deadline.getTime() < now,
                             submissionType:
                                 h.submissionType === 0 ? "offline" : "online",
-                            ...(h.description
-                                ? {description: htmlToText(h.description)}
-                                : {}),
+                            ...(desc ? {description: desc.text} : {}),
+                            ...(desc && desc.images.length > 0 ? {images: desc.images} : {}),
                             ...(h.submitTime ? {submittedAt: formatBeijing(h.submitTime)} : {}),
                             ...(h.grade !== undefined
                                 ? {grade: String(h.grade)}

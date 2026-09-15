@@ -116,6 +116,29 @@ describe("get_learn_notices Skill（假数据，无网络）", () => {
         expect(r.error!.code).toBe("NOT_FOUND");
         expect(r.error!.message).toContain("数据结构");
     });
+
+    it("正文内嵌图片提取到 images 字段，正文留 [图片N] 占位", async () => {
+        const client = {
+            ...fakeClient,
+            getNotifications: async () => [{
+                ...makeNotice("分组名单", "2026-09-11T02:00:00Z", false),
+                content: `<p>名单见图：</p><img src="/upload/2026/group.png"><p>确认后回复</p>`,
+            }],
+        };
+        const r = (await createGetLearnNoticesSkill(client).execute({course: "数据结构"})) as
+            {success: boolean; data?: LearnNoticesData};
+        expect(r.success).toBe(true);
+        const notice = r.data!.notices[0];
+        expect(notice.content).toBe("名单见图：\n[图片1]\n确认后回复");
+        expect(notice.images).toEqual([
+            {index: 1, url: "https://learn.tsinghua.edu.cn/upload/2026/group.png"},
+        ]);
+    });
+
+    it("正文没有内嵌图片时不带 images 字段", async () => {
+        const r = await exec({course: "数据结构"});
+        expect(r.data!.notices[0].images).toBeUndefined();
+    });
 });
 
 describe("htmlToText", () => {

@@ -142,6 +142,24 @@ describe("get_learn_homework Skill（假数据，无网络）", () => {
     it("描述剥成纯文本", async () => {
         const r = await exec({course: "数据结构", status: "unsubmitted"});
         expect(r.data!.homework[0].description).toBe("完成第 3 章习题");
+        expect(r.data!.homework[0].images).toBeUndefined();
+    });
+
+    it("描述内嵌图片提取到 images 字段，描述留 [图片N] 占位", async () => {
+        const client = {...fakeClient, getHomeworkList: async () => [
+            makeHomework("上机作业", {
+                deadline: new Date("2099-01-01T15:59:00Z"),
+                description: `<p>按下图连线：</p><img src="/upload/2026/topo.jpg">`,
+            }),
+        ]};
+        const s = createGetLearnHomeworkSkill(client);
+        const r = (await s.execute({course: "数据结构"})) as
+            {success: boolean; data?: LearnHomeworkData};
+        expect(r.success).toBe(true);
+        expect(r.data!.homework[0].description).toBe("按下图连线：\n[图片1]");
+        expect(r.data!.homework[0].images).toEqual([
+            {index: 1, url: "https://learn.tsinghua.edu.cn/upload/2026/topo.jpg"},
+        ]);
     });
 
     it("无未交作业时 NOT_FOUND 文案友好", async () => {
