@@ -1,5 +1,5 @@
 import {motion} from "motion/react";
-import {ArrowUpRight, BookOpen, CalendarDays, Clock3, Volleyball} from "lucide-react";
+import {ArrowUpRight, BookOpen, CalendarDays, Clock3, CreditCard, Newspaper, Volleyball} from "lucide-react";
 import {Brand} from "./Controls";
 
 export const suggestions = [
@@ -7,6 +7,8 @@ export const suggestions = [
     {icon: Volleyball, title: "运动一下", detail: "看看今晚的场馆空位", question: "今晚哪里可以打羽毛球？"},
     {icon: BookOpen, title: "找个自习位", detail: "查询图书馆可用座位", question: "帮我看看图书馆哪里有位置"},
     {icon: Clock3, title: "安排空闲时间", detail: "查查明天的空闲时段", question: "我明天下午有什么空闲时间？"},
+    {icon: Newspaper, title: "校园动态", detail: "浏览校园通知与资讯", question: "最近有什么重要的校园通知或资讯？"},
+    {icon: CreditCard, title: "校园卡余额", detail: "查看校园卡账户信息", question: "我的校园卡余额是多少？"},
 ];
 
 export function Welcome({send, authenticated}: {send: (question: string) => void; authenticated: boolean}) {

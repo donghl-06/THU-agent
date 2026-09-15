@@ -1,6 +1,6 @@
 import {useState, type FormEvent} from "react";
 import {AnimatePresence} from "motion/react";
-import {ArrowUpRight, BookOpen, CalendarDays, Check, Fingerprint, KeyRound, LoaderCircle, LockKeyhole, LogOut, MessageCircle, Power, ShieldCheck, Smartphone, Trash2, Unplug, Volleyball} from "lucide-react";
+import {ArrowUpRight, BookOpen, CalendarDays, Check, Fingerprint, KeyRound, LoaderCircle, LockKeyhole, LogOut, MessageCircle, Newspaper, Power, ShieldCheck, Smartphone, Trash2, Unplug, Volleyball} from "lucide-react";
 import type {Assistant} from "../lib/useAssistant";
 import {toolLabels} from "../lib/api";
 import {Modal} from "./Modal";
@@ -11,6 +11,7 @@ export function Dialogs({app, about, closeAbout}: {app: Assistant; about: boolea
         {about && <Modal key="about" title="关于清灵" close={closeAbout} className="about-modal"><Brand large/><h3>清灵 <span>QingLing</span></h3><p>你的清华校园智能助手</p><div className="about-services">{[
             {icon: CalendarDays, label: "课程与日程", text: "查课表、成绩，寻找空闲时间"},
             {icon: BookOpen, label: "图书馆", text: "查空位、预约座位与研讨间"},
+            {icon: Newspaper, label: "校园资讯", text: "浏览校园动态和通知详情"},
             {icon: Volleyball, label: "体育与生活", text: "场馆预约、校园卡、宿舍电费"},
         ].map(({icon: Icon, label, text}) => <div key={label}><Icon size={19}/><span><strong>{label}</strong><small>{text}</small></span></div>)}</div><p className="privacy-note"><ShieldCheck size={15}/>预约、充值等操作始终由你确认</p><button className="button primary full" onClick={closeAbout}>开始使用<ArrowUpRight size={16}/></button></Modal>}
         {app.auth && <AuthDialog key="auth" app={app}/>}

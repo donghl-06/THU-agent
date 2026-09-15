@@ -21,12 +21,13 @@ Agent 自主判断并组合多个校园能力（查课表 → 推理空闲时间
                                           │                │
                              ThuClient / SportsClient   Web 常驻调度器
                               / MyhomeClient / UseregClient
+                              / LearnClient / MailClient
                                           │
                                   SDK / 校园系统接口
 ```
 
-交互式 CLI 提供 18 个校园工具；Web 与外部 Skill CLI 提供 22 个工具（含 4 个任务工具）。
-外部 CLI 的任务调用转交常驻 Web 服务。MCP 默认提供 11 个校园只读工具和 2 个登录/用户信息工具，
+交互式 CLI 提供 31 个校园工具；Web 与外部 Skill CLI 提供 35 个工具（含 4 个任务工具）。
+外部 CLI 的任务调用转交常驻 Web 服务。MCP 默认提供 21 个校园只读工具和 2 个登录/用户信息工具，
 不支持写操作或任务调度。各入口复用业务实现，不自动共享跨进程的登录会话。
 
 ## 环境要求
@@ -59,7 +60,7 @@ cp .env.example .env
 ## 命令行对话
 
 ```bash
-pnpm agent   # 18 个校园查询/操作工具，写操作须在终端确认；不包含定时任务
+pnpm agent   # 31 个校园查询/操作工具，写操作须在终端确认；不包含定时任务
 ```
 
 试试这些问法：
@@ -68,6 +69,7 @@ pnpm agent   # 18 个校园查询/操作工具，写操作须在终端确认；�
 我今天下午有什么课？
 现在图书馆还有座位吗？
 今晚气膜馆羽毛球还有场吗？
+最近有什么重要的校园通知或资讯？
 ```
 
 ## 供任意 AI Agent 调用
@@ -75,7 +77,7 @@ pnpm agent   # 18 个校园查询/操作工具，写操作须在终端确认；�
 仓库内置了一个遵循 Agent Skills 目录结构的项目级 Skill：
 `.agents/skills/thu-agent/SKILL.md`。兼容 Agent Skills 且能运行本地命令的
 AI Agent 可以自动发现它，并通过机器可读 CLI 使用 `createAllSkills()` 中装配的
-校园能力，不需要接入本项目自己的 LLM。目前包含 18 个直接调用的校园能力，以及
+校园能力，不需要接入本项目自己的 LLM。目前包含 31 个直接调用的校园能力，以及
 通过常驻 Web 调度器执行的 4 个任务能力（提醒、定时抢场、任务查询与取消）。
 
 也可以直接检查这层接口：
@@ -90,7 +92,7 @@ pnpm --silent skill call get_schedule --input '{}'
 `THU_FINGERPRINT` 可留空使用自动持久化的设备身份；不需要 `LLM_*` 配置。
 校园网状态查询另需 `CJY_*` 识别验证码。宿舍卫生成绩返回公示图，可使用 Skill 中的
 `scripts/extract-images.mjs` 解码成私有临时图片，再由调用方的看图能力读取。
-所有 `requiresConfirmation: true` 的预约、取消、充值和支付类操作默认拒绝执行；
+所有 `requiresConfirmation: true` 的预约、取消、充值、支付、作业提交、下载和发信操作默认拒绝执行；
 外部 Agent 必须先向用户展示完整操作参数并取得本次明确同意，之后才能为该次调用
 附加 `--confirmed-by-user`。确认不能跨调用复用，失败或结果不明确时也不能自动重试。
 
@@ -120,7 +122,20 @@ pnpm --silent skill call list_my_tasks --input '{"includeFinished":true}'
 pnpm step1   # InfoHelper 实例化（不联网）
 pnpm step2   # 真实登录 + 获取用户信息
 pnpm step3   # 获取真实课表
+pnpm learn   # 网络学堂真链验证（课程/通知/作业/课件/日历）
 ```
+
+### 网络学堂（learn.tsinghua.edu.cn）
+
+清灵已接入网络学堂（复用同一账号与信任设备，无需二次登录）：
+
+- `get_learn_courses` / `get_learn_notices` / `get_learn_homework` / `get_learn_files` / `get_learn_calendar`：
+  查课程、通知、作业（含截止时间与成绩）、课件列表、学堂日历 + 作业截止聚合；
+- `submit_learn_homework`：把本地 PDF 等文件提交到指定作业（写操作，需用户在确认弹窗同意）；
+- `download_learn_file`：把课件下载到本地目录（写操作，需确认）。
+
+可以试试：「我有什么作业要交？」「数据结构最近有什么通知？」
+「帮我把桌面上的 hw3.pdf 交到数据结构的第三次作业」。
 
 ### Web UI 图形化登录
 
@@ -225,7 +240,7 @@ pnpm --silent mcp # 以 MCP stdio 模式启动，供 Codex 调用校园 Skill
 
 项目同时提供本地 MCP Server，可让 Codex 直接调用清华校园查询 Skill。MCP Server 不替代现有 Web/EXE 模式：Codex 负责理解和规划，服务器复用 `src/skills/` 与 `src/client/`；预约、取消、充值等写操作在 MCP 模式下默认拒绝，继续使用 Web/EXE 的确认界面完成。
 
-详细配置步骤见 [docs/codex-mcp.md](docs/codex-mcp.md)。开发者构建后的 MCP 入口为 `dist/scripts/mcp-server.cjs`，普通用户应直接下载 `清灵-MCP` 发布包。
+详细配置步骤见 [docs/codex-mcp.md](docs/codex-mcp.md)。开发者构建后的 MCP 入口为 `dist/scripts/mcp-server.cjs`，普通用户应直接下载 `清灵-MCP` 发布包。MCP 模式同样支持查询校园动态/资讯详情。
 
 ## 注意事项
 

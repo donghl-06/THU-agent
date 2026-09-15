@@ -16,6 +16,7 @@
  */
 import {InfoHelper} from "@thu-info/lib";
 import {CardRechargeType} from "@thu-info/lib/dist/models/card/recharge";
+import type {ChannelTag} from "@thu-info/lib/dist/models/news/news";
 import {config} from "../config/env";
 import {setupAuth, type LoginCredentials, type TwoFactorHooks} from "./auth";
 import {AuthSessionStore} from "./authPersist";
@@ -182,6 +183,25 @@ export class ThuClient {
     /** 获取成绩单（全部学期课程：名称/学分/等级/绩点）。bx=true 附带必限任标记 */
     async getReport(): ReturnType<InfoHelper["getReport"]> {
         return this.call(() => this.helper.getReport(true, true));
+    }
+
+    /** 获取校园动态/资讯列表，可按栏目过滤 */
+    async getNewsList(page: number, length: number, channel?: ChannelTag): ReturnType<InfoHelper["getNewsList"]> {
+        return this.call(() => this.helper.getNewsList(page, length, channel));
+    }
+
+    /** 按关键词搜索校园动态/资讯，可按栏目过滤 */
+    async searchNewsList(
+        page: number,
+        key: string,
+        channel?: ChannelTag,
+    ): ReturnType<InfoHelper["searchNewsList"]> {
+        return this.call(() => this.helper.searchNewsList(page, key, channel));
+    }
+
+    /** 获取某条校园动态/资讯的详情。url 必须来自列表接口返回的 url */
+    async getNewsDetail(url: string): ReturnType<InfoHelper["getNewsDetail"]> {
+        return this.call(() => this.helper.getNewsDetail(url));
     }
 
     /** 获取宿舍电费余额与更新时间（上游可能返回 remainder=null + "暂时无法查询"） */

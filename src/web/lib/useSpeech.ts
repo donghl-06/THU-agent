@@ -1,4 +1,4 @@
-import {useEffect, useRef, useState} from "react";
+import {useEffect, useLayoutEffect, useRef, useState, type RefObject} from "react";
 
 interface SpeechResult {isFinal: boolean; [index: number]: {transcript: string}}
 interface SpeechRecognitionInstance {
@@ -14,13 +14,20 @@ interface SpeechRecognitionInstance {
 }
 type SpeechWindow = Window & {SpeechRecognition?: new () => SpeechRecognitionInstance; webkitSpeechRecognition?: new () => SpeechRecognitionInstance};
 
-export function useSpeech(value: string, onChange: (text: string) => void, notify: (text: string) => void) {
+export function useSpeech(value: string, onChange: (text: string) => void, notify: (text: string) => void, textarea: RefObject<HTMLTextAreaElement | null>) {
     const [listening, setListening] = useState(false);
     const recognition = useRef<SpeechRecognitionInstance | null>(null);
     const continuing = useRef(false);
     const restartTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
     const changeRef = useRef(onChange);
+    const cursor = useRef<number | null>(null);
     changeRef.current = onChange;
+    useLayoutEffect(() => {
+        if (cursor.current !== null) {
+            textarea.current?.setSelectionRange(cursor.current, cursor.current);
+            cursor.current = null;
+        }
+    }, [value, textarea]);
     const Recognition = (window as SpeechWindow).SpeechRecognition ?? (window as SpeechWindow).webkitSpeechRecognition;
     function stop() {
         continuing.current = false;
@@ -31,7 +38,12 @@ export function useSpeech(value: string, onChange: (text: string) => void, notif
     function toggle() {
         if (continuing.current) { stop(); return; }
         if (!Recognition) { notify("当前浏览器不支持语音输入，请使用支持语音识别的浏览器并允许麦克风权限。"); return; }
-        let base = value.trim() ? `${value.trim()} ` : "";
+        const startPosition = textarea.current?.selectionStart ?? value.length;
+        const endPosition = textarea.current?.selectionEnd ?? startPosition;
+        const before = value.slice(0, startPosition);
+        const after = value.slice(endPosition);
+        let base = before + (before && !/\s$/.test(before) ? " " : "");
+        const suffix = (after && !/^\s/.test(after) ? " " : "") + after;
         continuing.current = true;
         setListening(true);
         function start() {
@@ -48,7 +60,8 @@ export function useSpeech(value: string, onChange: (text: string) => void, notif
                     if (result.isFinal) final += result[0].transcript;
                     else interim += result[0].transcript;
                 }
-                changeRef.current(base + final + interim);
+                cursor.current = (base + final + interim).length;
+                changeRef.current(base + final + interim + suffix);
             };
             rec.onend = () => {
                 base += final;

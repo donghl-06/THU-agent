@@ -47,6 +47,7 @@ export async function readStream(response: Response, onEvent: (event: StreamEven
 
 export const toolLabels: Record<string, string> = {
     get_schedule: "课程表", get_classroom_state: "教室空位", get_report: "成绩单",
+    get_campus_news: "校园动态", get_campus_news_detail: "动态详情",
     get_campus_card_info: "校园卡", recharge_campus_card: "校园卡充值",
     get_electricity: "宿舍电量", recharge_electricity: "电费充值",
     get_library_seats: "图书馆座位", get_library_rooms: "研讨间",
@@ -54,6 +55,10 @@ export const toolLabels: Record<string, string> = {
     cancel_library_booking: "取消图书馆预约", get_my_library_bookings: "图书馆预约",
     get_sports_resources: "体育场馆", book_sports_field: "预约体育场馆", pay_sports_order: "体育订单支付",
     get_dorm_hygiene: "宿舍卫生", get_network_status: "校园网",
+    get_learn_courses: "学堂课程", get_learn_notices: "学堂通知", get_learn_homework: "学堂作业",
+    submit_learn_homework: "提交学堂作业", get_learn_files: "学堂课件", download_learn_file: "下载学堂课件",
+    get_learn_calendar: "学堂日历", show_learn_image: "学堂图片",
+    get_emails: "清华邮箱", send_email: "发送邮件", show_email_image: "邮件图片",
     create_reminder: "创建提醒", schedule_sports_booking: "定时预约", list_my_tasks: "我的任务", cancel_task: "取消任务",
 };
 

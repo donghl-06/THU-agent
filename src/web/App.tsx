@@ -2,6 +2,7 @@ import {useCallback, useEffect, useLayoutEffect, useRef, useState} from "react";
 import {AnimatePresence, MotionConfig, motion, useReducedMotion} from "motion/react";
 import {ArrowDown, Bell, BellOff, Check, CircleHelp, Info, Moon, PanelLeft, ShieldCheck, Sun, Volume2, VolumeX, X} from "lucide-react";
 import {useAssistant} from "./lib/useAssistant";
+import type {UploadedFile} from "./lib/types";
 import {storage} from "./lib/history";
 import {Sidebar} from "./components/Sidebar";
 import {Composer} from "./components/Composer";
@@ -84,14 +85,14 @@ function Workspace() {
         } catch { /* Sound is optional. */ }
     }
 
-    async function send(text: string, images: string[] = []) {
+    async function send(text: string, images: string[] = [], files: UploadedFile[] = []) {
         if (app.turn || app.loginPending) return;
         if (!app.authenticated) { setDraft(text); app.openLogin(); return; }
         setDraft("");
         window.speechSynthesis?.cancel();
         beep();
         following.current = true;
-        const answer = await app.send(text, images);
+        const answer = await app.send(text, images, files);
         if (answer && tts && "speechSynthesis" in window) {
             const utterance = new SpeechSynthesisUtterance(answer);
             utterance.lang = "zh-CN";
@@ -150,8 +151,8 @@ function Workspace() {
                     setShowScroll(false);
                     chat.current?.scrollTo({top: chat.current.scrollHeight, behavior: reducedMotion ? "instant" : "smooth"});
                 }}><ArrowDown size={18}/></motion.button>}</AnimatePresence>
-                {!empty && <div className="quick-actions">{["今天有什么课", "图书馆座位", "校园卡余额"].map(text => <button key={text} disabled={Boolean(app.turn)} onClick={() => void send(text)}>{text}</button>)}</div>}
-                <Composer app={app} value={draft} setValue={setDraft} onSend={(text, images) => void send(text, images)}/>
+                {!empty && <div className="quick-actions">{["今天有什么课", "图书馆座位", "校园动态", "校园卡余额"].map(text => <button key={text} disabled={Boolean(app.turn)} onClick={() => void send(text)}>{text}</button>)}</div>}
+                <Composer app={app} value={draft} setValue={setDraft} onSend={(text, images, files) => void send(text, images, files)}/>
             </div>
             {empty && <span className="workspace-footnote"><ShieldCheck size={13}/>操作前确认，信息更安心</span>}
         </main>

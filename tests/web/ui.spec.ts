@@ -212,3 +212,98 @@ test("图片附件与输入法 Enter 不会误发", async ({page}) => {
     await input.press("Shift+Enter");
     await expect(input).toHaveValue("中文输入中\n");
 });
+
+test("文件上传不依赖视觉模型，发送保留文件上下文且历史只显示文件名", async ({page}) => {
+    await page.route("**/api/capabilities", route => route.fulfill({json: {vision: false}}));
+    await page.route("**/api/upload?*", route => route.fulfill({json: {name: "作业.pdf", path: "/fixture/uploads/homework.pdf", sizeBytes: 12}}));
+    await page.route("**/api/chat", route => route.fulfill({contentType: "text/event-stream", body: 'event: answer\ndata: {"text":"已收到文件，请说明用途。"}\n\nevent: done\ndata: {}\n\n'}));
+    await page.goto("/");
+    await login(page);
+    await expect(page.getByRole("button", {name: "添加图片"})).not.toBeVisible();
+    await page.getByLabel("选择文件", {exact: true}).setInputFiles({name: "作业.pdf", mimeType: "application/pdf", buffer: Buffer.from("fixture file")});
+    await expect(page.locator(".file-attachment")).toHaveText("作业.pdf");
+    await expect(page.getByRole("button", {name: "发送消息"})).toBeEnabled();
+    await expect(page.locator(".attachments")).toHaveCSS("opacity", "1");
+    await page.screenshot({path: "docs/screenshots/web-file-upload.png", animations: "disabled"});
+    const sent = page.waitForRequest("**/api/chat");
+    await page.getByRole("button", {name: "发送消息"}).click();
+    expect((await sent).postDataJSON().question).toContain("/fixture/uploads/homework.pdf");
+    await expect(page.locator(".user-message")).toHaveText("📎 作业.pdf");
+    await expect(page.locator(".markdown")).toHaveText("已收到文件，请说明用途。");
+    await expect(page.locator(".file-attachment")).toHaveCount(0);
+    expect(await page.evaluate(() => localStorage.getItem("thu-assistant-sessions-v1"))).not.toContain("/fixture/uploads/");
+    await page.reload();
+    await expect(page.locator(".user-message")).toHaveText("📎 作业.pdf");
+});
+
+test("切换对话丢弃未完成上传，空文件与上传失败不进入附件", async ({page}) => {
+    let finishUpload: (() => Promise<void>) | undefined;
+    await page.route("**/api/upload?*", async route => {
+        await new Promise<void>(resolve => { finishUpload = async () => { await route.fulfill({json: {name: "旧文件.pdf", path: "/fixture/old.pdf", sizeBytes: 1}}); resolve(); }; });
+    });
+    await page.goto("/");
+    await login(page);
+    const picker = page.getByLabel("选择文件", {exact: true});
+    await picker.setInputFiles({name: "空文件.pdf", mimeType: "application/pdf", buffer: Buffer.alloc(0)});
+    await expect(page.getByText("「空文件.pdf」是空文件", {exact: true})).toBeVisible();
+    const started = page.waitForRequest("**/api/upload?*");
+    await picker.setInputFiles({name: "旧文件.pdf", mimeType: "application/pdf", buffer: Buffer.from("x")});
+    await started;
+    await expect(page.getByRole("button", {name: "发送消息"})).toBeDisabled();
+    await page.getByRole("button", {name: "新建对话"}).click();
+    await expect.poll(() => Boolean(finishUpload)).toBe(true);
+    await finishUpload!();
+    await expect(page.locator(".file-attachment")).toHaveCount(0);
+    await page.route("**/api/upload?*", route => route.fulfill({status: 500}));
+    await picker.setInputFiles({name: "失败.pdf", mimeType: "application/pdf", buffer: Buffer.from("x")});
+    await expect(page.getByText("上传「失败.pdf」失败，请重试", {exact: true})).toBeVisible();
+    await expect(page.locator(".file-attachment")).toHaveCount(0);
+});
+
+test("临时图片可查看原图，删除失败可重试，过期图片显示说明", async ({page}) => {
+    let deletes = 0;
+    await page.route("**/api/temp-image/fixture", route => {
+        if (route.request().method() === "DELETE") return route.fulfill({status: ++deletes === 1 ? 500 : 200});
+        return route.fulfill({contentType: "image/png", body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6SAAAAABJRU5ErkJggg==", "base64")});
+    });
+    await page.route("**/api/temp-image/expired", route => route.fulfill({status: 404}));
+    await page.route("**/api/chat", route => route.fulfill({contentType: "text/event-stream", body: `event: answer\ndata: ${JSON.stringify({text: "![邮件图片](/api/temp-image/fixture)\n\n![过期图片](/api/temp-image/expired)"})}\n\nevent: done\ndata: {}\n\n`}));
+    await page.goto("/");
+    await login(page);
+    await page.getByRole("textbox", {name: "发送给清灵的消息"}).fill("查看邮件图片");
+    await page.getByRole("button", {name: "发送消息"}).click();
+    await expect(page.getByAltText("邮件图片", {exact: true})).toBeVisible();
+    await expect(page.locator('.inline-image a[href="/api/temp-image/fixture"]')).toHaveAttribute("target", "_blank");
+    expect(deletes).toBe(0);
+    await expect(page.locator(".image-note")).toHaveCount(1);
+    await page.getByRole("button", {name: "已用完，删除图片"}).click();
+    await expect(page.getByRole("alert")).toHaveText("删除失败，请重试");
+    await expect(page.getByAltText("邮件图片", {exact: true})).toBeVisible();
+    await page.getByRole("button", {name: "已用完，删除图片"}).click();
+    await expect(page.getByAltText("邮件图片", {exact: true})).not.toBeVisible();
+    await expect(page.locator(".image-note")).toHaveCount(2);
+    await page.getByRole("button", {name: "切换到深色模式"}).click();
+    await expect(page.getByAltText("邮件图片", {exact: true})).not.toBeVisible();
+    expect(deletes).toBe(2);
+});
+
+test("语音输入替换选区并保留光标之后的内容", async ({page}) => {
+    await page.addInitScript(() => {
+        class Recognition {
+            onresult?: (event: unknown) => void;
+            start() { (window as unknown as {emitSpeech: (text: string) => void}).emitSpeech = text => this.onresult?.({results: [{isFinal: true, 0: {transcript: text}}]}); }
+            stop() {}
+            abort() {}
+        }
+        Object.assign(window, {SpeechRecognition: Recognition});
+    });
+    await page.goto("/");
+    const input = page.getByRole("textbox", {name: "发送给清灵的消息"});
+    await input.fill("明天旧内容上课");
+    await input.evaluate((element: HTMLTextAreaElement) => element.setSelectionRange(2, 5));
+    await page.getByRole("button", {name: "语音输入", exact: true}).click();
+    await page.evaluate(() => (window as unknown as {emitSpeech: (text: string) => void}).emitSpeech("下午"));
+    await expect(input).toHaveValue("明天 下午 上课");
+    expect(await input.evaluate((element: HTMLTextAreaElement) => element.selectionStart)).toBe(5);
+    await page.getByRole("button", {name: "停止语音输入", exact: true}).click();
+});

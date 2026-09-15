@@ -1,7 +1,7 @@
 import {useCallback, useEffect, useRef, useState} from "react";
 import {ApiError, errorMessage, readStream, request, type StreamEvent} from "./api";
 import {deriveTitle, mergeHistory, newId, parseHistory, persistHistory, readHistory, SESSIONS_KEY, updateSession} from "./history";
-import type {AuthState, Confirmation, Message, Notice, Result, SessionsState, Turn, Usage} from "./types";
+import type {AuthState, Confirmation, Message, Notice, Result, SessionsState, Turn, UploadedFile, Usage} from "./types";
 
 export function useAssistant() {
     const [history, setHistory] = useState(readHistory);
@@ -293,15 +293,19 @@ export function useAssistant() {
         return finalAnswer ? text : undefined;
     }
 
-    async function send(question: string, images: string[] = []) {
-        if ((!question.trim() && !images.length) || chatAbort.current || loginAbort.current || lifecycle) return;
+    async function send(question: string, images: string[] = [], files: UploadedFile[] = []) {
+        if ((!question.trim() && !images.length && !files.length) || chatAbort.current || loginAbort.current || lifecycle) return;
         if (!authenticatedRef.current) { openLogin(); return; }
         const sessionId = historyRef.current.activeId;
+        const display = [question.trim(), ...(files.length ? [`📎 ${files.map(file => file.name).join("、")}`] : [])].filter(Boolean).join("\n");
+        const agentText = files.length ? files.map(file =>
+            `（用户已上传文件「${file.name}」，保存在本机路径：${file.path}。需要本地文件路径的工具（如 submit_learn_homework 的 filePath）可直接使用该路径。）`,
+        ).join("\n") + "\n\n" + (question.trim() || "（用户上传了上述文件，请结合对话确认它的用途。）") : question.trim();
         commit(state => updateSession(state, sessionId, session => {
-            const messages: Message[] = [...session.messages, {id: newId(), role: "user", text: question.trim(), images, imageCount: images.length}];
+            const messages: Message[] = [...session.messages, {id: newId(), role: "user", text: display, images, imageCount: images.length}];
             return {...session, messages, title: session.title === "新对话" ? deriveTitle(messages) : session.title};
         }));
-        return generate(question.trim(), images);
+        return generate(agentText, images);
     }
 
     function stop() {

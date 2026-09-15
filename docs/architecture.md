@@ -20,7 +20,7 @@
                                              ▼
                                   createAllSkills() 统一装配
                                     │                  │
-                           18 个校园原子工具       4 个任务工具（可选）
+                           31 个校园原子工具       4 个任务工具（可选）
                                     │                  │
                               领域客户端       Web 常驻 TaskScheduler
                                     │                  │
@@ -34,10 +34,10 @@ JSON CLI 的任务调用通过本机 HTTP 桥接到已运行的 Web 服务；它
 
 | 入口 | 实现 | 使用本项目 LLM | 当前能力 | 写操作确认 |
 | --- | --- | --- | --- | --- |
-| `pnpm agent` | `scripts/step10-agent.ts` | 是 | 18 个校园工具：11 读、7 写；无任务调度器 | 终端展示参数，输入 `y` / `yes` |
-| `pnpm web` | `scripts/web-dev.mjs` → Vite / `scripts/step18-web.ts` → `src/server/webServer.ts` | 对话需要；任务执行不需要 | 18 个校园工具 + 4 个任务工具 | 浏览器确认交互 |
-| `pnpm --silent skill …` | `src/skillCli.ts` | 否 | 22 个工具；任务依赖 Web | 宿主先取得用户明确同意，再逐次传 `--confirmed-by-user` |
-| `pnpm --silent mcp` | `scripts/mcp-server.ts` → `src/mcp/server.ts` | 否 | 默认 11 个校园读工具 + `thu_login` / `get_user_info` | 当前不支持写操作确认，拒绝执行写工具 |
+| `pnpm agent` | `scripts/step10-agent.ts` | 是 | 31 个校园工具：21 读、10 写；无任务调度器 | 终端展示参数，输入 `y` / `yes` |
+| `pnpm web` | `scripts/web-dev.mjs` → Vite / `scripts/step18-web.ts` → `src/server/webServer.ts` | 对话需要；任务执行不需要 | 31 个校园工具 + 4 个任务工具 | 浏览器确认交互 |
+| `pnpm --silent skill …` | `src/skillCli.ts` | 否 | 35 个工具；任务依赖 Web | 宿主先取得用户明确同意，再逐次传 `--confirmed-by-user` |
+| `pnpm --silent mcp` | `scripts/mcp-server.ts` → `src/mcp/server.ts` | 否 | 默认 21 个校园读工具 + `thu_login` / `get_user_info` | 当前不支持写操作确认，拒绝执行写工具 |
 
 `pnpm dev` 的 `src/index.ts` 仍是提示入口，不是 Agent 或 Web 启动命令。
 Windows EXE / macOS 应用封装的是同一套本地 Web 服务及启动、托盘、通知能力，
@@ -73,6 +73,9 @@ React 渲染并跳过原始 HTML。`POST /api/chat` 以 SSE 返回文本、工�
 
 Web 层还提供图形化登录与二次认证、停止生成、多会话与历史恢复、标题生成、图片输入、
 支付二维码/链接/表单展示、预约日历 `.ics` 导出、Token 用量，以及任务和通知界面。
+文件通过 `POST /api/upload` 上传（单文件不超过 50 MB）；文件名显示在聊天气泡，
+本机路径仅随消息交给模型。邮件/学堂临时图片通过 `/api/temp-image/` 显示，用户点击
+删除按钮后清理；CLI/MCP 未装配图片通道时，对应图片工具返回 `NOT_SUPPORTED`。
 生成支付订单或付款入口不等于支付成功，用户仍需完成相应支付流程。
 
 每个聊天会话有独立的 Agent 消息数组，但同一服务实例共享清华登录态与调度器；
@@ -94,10 +97,11 @@ Web 层还提供图形化登录与二次认证、停止生成、多会话与历�
 [createAllSkills](../src/skills/index.ts) 是统一装配入口，向 CLI、Web 和 MCP 提供同一套实现。
 注入客户端、验证码求解器和调度器也使工具可以脱离网络、模型和 UI 独立测试。
 
-- 11 个校园读工具：课表、校园卡、教室、图书馆座位/研讨间、体育资源、成绩单、
-  宿舍电费、宿舍卫生、校园网状态、我的图书馆预约。
-- 7 个校园写工具：体育预约、图书馆座位/研讨间预约、取消图书馆预约、电费充值、
-  体育订单支付、校园卡充值。
+- 21 个校园读工具：课表、校园卡、教室、图书馆座位/研讨间、体育资源、成绩单、
+  宿舍电费、宿舍卫生、校园网状态、我的图书馆预约，以及校园资讯列表/详情、
+  学堂课程/通知/作业/课件/日历/图片、邮箱列表与正文/图片。
+- 10 个校园写工具：体育预约、图书馆座位/研讨间预约、取消图书馆预约、电费充值、
+  体育订单支付、校园卡充值、提交学堂作业、下载课件、发送邮件。
 - 4 个任务工具：`create_reminder`、`schedule_sports_booking`、`list_my_tasks`、
   `cancel_task`；其中仅任务查询为只读，其余均要求确认。
 
@@ -106,7 +110,7 @@ Web 层还提供图形化登录与二次认证、停止生成、多会话与历�
 
 ### 外部 Agent Skill：`.agents/skills/thu-agent/`
 
-这是**一个**供兼容宿主发现和加载的 Skill 包，不是 22 份独立 Skill：
+这是**一个**供兼容宿主发现和加载的 Skill 包，不是 35 份独立 Skill：
 
 - `SKILL.md`：触发场景、工具发现流程、逐次确认和敏感数据处理规则。
 - `scripts/thu-agent.mjs`：从任意工作目录定位本仓库，再启动机器 CLI。

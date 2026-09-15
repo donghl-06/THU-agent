@@ -85,4 +85,30 @@ export const config = {
             return Boolean(process.env.CJY_USER && process.env.CJY_PASSWORD && process.env.CJY_SOFT_ID);
         },
     },
+    /** 清华邮箱（Coremail）IMAP/SMTP。用「客户端授权码」而非邮箱密码（网页版邮箱设置里生成）。
+     *  未配置时 username/password 为 undefined，邮件技能报 AUTH_FAILED 提示配置 */
+    email: {
+        get username(): string | undefined {
+            return process.env.THU_EMAIL_USERNAME || undefined;
+        },
+        /** 客户端授权码 */
+        get password(): string | undefined {
+            return process.env.THU_EMAIL_PASSWORD || undefined;
+        },
+        get imapHost() {
+            return process.env.THU_EMAIL_IMAP_HOST ?? "imap.tsinghua.edu.cn";
+        },
+        get imapPort() {
+            return Number(process.env.THU_EMAIL_IMAP_PORT ?? 993);
+        },
+        get smtpHost() {
+            return process.env.THU_EMAIL_SMTP_HOST ?? "smtp.tsinghua.edu.cn";
+        },
+        get smtpPort() {
+            return Number(process.env.THU_EMAIL_SMTP_PORT ?? 465);
+        },
+        get configured() {
+            return Boolean(this.username && this.password);
+        },
+    },
 };

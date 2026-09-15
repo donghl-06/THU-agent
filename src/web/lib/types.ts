@@ -1,3 +1,9 @@
+export interface UploadedFile {
+    name: string;
+    path: string;
+    sizeBytes: number;
+}
+
 export interface Usage {
     promptTokens: number;
     completionTokens: number;
