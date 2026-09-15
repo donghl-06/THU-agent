@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useLayoutEffect, useRef, useState} from "react";
 import {AnimatePresence, MotionConfig, motion, useReducedMotion} from "motion/react";
-import {ArrowDown, Bell, BellOff, Check, CircleHelp, Info, Moon, PanelLeft, ShieldCheck, Sun, Volume2, VolumeX, X} from "lucide-react";
+import {ArrowDown, Bell, BellOff, Check, CircleHelp, Hand, Info, Moon, PanelLeft, ShieldAlert, Sun, Volume2, VolumeX, X} from "lucide-react";
 import {useAssistant} from "./lib/useAssistant";
 import type {UploadedFile} from "./lib/types";
 import {storage} from "./lib/history";
@@ -8,7 +8,7 @@ import {Sidebar} from "./components/Sidebar";
 import {Composer} from "./components/Composer";
 import {Welcome} from "./components/Welcome";
 import {Dialogs} from "./components/Dialogs";
-import {ErrorNotice, MessageView, ResultView, Thinking} from "./components/Conversation";
+import {ErrorNotice, MessageView, ResultView} from "./components/Conversation";
 import {IconButton} from "./components/Controls";
 
 export default function App() {
@@ -140,7 +140,6 @@ function Workspace() {
             }}>
                 {empty ? <Welcome authenticated={app.authenticated} send={text => void send(text)}/> : <div className="conversation" role="log" aria-label="对话内容" aria-live="off">
                     {app.messages.map(message => <MessageView key={message.id} message={message} streaming={app.turn?.messageId === message.id} copy={text => void copy(text)} retry={!app.turn && message.id === lastBot?.id ? () => void app.retry() : undefined}/>)}
-                    <AnimatePresence>{app.turn && <Thinking key={app.turn.messageId} turn={app.turn}/>}</AnimatePresence>
                     {app.error && <ErrorNotice message={app.error} retry={() => void app.retry()} disabled={Boolean(app.turn)}/>}
                     {app.results.map(result => <ResultView key={result.id} result={result}/>)}
                 </div>}
@@ -154,7 +153,7 @@ function Workspace() {
                 {!empty && <div className="quick-actions">{["今天有什么课", "图书馆座位", "校园动态", "校园卡余额"].map(text => <button key={text} disabled={Boolean(app.turn)} onClick={() => void send(text)}>{text}</button>)}</div>}
                 <Composer app={app} value={draft} setValue={setDraft} onSend={(text, images, files) => void send(text, images, files)}/>
             </div>
-            {empty && <span className="workspace-footnote"><ShieldCheck size={13}/>操作前确认，信息更安心</span>}
+            {empty && <span className="workspace-footnote">{app.accessMode === "full-access" ? <><ShieldAlert size={13}/>完全访问，按你的指令直接执行</> : <><Hand size={13}/>请求批准，操作前由你确认</>}</span>}
         </main>
         <div className="toast-stack" role="status" aria-live="polite"><AnimatePresence>{app.notices.map(notice => <motion.div key={notice.id} className={`toast ${notice.type}`} initial={{opacity: 0, y: -10, scale: .96}} animate={{opacity: 1, y: 0, scale: 1}} exit={{opacity: 0, y: -8, scale: .96}}>{notice.type === "success" ? <Check size={17}/> : notice.type === "error" ? <X size={17}/> : <Info size={17}/>}<span>{notice.message}</span></motion.div>)}</AnimatePresence></div>
         <Dialogs app={app} about={about} closeAbout={() => setAbout(false)}/>

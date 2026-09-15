@@ -1,4 +1,4 @@
-import type {Message, Session, SessionsState} from "./types";
+import type {Message, Session, SessionsState, Turn} from "./types";
 
 export const SESSIONS_KEY = "thu-assistant-sessions-v1";
 const LEGACY_KEY = "thu-assistant-chat-v1";
@@ -13,12 +13,34 @@ export const storage = {
     },
 };
 
+function isTurn(value: unknown): value is Turn {
+    if (!value || typeof value !== "object") return false;
+    const turn = value as Record<string, unknown>;
+    return typeof turn.sessionId === "string" && typeof turn.messageId === "string" &&
+        typeof turn.startedAt === "number" && Number.isFinite(turn.startedAt) &&
+        (turn.finishedAt === undefined || (typeof turn.finishedAt === "number" && Number.isFinite(turn.finishedAt))) &&
+        ["running", "completed", "cancelled", "error"].includes(String(turn.status)) &&
+        ["thinking", "tool", "generating", "confirm"].includes(String(turn.phase)) &&
+        (turn.finalItemId === undefined || typeof turn.finalItemId === "string") &&
+        Array.isArray(turn.items) && turn.items.every((item: unknown) => {
+            if (!item || typeof item !== "object") return false;
+            const entry = item as Record<string, unknown>;
+            if (typeof entry.id !== "string") return false;
+            if (entry.kind === "text" || entry.kind === "reasoning") return typeof entry.text === "string" && ["streaming", "done"].includes(String(entry.status));
+            return entry.kind === "tool" && typeof entry.name === "string" &&
+                ["running", "done", "error", "interrupted"].includes(String(entry.status)) &&
+                (entry.ms === undefined || (typeof entry.ms === "number" && Number.isFinite(entry.ms)));
+        });
+}
+
 export function normalizeMessages(records: Partial<Message>[], sessionId: string): Message[] {
     const byId = new Map<string, Message>();
     const occurrences = new Map<string, number>();
     for (const source of records) {
         if (!source || !["user", "bot"].includes(source.role ?? "") || typeof source.text !== "string") continue;
-        if (!source.text && (source.role === "bot" || !source.imageCount)) continue;
+        const turn = source.role === "bot" && isTurn(source.turn) ? source.turn : undefined;
+        const hasProcess = turn && (turn.status === "running" || turn.items.length > 0);
+        if (!source.text && !hasProcess && (source.role === "bot" || !source.imageCount)) continue;
         const key = `${source.role}\u0000${source.text}\u0000${source.imageCount ?? 0}`;
         const occurrence = (occurrences.get(key) ?? 0) + 1;
         occurrences.set(key, occurrence);
@@ -28,7 +50,7 @@ export function normalizeMessages(records: Partial<Message>[], sessionId: string
         const rawId = source.id ?? "";
         const oldIndexedId = rawId.startsWith(prefix) && !/^[0-9a-z]+:[1-9][0-9]*$/.test(rawId.slice(prefix.length));
         const id = rawId && !oldIndexedId ? rawId : `${prefix}${(hash >>> 0).toString(36)}:${occurrence}`;
-        byId.set(id, {...source, id, role: source.role as Message["role"], text: source.text.slice(0, 20000)});
+        byId.set(id, {...source, id, role: source.role as Message["role"], text: source.text.slice(0, 20000), ...(turn ? {turn} : {turn: undefined})});
     }
     return [...byId.values()].slice(-MAX_MESSAGES);
 }
@@ -89,7 +111,7 @@ export function mergeHistory(local: SessionsState, remote: SessionsState): Sessi
         if (deletedSessionIds.includes(session.id)) continue;
         const prev = byId.get(session.id);
         if (!prev) { byId.set(session.id, {...session}); continue; }
-        const localNewer = (prev.updatedAt ?? prev.createdAt) > (session.updatedAt ?? session.createdAt);
+        const localNewer = (prev.updatedAt ?? prev.createdAt) >= (session.updatedAt ?? session.createdAt);
         byId.set(session.id, {
             ...prev,
             title: prev.title && prev.title !== "新对话" ? prev.title : session.title,

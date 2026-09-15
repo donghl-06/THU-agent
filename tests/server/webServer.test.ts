@@ -317,6 +317,25 @@ describe("Web 服务端", () => {
         expect(events.some((e) => e.event === "auth" && e.data.phase === "success")).toBe(true);
     });
 
+    it("思考、正文、工具跨轮转发到 SSE，工具保留调用 ID", async () => {
+        let round = 0;
+        const llm: LlmClient = {
+            chat: async () => textMsg("fallback"),
+            chatStream: async (_messages, _tools, onToken, _signal, _usage, onReasoning) => {
+                onReasoning?.(round === 0 ? "先查询" : "已核对");
+                onToken(round === 0 ? "正在查" : "查完了");
+                return round++ === 0 ? toolCallMsg("echo", {}, "lookup") : textMsg("查完了");
+            },
+        };
+        server = createWebServer(() => new Agent([echoSkill], "测试", llm), {port: 0, requireLogin: false});
+        await new Promise<void>(resolve => server!.listen(0, "127.0.0.1", resolve));
+        const address = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+        const response = await fetch(`${address}/api/chat`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({question: "查一下"})});
+        const events = await readSse(response);
+        expect(events.map(item => item.event)).toEqual(["reasoning", "token", "tool", "tool", "reasoning", "token", "answer", "done"]);
+        expect(events.filter(item => item.event === "tool").map(item => item.data.toolCallId)).toEqual(["lookup", "lookup"]);
+    });
+
     it("工具调用发出 tool start/end 事件", async () => {
         await start([toolCallMsg("echo", {}), textMsg("查完了")]);
         const resp = await fetch(`${base}/api/chat`, {
@@ -345,6 +364,24 @@ describe("Web 服务端", () => {
         expect(executed).toBe(true);
         expect(events.some((e) => e.event === "confirm" && e.data.name === "recharge")).toBe(true);
         expect(events.some((e) => e.event === "answer")).toBe(true);
+    });
+
+    it("完全访问直接执行，下一请求省略模式恢复批准，非法模式不会执行", async () => {
+        let executed = 0;
+        const write: Skill = {...paySkill, execute: async () => { executed++; return ok({done: true}); }};
+        const {confirmSpy} = await start([toolCallMsg(write.name, {}), textMsg("完成"), toolCallMsg(write.name, {}), textMsg("取消")], [write]);
+        const chat = (accessMode?: unknown) => fetch(`${base}/api/chat`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({question: "执行测试", accessMode})});
+        for (const mode of ["all", true, null, {mode: "full-access"}]) expect((await chat(mode)).status).toBe(400);
+        expect(executed).toBe(0);
+        const full = await readSse(await chat("full-access"));
+        expect(full.some(event => event.event === "confirm")).toBe(false);
+        expect(full.at(-1)?.event).toBe("done");
+        expect(executed).toBe(1);
+        expect(confirmSpy.called).toBe(false);
+        const approval = await readSseAnsweringConfirms(base, await chat(), false);
+        expect(approval.some(event => event.event === "confirm")).toBe(true);
+        expect(executed).toBe(1);
+        expect(confirmSpy.called).toBe(true);
     });
 
     it("确认拒绝：写操作不执行", async () => {
@@ -1056,7 +1093,9 @@ describe("会话持久化（Step 21c）", () => {
         expect(restored).toContain("记住了");
         // system 是新实例的提示词，不是恢复来的旧文本
         expect(llm2.seen[0][0].role).toBe("system");
-        expect(llm2.seen[0][0].content).toBe("测试系统提示");
+        expect(llm2.seen[0][0].content).toMatch(/^测试系统提示\n/);
+        expect(llm2.seen[0][0].content).toContain("当前模式：请求批准");
+        expect(readFileSync(firstFile, "utf8")).not.toContain("当前模式");
     });
 
     it("logout 只断开校园服务，不清空持久化聊天上下文", async () => {

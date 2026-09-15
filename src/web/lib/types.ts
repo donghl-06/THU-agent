@@ -19,6 +19,7 @@ export interface Message {
     images?: string[];
     usage?: Usage;
     notification?: boolean;
+    turn?: Turn;
 }
 
 export interface Session {
@@ -39,17 +40,31 @@ export interface SessionsState {
 
 export interface ToolStep {
     id: string;
+    kind: "tool";
+    toolCallId?: string;
     name: string;
-    status: "running" | "done" | "error";
+    status: "running" | "done" | "error" | "interrupted";
     ms?: number;
 }
+
+export interface TextStep {
+    id: string;
+    kind: "text" | "reasoning";
+    text: string;
+    status: "streaming" | "done";
+}
+
+export type TurnItem = ToolStep | TextStep;
 
 export interface Turn {
     sessionId: string;
     messageId: string;
     startedAt: number;
+    finishedAt?: number;
+    status: "running" | "completed" | "cancelled" | "error";
     phase: "thinking" | "tool" | "generating" | "confirm";
-    steps: ToolStep[];
+    items: TurnItem[];
+    finalItemId?: string;
 }
 
 export interface AuthState {

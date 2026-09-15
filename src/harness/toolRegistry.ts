@@ -5,11 +5,12 @@
  * 质量直接决定模型会不会用对工具。
  *
  * 写操作安全闸：标了 requiresConfirmation 的 Skill，执行前必须过
- * confirm 回调（由 UI 层实现，向用户展示操作并等明确同意）。
- * 没配 confirm 回调时写操作一律拒绝执行（fail closed）。
+ * confirm 回调，或由宿主显式为本轮选择完全访问模式。
+ * 默认请求批准；没配 confirm 回调时拒绝写操作（fail closed）。
  */
 import type {Skill, SkillResult} from "../skills/base/types";
 import type {ToolCall, ToolSchema} from "./types";
+import type {AccessMode} from "./accessMode";
 
 /** 用户确认回调：展示这次写操作，返回用户是否同意执行 */
 export type ConfirmFn = (call: ToolCall, skill: Skill) => Promise<boolean>;
@@ -37,7 +38,7 @@ export class ToolRegistry {
     }
 
     /** 执行一次工具调用，返回给模型看的 JSON 字符串 */
-    async execute(call: ToolCall): Promise<string> {
+    async execute(call: ToolCall, accessMode: AccessMode = "request-approval"): Promise<string> {
         const skill = this.skills.get(call.function.name);
         if (!skill) {
             return JSON.stringify({
@@ -54,7 +55,7 @@ export class ToolRegistry {
                 error: {code: "BAD_ARGUMENTS", message: `工具参数不是合法 JSON：${call.function.arguments.slice(0, 200)}`},
             } satisfies SkillResult);
         }
-        if (skill.requiresConfirmation) {
+        if (skill.requiresConfirmation && accessMode !== "full-access") {
             if (!this.confirm) {
                 return JSON.stringify({
                     success: false,

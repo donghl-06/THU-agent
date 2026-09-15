@@ -4,14 +4,14 @@
  * 安全模型（单用户红线）：
  *   - 监听地址由启动入口指定；WSL/HOST 覆盖可开放其他网卡，须核对网络范围
  *   - 登录凭证传给本地后端，前端不持久化；UI_TOKEN 可启用访问口令
- *   - 写操作确认走 SSE 推送 + /api/confirm 应答的桥，前端不点同意就不执行
+ *   - 请求批准模式通过 SSE + /api/confirm 确认；完全访问由本轮显式授权直接执行
  *
  * 接口：
  *   GET  /              → 单页前端
  *   GET  /api/capabilities → {vision}  前端据此显隐图片上传入口
  *   POST /api/ui/auth   → {token} → 正确则种 ui_token cookie（.env 配 UI_TOKEN 才启用鉴权；
  *                          启用时豁免清单之外的所有请求都需携带该 cookie，否则 403）
- *   POST /api/chat      → {question, sessionId?, images?} → SSE 流，事件：
+ *   POST /api/chat      → {question, sessionId?, images?, accessMode?} → SSE 流，事件：
  *   POST /api/upload    → ?name=<文件名> + 原始字节 body → {name, path, sizeBytes}
  *                         把文件交给清灵（交作业等场景），需登录，单文件 ≤ 50MB
  *       （sessionId 标识前端会话，缺省/非法落到 "default"；每个会话一个
@@ -19,7 +19,8 @@
  *       （images 为 data URL 数组，最多 4 张、每张 base64 不超过 6MB 字符；
  *         仅当端点支持 vision 时可用，见 config.llm.vision）
  *       token   {text}                    回答的流式片段
- *       tool    {phase,name,ms?,success?} 工具进度（start/end）
+ *       reasoning {text}                  模型思考的流式片段
+ *       tool    {phase,name,toolCallId?,ms?,success?} 工具进度（start/end）
  *       confirm {id,name,args}            写操作待确认（前端弹窗）
  *       auth    {phase,...}                二次认证交互（前端弹窗）
  *       qr      {url, dataUrl?}           支付二维码（data URL 图片）
@@ -52,6 +53,7 @@ import {createReadStream, mkdirSync, readFileSync, readdirSync, writeFileSync} f
 import {dirname, extname, join} from "node:path";
 import {randomUUID} from "node:crypto";
 import type {Agent} from "../harness/agentLoop";
+import {isAccessMode, type AccessMode} from "../harness/accessMode";
 import type {LlmClient} from "../harness/llmClient";
 import {createLlmClient} from "../harness/llmClient";
 import type {ConfirmFn} from "../harness/toolRegistry";
@@ -546,6 +548,7 @@ export function createWebServer(
         }
         let question: string;
         let images: string[] | undefined;
+        let accessMode: AccessMode = "request-approval";
         let sessionId: string;
         let rawBody: string;
         try {
@@ -555,7 +558,12 @@ export function createWebServer(
             return;
         }
         try {
-            const parsed = JSON.parse(rawBody) as {question?: unknown; images?: unknown; sessionId?: unknown};
+            const parsed = JSON.parse(rawBody) as {question?: unknown; images?: unknown; sessionId?: unknown; accessMode?: unknown};
+            if (parsed.accessMode !== undefined && !isAccessMode(parsed.accessMode)) {
+                res.writeHead(400).end("invalid accessMode");
+                return;
+            }
+            accessMode = parsed.accessMode ?? "request-approval";
             const imgErr = validateImages(parsed.images);
             if (imgErr) {
                 res.writeHead(400).end(imgErr);
@@ -616,7 +624,9 @@ export function createWebServer(
             sessionAgent = getOrCreateAgent(sessionId);
             // 任务类 skill 需要知道归属会话（通知回传定位）；经 AsyncLocalStorage 透传
             const result = await taskSessionContext.run(sessionId, () => sessionAgent!.ask(question, {
+                accessMode,
                 onToken: (text) => sseSend(res, "token", {text}),
+                onReasoning: (text) => sseSend(res, "reasoning", {text}),
                 onToolEvent: (e) => sseSend(res, "tool", e),
                 ...(images ? {images} : {}),
                 signal: chatAbort.signal,

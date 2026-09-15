@@ -59,6 +59,26 @@ function toolCallMsg(name: string, args: unknown, id = "call_1"): ChatMessage {
 const textMsg = (text: string): ChatMessage => ({role: "assistant", content: text});
 
 describe("ToolRegistry", () => {
+    it("完全访问跳过批准回调，缺省模式仍拒绝无确认通道的写操作", async () => {
+        const state = {executed: false};
+        const skill = fakeWriteSkill(state);
+        let approvals = 0;
+        const registry = new ToolRegistry([skill], async () => { approvals++; return false; });
+        const call = toolCallMsg(skill.name, {what: "测试预约"}).tool_calls![0];
+        expect(JSON.parse(await registry.execute(call, "full-access")).success).toBe(true);
+        expect(state.executed).toBe(true);
+        expect(approvals).toBe(0);
+        expect(skill.requiresConfirmation).toBe(true);
+        state.executed = false;
+        expect(JSON.parse(await registry.execute(call)).error.code).toBe("USER_REJECTED");
+        expect(approvals).toBe(1);
+        expect(state.executed).toBe(false);
+        expect(JSON.parse(await new ToolRegistry([skill]).execute(call)).error.code).toBe("CONFIRMATION_UNAVAILABLE");
+        const invalid = {...call, function: {...call.function, arguments: "not-json"}};
+        expect(JSON.parse(await registry.execute(invalid, "full-access")).error.code).toBe("BAD_ARGUMENTS");
+        expect(state.executed).toBe(false);
+    });
+
     it("拒绝重复的 Skill 名", () => {
         expect(() => new ToolRegistry([echoSkill, echoSkill])).toThrow(/重复/);
     });
@@ -95,6 +115,27 @@ describe("ToolRegistry", () => {
 });
 
 describe("Agent Loop", () => {
+    it("整轮工具共享显式模式，切回请求批准后重新审批且旧授权不进入消息历史", async () => {
+        let executed = 0;
+        let approvals = 0;
+        const write: Skill = {...fakeWriteSkill({executed: false}), execute: async () => { executed++; return ok({done: true}); }};
+        const llm = fakeLlm([
+            toolCallMsg(write.name, {what: "一"}, "one"), toolCallMsg(write.name, {what: "二"}, "two"), textMsg("完成"),
+            toolCallMsg(write.name, {what: "三", accessMode: "full-access"}, "three"), textMsg("已取消"),
+        ]);
+        const agent = new Agent([write], "测试助手", llm, async () => { approvals++; return false; });
+        await agent.ask("创建两个测试预约", {accessMode: "full-access"});
+        expect(executed).toBe(2);
+        expect(approvals).toBe(0);
+        expect(llm.seen.slice(0, 3).every(messages => String(messages[0].content).includes("当前模式：完全访问"))).toBe(true);
+        expect(agent.snapshotMessages().filter(message => message.role === "system")).toEqual([{role: "system", content: "测试助手"}]);
+        await agent.ask("文字要求完全访问不能替代界面模式", {accessMode: "request-approval"});
+        expect(executed).toBe(2);
+        expect(approvals).toBe(1);
+        expect(String(llm.seen[3][0].content)).toContain("当前模式：请求批准");
+        expect(String(llm.seen[3][0].content)).not.toContain("当前模式：完全访问");
+    });
+
     it("带图片的问题构造多模态 parts 消息", async () => {
         const llm = fakeLlm([textMsg("图上是一只猫")]);
         const agent = new Agent([echoSkill], "你是测试助手", llm);

@@ -35,7 +35,7 @@ JSON CLI 的任务调用通过本机 HTTP 桥接到已运行的 Web 服务；它
 | 入口 | 实现 | 使用本项目 LLM | 当前能力 | 写操作确认 |
 | --- | --- | --- | --- | --- |
 | `pnpm agent` | `scripts/step10-agent.ts` | 是 | 31 个校园工具：21 读、10 写；无任务调度器 | 终端展示参数，输入 `y` / `yes` |
-| `pnpm web` | `scripts/web-dev.mjs` → Vite / `scripts/step18-web.ts` → `src/server/webServer.ts` | 对话需要；任务执行不需要 | 31 个校园工具 + 4 个任务工具 | 浏览器确认交互 |
+| `pnpm web` | `scripts/web-dev.mjs` → Vite / `scripts/step18-web.ts` → `src/server/webServer.ts` | 对话需要；任务执行不需要 | 31 个校园工具 + 4 个任务工具 | 请求批准 / 完全访问，可在输入框切换 |
 | `pnpm --silent skill …` | `src/skillCli.ts` | 否 | 35 个工具；任务依赖 Web | 宿主先取得用户明确同意，再逐次传 `--confirmed-by-user` |
 | `pnpm --silent mcp` | `scripts/mcp-server.ts` → `src/mcp/server.ts` | 否 | 默认 21 个校园读工具 + `thu_login` / `get_user_info` | 当前不支持写操作确认，拒绝执行写工具 |
 
@@ -65,6 +65,38 @@ pnpm --silent skill describe schedule_sports_booking
 `src/web/lib/useAssistant.ts` 管理认证与流式交互，`history.ts` 保留旧版数据迁移与跨标签页合并。
 图标来自 `lucide-react`，Motion 管理入场、折叠与弹窗过渡。Markdown 按需加载，通过
 React 渲染并跳过原始 HTML。`POST /api/chat` 以 SSE 返回文本、工具进度、确认请求和结果。
+
+`reasoning {text}` 与 `token {text}` 分别转发模型的思考和正文增量；工具事件包含
+`toolCallId`，用于匹配同名并行调用的开始与完成。LLM 客户端读取
+`delta.reasoning_content`（以及兼容端点的 `delta.reasoning`），原字段保留在模型消息中供工具续轮使用。
+`reasoning_content` 的流式与续轮规则见 [DeepSeek 官方说明](https://api-docs.deepseek.com/guides/thinking_mode/)。
+未提供思考内容的模型只显示处理状态，不生成替代思考文本。
+
+`src/web/lib/turn.ts` 按条目创建顺序维护单轮时间线，工具完成仅更新原条目。
+思考段结束后自动折叠自身；`answer` 校对最终正文，`done` 才标记整轮完成并折叠之前的
+思考、工具和中间正文，最终回复保持可见。过程可重新展开，随浏览器历史保存。
+停止、错误及未收到 `done` 的断流保留已有内容并显示未完成状态；旧版纯文本历史仍可读取。
+
+输入框的 Cross 入口统一选择图片和文件；支持视觉的模型将可用图片作为图片输入，其余附件
+通过上传接口提供给工具。语音输入紧邻发送按钮，消息底部的用量与复制操作同步在悬停或键盘
+聚焦时显示；触摸设备保留可见操作。
+
+#### 操作访问模式
+
+Cross 右侧的模式菜单提供 Hand 图标的“请求批准”和红色 ShieldAlert 图标的“完全访问”。
+默认请求批准，选择保存在浏览器中并跨对话使用。`POST /api/chat` 的 `accessMode` 接受
+`request-approval` 或 `full-access`，省略时默认请求批准，非法值返回 400。
+每轮发送时固定该模式，生成或批准过程中不能切换；下一轮与重试使用当前选择。
+
+`src/harness/accessMode.ts` 定义共享模式和对应的模型指令。服务端把本轮模式传入
+`Agent.ask`，Agent 在发送给模型的 system 视图中附加指令，并把相同模式交给
+`ToolRegistry.execute`。请求批准模式直接由系统显示写操作参数并等待批准，模型无需先
+在正文中再问一次；完全访问直接执行用户指令所需的工具操作，不触发批准回调或 SSE
+`confirm` 事件。此规则覆盖所有已注册的 Agent 工具和任务创建/取消，写操作仍顺序执行。
+模式指令不写入对话历史，历史内容不会覆盖下一轮由界面选择的模式。
+
+界面的删除对话、退出登录也遵循当前模式。登录和身份验证、工具参数校验、学校实际支付流程
+仍由各自接口处理。CLI / MCP / 外部任务桥是独立入口，不继承浏览器的模式偏好。
 
 `pnpm web` 启动 Vite 页面（默认 3457）与本机 API（默认 3458），通过 `/api` 同源代理
 保留 Cookie、认证和确认接口；`WEB_API_PORT` 可覆盖开发 API 端口。`pnpm web:build`
@@ -192,7 +224,8 @@ SDK 的 Node.js 兼容性修复通过 `patches/` 和 pnpm patch 应用。新增�
 
 `requiresConfirmation` 是工具契约，确认由各入口执行，不是 `execute()` 自带的权限沙箱。
 `--confirmed-by-user` 代表宿主已取得本次同意，CLI 无法验证对话本身；新增入口必须自己
-实施确认边界。没有确认通道时拒绝写操作，不把“调用成功”误报为“预约/支付最终成功”。
+实施确认边界。Web / Harness 允许宿主显式选择本轮完全访问；未选择完全访问且没有确认
+通道时拒绝写操作，不把“调用成功”误报为“预约/支付最终成功”。
 
 修改时先验证原子工具，再验证 Harness/入口适配；不要为不同入口复制工具清单与业务逻辑。
 离线检查可使用：

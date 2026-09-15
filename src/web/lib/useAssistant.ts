@@ -1,9 +1,15 @@
 import {useCallback, useEffect, useRef, useState} from "react";
 import {ApiError, errorMessage, readStream, request, type StreamEvent} from "./api";
-import {deriveTitle, mergeHistory, newId, parseHistory, persistHistory, readHistory, SESSIONS_KEY, updateSession} from "./history";
+import {deriveTitle, mergeHistory, newId, parseHistory, persistHistory, readHistory, SESSIONS_KEY, storage, updateSession} from "./history";
+import {applyTurnEvent, finishTurn, turnText} from "./turn";
+import {isAccessMode, type AccessMode} from "../../harness/accessMode";
 import type {AuthState, Confirmation, Message, Notice, Result, SessionsState, Turn, UploadedFile, Usage} from "./types";
 
 export function useAssistant() {
+    const [accessMode, setAccessMode] = useState<AccessMode>(() => {
+        const saved = storage.get("thu-assistant-access-mode-v1", "request-approval");
+        return isAccessMode(saved) ? saved : "request-approval";
+    });
     const [history, setHistory] = useState(readHistory);
     const historyRef = useRef(history);
     const [authenticated, setAuthenticated] = useState(false);
@@ -28,6 +34,12 @@ export function useAssistant() {
     const cancellation = useRef<Promise<unknown> | null>(null);
     const lastQuestion = useRef<{question: string; images: string[]; messageId?: string} | null>(null);
     const noticeTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+    function changeAccessMode(mode: AccessMode) {
+        if (chatAbort.current || loginAbort.current || confirmBusy || !isAccessMode(mode)) return;
+        setAccessMode(mode);
+        storage.set("thu-assistant-access-mode-v1", mode);
+    }
 
     const notify = useCallback((message: string, type: Notice["type"] = "info") => {
         const id = newId();
@@ -201,53 +213,44 @@ export function useAssistant() {
         if (chatAbort.current || loginAbort.current) return;
         const sessionId = historyRef.current.activeId;
         const messageId = retryId ?? newId();
+        const turnAccessMode = accessMode;
         const controller = new AbortController();
         chatAbort.current = controller;
         lastQuestion.current = {question, images, messageId};
         setError(null);
         setResults([]);
-        setTurn({sessionId, messageId, startedAt: Date.now(), phase: "thinking", steps: []});
+        let currentTurn: Turn = {sessionId, messageId, startedAt: Date.now(), status: "running", phase: "thinking", items: []};
+        setTurn(currentTurn);
         let text = "";
         let usage: Usage | undefined;
         let finalAnswer = false;
         let lastSaved = Date.now();
         const updateBot = (persist = false) => {
             commit(state => updateSession(state, sessionId, session => {
-                const message: Message = {id: messageId, role: "bot", text, usage};
+                const message: Message = {id: messageId, role: "bot", text, usage, turn: currentTurn};
                 const exists = session.messages.some(m => m.id === messageId);
                 return {...session, messages: exists ? session.messages.map(m => m.id === messageId ? message : m) : [...session.messages, message]};
             }), persist);
         };
+        updateBot();
         const eventHandler = ({event, data}: StreamEvent) => {
-            if (event === "token") {
-                text += String(data.text ?? "");
-                setTurn(prev => prev && {...prev, phase: "generating"});
+            const nextTurn = applyTurnEvent(currentTurn, {event, data});
+            if (nextTurn !== currentTurn) {
+                currentTurn = nextTurn;
+                text = turnText(currentTurn);
+                setTurn(currentTurn);
                 const save = Date.now() - lastSaved > 1000;
                 if (save) lastSaved = Date.now();
                 updateBot(save);
-            } else if (event === "tool") {
-                const name = String(data.name);
-                setTurn(prev => {
-                    if (!prev) return prev;
-                    const steps = [...prev.steps];
-                    if (data.phase === "start") steps.push({id: newId(), name, status: "running"});
-                    else {
-                        const index = steps.findIndex(s => s.name === name && s.status === "running");
-                        if (index >= 0) steps[index] = {...steps[index], status: data.success === false ? "error" : "done", ms: typeof data.ms === "number" ? data.ms : undefined};
-                    }
-                    return {...prev, phase: "tool", steps};
-                });
-            } else if (event === "confirm") {
-                setTurn(prev => prev && {...prev, phase: "confirm"});
+            }
+            if (event === "confirm") {
                 setConfirmation({kind: "write", id: String(data.id), name: String(data.name), args: (data.args ?? {}) as Record<string, unknown>});
             } else if (event === "auth") handleAuth(data);
             else if (event === "qr") setResults(prev => [...prev, {id: newId(), kind: "qr", url: String(data.url), dataUrl: data.dataUrl as string | undefined}]);
             else if (event === "payform") setResults(prev => [...prev, {id: newId(), kind: "payform", html: String(data.html)}]);
             else if (event === "calendar") setResults(prev => [...prev, {id: newId(), kind: "calendar", title: String(data.title), filename: String(data.filename), icsContent: String(data.icsContent)}]);
             else if (event === "answer") {
-                text = String(data.text ?? "");
                 finalAnswer = true;
-                updateBot();
             } else if (event === "usage") {
                 usage = data as unknown as Usage;
                 if (text) updateBot();
@@ -256,10 +259,16 @@ export function useAssistant() {
             }
         };
         try {
-            const response = await request("/api/chat", {question, sessionId, ...(images.length ? {images} : {})}, controller.signal);
+            const response = await request("/api/chat", {question, sessionId, accessMode: turnAccessMode, ...(images.length ? {images} : {})}, controller.signal);
             await readStream(response, eventHandler);
+            if (currentTurn.status === "running") {
+                currentTurn = finishTurn(currentTurn, "error");
+                setError("连接已中断，已保留收到的内容，可以重试。");
+            }
         } catch (e) {
-            if (controller.signal.aborted) notify("已停止生成");
+            if (currentTurn.status === "running") currentTurn = finishTurn(currentTurn, controller.signal.aborted ? "cancelled" : "error");
+            if (currentTurn.status === "completed") { /* The done event already committed this response. */ }
+            else if (controller.signal.aborted) notify("已停止生成");
             else if (e instanceof ApiError && e.status === 401) {
                 setLoggedIn(false);
                 setAuth({phase: "login", origin: "login", message: "登录已过期，请重新连接清华 Info。"});
@@ -268,9 +277,9 @@ export function useAssistant() {
         } finally {
             if (cancellation.current) await cancellation.current;
             cancellation.current = null;
-            if (text) updateBot();
+            updateBot();
             commit(state => updateSession(state, sessionId, session => ({...session,
-                messages: session.messages.filter(m => m.id !== messageId || Boolean(m.text)),
+                messages: session.messages.filter(m => m.id !== messageId || Boolean(m.text) || Boolean(m.turn?.items.length)),
                 tokens: (session.tokens ?? 0) + (usage?.totalTokens ?? 0),
             })));
             setTurn(null);
@@ -279,7 +288,7 @@ export function useAssistant() {
             chatAbort.current = null;
             if (authRef.current?.origin === "chat") setAuth(null);
         }
-        if (finalAnswer) {
+        if (finalAnswer && currentTurn.status === "completed") {
             const session = historyRef.current.sessions.find(s => s.id === sessionId);
             if (session && !session.titleLlm) {
                 commit(state => updateSession(state, sessionId, s => ({...s, titleLlm: true})));
@@ -290,7 +299,7 @@ export function useAssistant() {
                 }).catch(() => {});
             }
         }
-        return finalAnswer ? text : undefined;
+        return finalAnswer && currentTurn.status === "completed" ? text : undefined;
     }
 
     async function send(question: string, images: string[] = [], files: UploadedFile[] = []) {
@@ -342,8 +351,18 @@ export function useAssistant() {
         lastQuestion.current = null;
     }
 
+    function requestConfirmation(action: Confirmation) {
+        if (chatAbort.current || loginAbort.current || confirmBusy) return;
+        if (accessMode === "full-access" && action.kind !== "write") void performConfirmedAction(action, true);
+        else setConfirmation(action);
+    }
+
     async function respond(approved: boolean) {
-        if (!confirmation || confirmBusy) return;
+        if (confirmation) await performConfirmedAction(confirmation, approved);
+    }
+
+    async function performConfirmedAction(confirmation: Confirmation, approved: boolean) {
+        if (confirmBusy) return;
         setConfirmBusy(true);
         try {
             if (confirmation.kind === "write") await request("/api/confirm", {id: confirmation.id, approved});
@@ -367,9 +386,9 @@ export function useAssistant() {
     }
 
     const session = history.sessions.find(s => s.id === history.activeId);
-    return {history, session, messages: authenticated ? session?.messages ?? [] : [], authenticated, authChecked,
+    return {history, session, messages: authenticated ? session?.messages ?? [] : [], authenticated, authChecked, accessMode, changeAccessMode,
         auth, authBusy, loginPending, uiLocked, lifecycle, turn, stopping, confirmation, confirmBusy, results, error, vision, notices,
-        notify, openLogin, startLogin, cancelAuth, submitAuth, unlock, send, stop, retry, switchSession, newChat, respond, setConfirmation};
+        notify, openLogin, startLogin, cancelAuth, submitAuth, unlock, send, stop, retry, switchSession, newChat, respond, requestConfirmation};
 }
 
 export type Assistant = ReturnType<typeof useAssistant>;

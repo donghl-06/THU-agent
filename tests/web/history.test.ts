@@ -34,5 +34,8 @@ describe("React 会话数据迁移与合并", () => {
     it("损坏的历史不会阻止界面启动", () => {
         expect(parseHistory("broken").sessions).toEqual([]);
         expect(parseHistory(JSON.stringify({sessions: [null, {id: 123}, {id: "valid", messages: "bad"}]})).sessions).toHaveLength(1);
+        const state = parseHistory(JSON.stringify({sessions: [{id: "valid", messages: [{role: "bot", text: "仍可阅读", turn: {items: null}}]}]}));
+        expect(state.sessions[0].messages[0].text).toBe("仍可阅读");
+        expect(state.sessions[0].messages[0].turn).toBeUndefined();
     });
 });

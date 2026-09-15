@@ -1,6 +1,6 @@
 import {useState, type FormEvent} from "react";
 import {AnimatePresence} from "motion/react";
-import {ArrowUpRight, BookOpen, CalendarDays, Check, Fingerprint, KeyRound, LoaderCircle, LockKeyhole, LogOut, MessageCircle, Newspaper, Power, ShieldCheck, Smartphone, Trash2, Unplug, Volleyball} from "lucide-react";
+import {ArrowUpRight, BookOpen, CalendarDays, Check, Fingerprint, Hand, KeyRound, LoaderCircle, LockKeyhole, LogOut, MessageCircle, Newspaper, Power, ShieldAlert, Smartphone, Trash2, Unplug, Volleyball} from "lucide-react";
 import type {Assistant} from "../lib/useAssistant";
 import {toolLabels} from "../lib/api";
 import {Modal} from "./Modal";
@@ -13,7 +13,7 @@ export function Dialogs({app, about, closeAbout}: {app: Assistant; about: boolea
             {icon: BookOpen, label: "图书馆", text: "查空位、预约座位与研讨间"},
             {icon: Newspaper, label: "校园资讯", text: "浏览校园动态和通知详情"},
             {icon: Volleyball, label: "体育与生活", text: "场馆预约、校园卡、宿舍电费"},
-        ].map(({icon: Icon, label, text}) => <div key={label}><Icon size={19}/><span><strong>{label}</strong><small>{text}</small></span></div>)}</div><p className="privacy-note"><ShieldCheck size={15}/>预约、充值等操作始终由你确认</p><button className="button primary full" onClick={closeAbout}>开始使用<ArrowUpRight size={16}/></button></Modal>}
+        ].map(({icon: Icon, label, text}) => <div key={label}><Icon size={19}/><span><strong>{label}</strong><small>{text}</small></span></div>)}</div><p className="privacy-note">{app.accessMode === "full-access" ? <><ShieldAlert size={15}/>完全访问：操作将直接执行</> : <><Hand size={15}/>请求批准：操作前由你确认</>}</p><button className="button primary full" onClick={closeAbout}>开始使用<ArrowUpRight size={16}/></button></Modal>}
         {app.auth && <AuthDialog key="auth" app={app}/>}
         {app.confirmation && <ConfirmDialog key="confirmation" app={app}/>}
         {app.uiLocked && <AccessDialog key="access" app={app}/>}
@@ -53,7 +53,7 @@ function ConfirmDialog({app}: {app: Assistant}) {
     const isWrite = confirmation.kind === "write";
     const isDelete = confirmation.kind === "delete";
     const title = isWrite ? "确认这次操作" : isDelete ? "删除对话？" : "退出登录？";
-    const Icon = isWrite ? ShieldCheck : isDelete ? Trash2 : LogOut;
+    const Icon = isWrite ? Hand : isDelete ? Trash2 : LogOut;
     return <Modal title={title} close={app.confirmBusy ? undefined : () => void app.respond(false)}>
         <span className={`dialog-icon ${isDelete ? "danger" : ""}`}><Icon size={27}/></span>
         <p className="dialog-description">{isWrite ? "请核对以下信息，确认后清灵才会执行。" : isDelete ? `“${confirmation.session.title}”将被删除，此操作无法撤销。` : "退出后历史对话会隐藏，重新登录即可继续查看。"}</p>

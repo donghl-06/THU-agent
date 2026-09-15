@@ -62,7 +62,7 @@ export function Sidebar({app, collapsed, mobileOpen, closeMobile, collapse, abou
                             <div className={`session-item ${session.id === app.history.activeId ? "active" : ""}`}>
                                 {session.id === app.history.activeId && <motion.span className="session-selection" layoutId="session-selection" transition={{type: "spring", stiffness: 440, damping: 38}}/>}
                                 <button className="session-link" aria-current={session.id === app.history.activeId ? "page" : undefined} title={session.title} onClick={() => { app.switchSession(session.id); closeMobile(); }}><MessageCircle size={16}/><span>{session.title}</span></button>
-                                <IconButton className="session-delete" icon={Trash2} label={`删除对话：${session.title}`} disabled={Boolean(app.turn)} onClick={() => app.setConfirmation({kind: "delete", session})}/>
+                                <IconButton className="session-delete" icon={Trash2} label={`删除对话：${session.title}`} disabled={Boolean(app.turn) || app.confirmBusy} onClick={() => app.requestConfirmation({kind: "delete", session})}/>
                             </div>
                         </div>;
                     })}
@@ -70,7 +70,7 @@ export function Sidebar({app, collapsed, mobileOpen, closeMobile, collapse, abou
                 <div className="sidebar-bottom">
                     {app.authenticated && Boolean(app.session?.tokens) && <span className="session-usage">本次对话 · {app.session?.tokens?.toLocaleString()} tokens</span>}
                     <button className="guide-link" onClick={about}><CircleHelp size={17}/><span>校园服务指南</span><ArrowUpRight size={14}/></button>
-                    <button className="account" disabled={Boolean(app.turn) || app.loginPending} onClick={() => app.authenticated ? app.setConfirmation({kind: "logout"}) : app.openLogin()}>
+                    <button className="account" disabled={Boolean(app.turn) || app.loginPending || app.confirmBusy} onClick={() => app.authenticated ? app.requestConfirmation({kind: "logout"}) : app.openLogin()}>
                         <span className="account-avatar"><UserRound size={19}/></span>
                         <span className="account-copy"><strong>{app.authenticated ? "清华 Info" : "连接清华账号"}</strong><small>{app.authenticated ? <><Check size={11}/>已连接校园服务</> : "登录，开启校园服务"}</small></span>
                         <ChevronsUpDown size={15}/>

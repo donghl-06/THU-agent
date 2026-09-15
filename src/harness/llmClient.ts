@@ -36,7 +36,7 @@ export interface LlmClient {
      * （tool_calls 在流里是增量碎片，内部拼好后整体返回）。
      * 可选方法——不支持流式的假 LLM 不实现它，Agent 会自动退回 chat。
      */
-    chatStream?(messages: ChatMessage[], tools: ToolSchema[], onToken: (token: string) => void, signal?: AbortSignal, onUsage?: UsageCallback): Promise<ChatMessage>;
+    chatStream?(messages: ChatMessage[], tools: ToolSchema[], onToken: (token: string) => void, signal?: AbortSignal, onUsage?: UsageCallback, onReasoning?: (token: string) => void): Promise<ChatMessage>;
 }
 
 /** 从 fetch 的 cause 链里挖出真正的底层原因（ECONNRESET/ENOTFOUND/…） */
@@ -124,13 +124,15 @@ export function createLlmClient(): LlmClient {
             return message;
         },
 
-        async chatStream(messages, tools, onToken, signal, onUsage) {
+        async chatStream(messages, tools, onToken, signal, onUsage, onReasoning) {
             const resp = await post(messages, tools, true, signal);
             if (!resp.body) throw new Error("LLM 流式响应没有 body。");
 
             // SSE 解析：逐行读 "data: {...}"，content 增量立刻回调，
             // tool_calls 增量按 index 拼成完整调用
             let content = "";
+            let reasoningContent = "";
+            let reasoning = "";
             const toolCalls = new Map<number, {id: string; name: string; arguments: string}>();
             let usage: RawUsage | undefined; // usage 块通常在流末尾（choices 为空）
             const reader = resp.body.getReader();
@@ -145,6 +147,8 @@ export function createLlmClient(): LlmClient {
                     choices?: {
                         delta?: {
                             content?: string;
+                            reasoning_content?: string;
+                            reasoning?: string;
                             tool_calls?: {index: number; id?: string; function?: {name?: string; arguments?: string}}[];
                         };
                     }[];
@@ -158,6 +162,10 @@ export function createLlmClient(): LlmClient {
                 if (chunk.usage) usage = chunk.usage;
                 const delta = chunk.choices?.[0]?.delta;
                 if (!delta) return;
+                if (typeof delta.reasoning_content === "string") reasoningContent += delta.reasoning_content;
+                if (typeof delta.reasoning === "string") reasoning += delta.reasoning;
+                const thought = delta.reasoning_content || delta.reasoning;
+                if (typeof thought === "string" && thought) onReasoning?.(thought);
                 if (delta.content) {
                     content += delta.content;
                     onToken(delta.content);
@@ -196,6 +204,8 @@ export function createLlmClient(): LlmClient {
             return {
                 role: "assistant",
                 content: content || null,
+                ...(reasoningContent ? {reasoning_content: reasoningContent} : {}),
+                ...(reasoning ? {reasoning} : {}),
                 ...(calls.length > 0 ? {tool_calls: calls} : {}),
             };
         },

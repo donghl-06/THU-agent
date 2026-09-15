@@ -1,10 +1,11 @@
 import {useEffect, useLayoutEffect, useRef, useState, type ChangeEvent} from "react";
 import {AnimatePresence, motion} from "motion/react";
-import {ArrowUp, CornerDownLeft, FileUp, ImagePlus, LoaderCircle, Mic, Square, X} from "lucide-react";
+import {ArrowUp, Cross, FileUp, LoaderCircle, Mic, Square, X} from "lucide-react";
 import type {Assistant} from "../lib/useAssistant";
 import type {UploadedFile} from "../lib/types";
 import {useSpeech} from "../lib/useSpeech";
 import {IconButton} from "./Controls";
+import {AccessModePicker} from "./AccessModePicker";
 
 export function Composer({app, value, setValue, onSend}: {app: Assistant; value: string; setValue: (text: string) => void; onSend: (text: string, images: string[], files: UploadedFile[]) => void}) {
     const [images, setImages] = useState<string[]>([]);
@@ -12,7 +13,6 @@ export function Composer({app, value, setValue, onSend}: {app: Assistant; value:
     const [uploading, setUploading] = useState(false);
     const textarea = useRef<HTMLTextAreaElement>(null);
     const input = useRef<HTMLInputElement>(null);
-    const fileInput = useRef<HTMLInputElement>(null);
     const speech = useSpeech(value, setValue, app.notify, textarea);
     const busy = Boolean(app.turn);
     const wasBusy = useRef(busy);
@@ -33,37 +33,33 @@ export function Composer({app, value, setValue, onSend}: {app: Assistant; value:
     }, [app.history.activeId, app.authenticated]);
     useEffect(() => () => { uploadGeneration.current++; }, []);
 
-    async function selectImages(event: ChangeEvent<HTMLInputElement>) {
-        const files = Array.from(event.target.files ?? []);
-        event.target.value = "";
-        const generation = uploadGeneration.current;
-        setUploading(true);
-        const next = [...images];
-        for (const file of files) {
-            if (next.length >= 4) { app.notify("最多一次发送 4 张图片"); break; }
-            if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) { app.notify("请选择 PNG、JPEG、WebP 或 GIF 图片", "error"); continue; }
-            if (file.size > 4.5 * 1024 * 1024) { app.notify("图片超过 4.5 MB，请先压缩", "error"); continue; }
-            try {
-                next.push(await new Promise<string>((resolve, reject) => {
-                    const reader = new FileReader();
-                    reader.onload = () => resolve(String(reader.result));
-                    reader.onerror = reject;
-                    reader.readAsDataURL(file);
-                }));
-            } catch { app.notify("无法读取图片，请重试", "error"); }
-        }
-        if (generation === uploadGeneration.current) { setImages(next); setUploading(false); }
-    }
-    async function selectFiles(event: ChangeEvent<HTMLInputElement>) {
+    async function selectAttachments(event: ChangeEvent<HTMLInputElement>) {
         const selected = Array.from(event.target.files ?? []);
         event.target.value = "";
         if (!app.authenticated) { app.openLogin(); return; }
         const generation = uploadGeneration.current;
+        let imageCount = images.length;
         setUploading(true);
         try {
             for (const file of selected) {
                 if (generation !== uploadGeneration.current) break;
                 if (!file.size) { app.notify(`「${file.name}」是空文件`, "error"); continue; }
+                if (app.vision && /^image\/(png|jpeg|webp|gif)$/.test(file.type)) {
+                    if (imageCount >= 4) { app.notify("最多一次发送 4 张图片"); continue; }
+                    if (file.size > 4.5 * 1024 * 1024) { app.notify("图片超过 4.5 MB，请先压缩", "error"); continue; }
+                    try {
+                        const image = await new Promise<string>((resolve, reject) => {
+                            const reader = new FileReader();
+                            reader.onload = () => resolve(String(reader.result));
+                            reader.onerror = reject;
+                            reader.readAsDataURL(file);
+                        });
+                        if (generation !== uploadGeneration.current) break;
+                        setImages(prev => [...prev, image]);
+                        imageCount++;
+                    } catch { if (generation === uploadGeneration.current) app.notify("无法读取图片，请重试", "error"); }
+                    continue;
+                }
                 if (file.size > 50 * 1024 * 1024) { app.notify(`「${file.name}」超过 50 MB，请先压缩`, "error"); continue; }
                 try {
                     const response = await fetch(`/api/upload?name=${encodeURIComponent(file.name)}`, {method: "POST", body: file});
@@ -98,15 +94,13 @@ export function Composer({app, value, setValue, onSend}: {app: Assistant; value:
                 if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); if (!busy && !uploading && (value.trim() || images.length || files.length)) send(); }
             }} disabled={Boolean(app.lifecycle)}/>
             <div className="composer-toolbar"><div className="composer-tools">
-                {app.vision && <IconButton icon={uploading ? LoaderCircle : ImagePlus} className={uploading ? "spin-icon" : ""} label="添加图片" disabled={busy || uploading} onClick={() => input.current?.click()}/>}
-                <IconButton icon={FileUp} label="上传文件" disabled={busy || uploading || Boolean(app.lifecycle)} onClick={() => app.authenticated ? fileInput.current?.click() : app.openLogin()}/>
+                <IconButton icon={uploading ? LoaderCircle : Cross} className={uploading ? "spin-icon" : ""} label="添加附件" disabled={busy || uploading || Boolean(app.lifecycle)} onClick={() => app.authenticated ? input.current?.click() : app.openLogin()}/>
+                <AccessModePicker mode={app.accessMode} change={app.changeAccessMode} disabled={busy || app.loginPending || app.confirmBusy || Boolean(app.lifecycle)}/>
+            </div><div className="composer-send-actions">
                 <IconButton icon={Mic} label={speech.listening ? "停止语音输入" : "语音输入"} className={speech.listening ? "recording" : ""} aria-pressed={speech.listening} disabled={busy} onClick={speech.toggle}/>
-                <span className="composer-tool-label">{speech.listening ? "聆听中" : "校园助手"}</span>
-            </div><span className="composer-shortcut"><CornerDownLeft size={12}/>发送<span>·</span>Shift + Enter 换行</span>
                 <button className={`send-button ${busy ? "stop-button" : ""}`} aria-label={app.stopping ? "正在停止" : busy ? "停止生成" : "发送消息"} title={busy ? "停止生成" : "发送消息"} disabled={app.stopping || uploading || app.loginPending || Boolean(app.lifecycle) || (!busy && !value.trim() && !images.length && !files.length)} onClick={() => busy ? app.stop() : send()}>{app.stopping ? <LoaderCircle size={19} className="spin"/> : busy ? <Square size={16} fill="currentColor"/> : <ArrowUp size={21} strokeWidth={2}/>}</button>
-            </div>
-            <input ref={input} type="file" aria-label="选择图片" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden onChange={event => void selectImages(event)}/>
-            <input ref={fileInput} type="file" aria-label="选择文件" multiple hidden onChange={event => void selectFiles(event)}/>
+            </div></div>
+            <input ref={input} type="file" aria-label="选择附件" multiple hidden onChange={event => void selectAttachments(event)}/>
         </motion.div>
         <p className="disclaimer">清灵的回答可能存在误差，重要信息请以学校官方信息为准</p>
     </div>;

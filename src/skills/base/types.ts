@@ -22,8 +22,9 @@ export interface Skill {
 
     /**
      * 为 true 表示这是写操作（预约/取消/充值等）。
-     * Harness 必须在执行前把操作详情展示给用户、拿到明确同意；
-     * 没有确认通道的环境必须拒绝执行（fail closed）。
+     * 请求批准模式下，Harness 展示操作详情并取得同意；
+     * 宿主显式选择的完全访问模式提供本轮授权。
+     * 未获完全访问授权且没有确认通道的环境必须拒绝执行（fail closed）。
      */
     requiresConfirmation?: boolean;
 
