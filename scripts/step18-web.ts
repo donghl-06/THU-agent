@@ -25,6 +25,7 @@ import {TaskStore} from "../src/tasks/taskStore";
 import type {LoginCredentials} from "../src/client/auth";
 import {resolveStableFingerprint} from "../src/client/fingerprintStore";
 import {dirname, join} from "node:path";
+import {existsSync} from "node:fs";
 
 const scriptDirectory = dirname(process.argv[1] ?? process.cwd());
 process.env.OPENSSL_CONF ??= join(scriptDirectory, "..", "openssl.cnf");
@@ -33,7 +34,8 @@ const PORT = Number(process.env.PORT ?? 3457);
 // WSL 下默认监听 0.0.0.0，绕开 localhost 转发失效问题；Windows 原生/打包版保持 127.0.0.1。
 // 显式设置 HOST 环境变量时永远优先。
 const HOST = process.env.HOST ?? (process.env.WSL_DISTRO_NAME ? "0.0.0.0" : "127.0.0.1");
-const indexHtmlPath = join(scriptDirectory, "..", "src", "server", "public", "index.html");
+const builtWeb = join(scriptDirectory, "..", "build", "web", "index.html");
+const indexHtmlPath = existsSync(builtWeb) ? builtWeb : join(scriptDirectory, "..", "src", "server", "public", "index.html");
 
 const today = dateContextLine();
 

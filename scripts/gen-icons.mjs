@@ -3,7 +3,7 @@
  * 纯 Node 实现 PNG 编码（zlib 内置 + 手写 CRC），无第三方依赖、无字体渲染。
  *
  * 运行：node scripts/gen-icons.mjs
- * 产物：src/server/public/icons/icon-{192,512}.png（提交进 git，打包随 dist 带走）
+ * 产物：src/web/public/icons/icon-{192,512}.png（提交进 git，打包随 dist 带走）
  */
 import {deflateSync} from "node:zlib";
 import {mkdir, writeFile} from "node:fs/promises";
@@ -11,7 +11,7 @@ import {dirname, join, resolve} from "node:path";
 import {fileURLToPath} from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const outDir = join(root, "src", "server", "public", "icons");
+const outDir = join(root, "src", "web", "public", "icons");
 
 // ---- PNG 编码 ----
 

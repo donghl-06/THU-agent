@@ -158,6 +158,21 @@ describe("Web 服务端", () => {
         expect(html).toContain("清灵");
     });
 
+    it("React 构建资源能加载，未知资源和目录穿越不会暴露文件", async () => {
+        await start([textMsg("x")]);
+        const html = await (await fetch(`${base}/`)).text();
+        const paths = [...html.matchAll(/(?:src|href)="(\/assets\/[^\"]+)"/g)].map(match => match[1]);
+        expect(paths.length).toBeGreaterThan(1);
+        for (const path of paths) {
+            const response = await fetch(`${base}${path}`);
+            expect(response.status).toBe(200);
+            expect(response.headers.get("content-type")).toContain(path.endsWith(".css") ? "text/css" : "text/javascript");
+            expect(response.headers.get("cache-control")).toContain("immutable");
+        }
+        expect((await fetch(`${base}/assets/missing.js`)).status).toBe(404);
+        expect((await fetch(`${base}/assets/%2e%2e%2f.env`)).status).toBe(404);
+    });
+
     it("纯文本问答：answer + done 事件", async () => {
         await start([textMsg("你好呀")]);
         const resp = await fetch(`${base}/api/chat`, {

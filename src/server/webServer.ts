@@ -46,8 +46,8 @@
  * 把转发目标切到本轮 SSE 连接的桥上（busy 互斥保证同时只有一轮）。
  */
 import {createServer, type IncomingMessage, type ServerResponse, type Server} from "node:http";
-import {readFileSync} from "node:fs";
-import {dirname, join} from "node:path";
+import {readFileSync, readdirSync} from "node:fs";
+import {dirname, extname, join} from "node:path";
 import type {Agent} from "../harness/agentLoop";
 import type {LlmClient} from "../harness/llmClient";
 import {createLlmClient} from "../harness/llmClient";
@@ -210,7 +210,7 @@ export function createWebServer(
 ): Server {
     const port = opts.port ?? 3457;
     const requireLogin = opts.requireLogin ?? true;
-    const indexPath = opts.indexHtmlPath ?? join(process.cwd(), "src", "server", "public", "index.html");
+    const indexPath = opts.indexHtmlPath ?? join(process.cwd(), "build", "web", "index.html");
     const indexHtml = readFileSync(indexPath, "utf8");
     // PWA 静态资源（与 index.html 同目录）：读不到（如测试注入临时 HTML）时对应路由 404
     const readOptional = (p: string): Buffer | undefined => {
@@ -225,6 +225,13 @@ export function createWebServer(
     const icon192 = readOptional(join(publicDir, "icons", "icon-192.png"));
     const icon512 = readOptional(join(publicDir, "icons", "icon-512.png"));
     const serviceWorker = readOptional(join(publicDir, "service-worker.js"));
+    // Only expose Vite's generated assets, never arbitrary paths from the workspace.
+    const webAssets = new Map<string, Buffer>();
+    try {
+        for (const entry of readdirSync(join(publicDir, "assets"), {withFileTypes: true})) {
+            if (entry.isFile()) webAssets.set(`/assets/${entry.name}`, readFileSync(join(publicDir, "assets", entry.name)));
+        }
+    } catch { /* Injected test pages may have no asset directory. */ }
     const store = opts.sessionStorePath ? new SessionStore(opts.sessionStorePath) : undefined;
     const scheduler = opts.scheduler;
     const hub = opts.notificationHub;
@@ -883,8 +890,16 @@ export function createWebServer(
         void (async () => {
             const url = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
             if (req.method === "GET" && url.pathname === "/") {
-                res.writeHead(200, {"Content-Type": "text/html; charset=utf-8"});
+                res.writeHead(200, {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache"});
                 res.end(indexHtml);
+                return;
+            }
+            if (req.method === "GET" && url.pathname.startsWith("/assets/")) {
+                const asset = webAssets.get(url.pathname);
+                if (!asset) { res.writeHead(404).end("not found"); return; }
+                const types: Record<string, string> = {".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".woff2": "font/woff2"};
+                res.writeHead(200, {"Content-Type": types[extname(url.pathname)] ?? "application/octet-stream", "Cache-Control": "public, max-age=31536000, immutable"});
+                res.end(asset);
                 return;
             }
             if (req.method === "GET" && url.pathname === "/service-worker.js" && serviceWorker) {

@@ -35,7 +35,7 @@ JSON CLI 的任务调用通过本机 HTTP 桥接到已运行的 Web 服务；它
 | 入口 | 实现 | 使用本项目 LLM | 当前能力 | 写操作确认 |
 | --- | --- | --- | --- | --- |
 | `pnpm agent` | `scripts/step10-agent.ts` | 是 | 18 个校园工具：11 读、7 写；无任务调度器 | 终端展示参数，输入 `y` / `yes` |
-| `pnpm web` | `scripts/step18-web.ts` → `src/server/webServer.ts` | 对话需要；任务执行不需要 | 18 个校园工具 + 4 个任务工具 | 浏览器确认交互 |
+| `pnpm web` | `scripts/web-dev.mjs` → Vite / `scripts/step18-web.ts` → `src/server/webServer.ts` | 对话需要；任务执行不需要 | 18 个校园工具 + 4 个任务工具 | 浏览器确认交互 |
 | `pnpm --silent skill …` | `src/skillCli.ts` | 否 | 22 个工具；任务依赖 Web | 宿主先取得用户明确同意，再逐次传 `--confirmed-by-user` |
 | `pnpm --silent mcp` | `scripts/mcp-server.ts` → `src/mcp/server.ts` | 否 | 默认 11 个校园读工具 + `thu_login` / `get_user_info` | 当前不支持写操作确认，拒绝执行写工具 |
 
@@ -60,8 +60,16 @@ pnpm --silent skill describe schedule_sports_booking
 
 ### Web：对话适配层与常驻任务宿主
 
-服务端使用 Node.js HTTP，前端主体是 `src/server/public/index.html` 中的原生
-HTML/CSS/JavaScript；`POST /api/chat` 以 SSE 返回文本、工具进度、确认请求和结果。
+服务端使用 Node.js HTTP，前端使用 React + TypeScript + Vite。`src/web/App.tsx`
+组织聊天工作区，`src/web/components/` 提供侧栏、消息、输入区和弹窗，
+`src/web/lib/useAssistant.ts` 管理认证与流式交互，`history.ts` 保留旧版数据迁移与跨标签页合并。
+图标来自 `lucide-react`，Motion 管理入场、折叠与弹窗过渡。Markdown 按需加载，通过
+React 渲染并跳过原始 HTML。`POST /api/chat` 以 SSE 返回文本、工具进度、确认请求和结果。
+
+`pnpm web` 启动 Vite 页面（默认 3457）与本机 API（默认 3458），通过 `/api` 同源代理
+保留 Cookie、认证和确认接口；`WEB_API_PORT` 可覆盖开发 API 端口。`pnpm web:build`
+生成 `build/web/`，`pnpm web:serve` 直接提供构建后的页面与 API。发行构建将 React 资源复制到
+`dist/src/server/public/`，沿用桌面打包入口。服务端只公开构建资源白名单，离线缓存仅含页面壳和静态资源，不缓存 API。
 
 Web 层还提供图形化登录与二次认证、停止生成、多会话与历史恢复、标题生成、图片输入、
 支付二维码/链接/表单展示、预约日历 `.ics` 导出、Token 用量，以及任务和通知界面。

@@ -32,7 +32,7 @@ Agent 自主判断并组合多个校园能力（查课表 → 推理空闲时间
 ## 环境要求
 
 - Windows + WSL2 Ubuntu（或任意 Linux/macOS）
-- Node.js ≥ 22
+- Node.js ≥ 22.12
 - pnpm 10（`npm install -g pnpm`）
 - 清华大学 Info 账号（用于登录校园服务）
 - 使用内置 CLI / Web 自然语言对话时，需配置 OpenAI 兼容的 LLM API；直接 Skill / MCP 调用不需要
@@ -128,6 +128,21 @@ pnpm step3   # 获取真实课表
 即可在页面输入清华 Info 学号和密码。需要二次认证时，页面会弹出 TOTP、短信或微信
 认证方式选择，并在同一窗口输入验证码；登录凭证传给本地后端，不会写入浏览器本地存储。
 Web UI 登录成功后才会开放校园 Skill 查询。
+
+Web 前端使用 **React + TypeScript + Vite**，界面组件位于 `src/web/components/`，
+应用状态、SSE 与历史迁移位于 `src/web/lib/`，样式统一在 `src/web/styles.css`。
+图标使用 `lucide-react`，过渡动效使用 Motion，并尊重系统的减少动态效果设置。
+
+- `pnpm web`：启动 Vite 热更新页面（默认 3457）和本机 API（默认 3458）。
+- `pnpm web:build`：构建到 `build/web/`。
+- `pnpm web:serve`：提供已构建页面和 API（默认 3457，无热更新）。
+- `pnpm build`：构建 React 前端和现有桌面发行包资源。
+- `pnpm test:web`：使用离线模拟服务运行 Playwright 浏览器回归，不连接校园服务。
+  首次运行先执行 `pnpm exec playwright install chromium`。
+
+开发时 `PORT` 控制页面端口，`WEB_API_PORT` 控制 API 端口；API 通过 Vite 同源代理访问。
+前端保留原有本地历史数据格式，登录后自动恢复；图片预览和登录密码不写入历史。
+静态资源与离线壳一起打包，无需 CDN。界面截图见 [Web UI 截图](docs/web-ui.md)。
 
 非 WSL 环境默认监听 `127.0.0.1`，WSL 默认监听 `0.0.0.0`，可通过 `HOST` / `PORT` 覆盖。
 WSL 或自行开放其他网卡时不能假定仅本机可访问，应核对网络范围并配置 `UI_TOKEN`；
