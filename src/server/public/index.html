@@ -344,6 +344,18 @@
   @media (max-width: 560px) { .w-grid { grid-template-columns: 1fr; } }
   /* Markdown 渲染样式（文档十九）：层级清晰、克制 */
   .msg.md { white-space: normal; }
+  /* 对话内图片（show_email_image / show_learn_image 的临时图）：限宽、圆角、可点开放大 */
+  .md img { max-width: min(260px, 100%); border-radius: var(--r-md); display: block; margin: 8px 0; cursor: zoom-in; }
+  .md .img-gone { font-size: var(--fs-xs); color: var(--muted); margin: 8px 0; }
+  /* 临时图容器：图 + 「已用完」按钮，用户点击确认后服务端才删本地文件 */
+  .md .inline-img { margin: 8px 0; }
+  .md .inline-img img { margin: 0 0 4px; }
+  .md .img-done {
+    font-size: var(--fs-xs); color: var(--muted); background: var(--inset);
+    border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; cursor: pointer;
+  }
+  .md .img-done:hover { color: var(--ok); border-color: var(--ok); }
+  .md .img-done:disabled { opacity: .5; cursor: default; }
   .md > :first-child { margin-top: 0; }
   .md > :last-child { margin-bottom: 0; }
   .md p { margin: 0 0 10px; }
@@ -449,10 +461,17 @@
   }
   @keyframes pulse { 50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--err) 22%, transparent); } }
   /* 待发送图片缩略图条 */
-  #thumbs { display: flex; gap: 8px; padding: 0 4px 8px; }
+  #thumbs { display: flex; gap: 8px; padding: 0 4px 8px; flex-wrap: wrap; }
   #thumbs[hidden] { display: none; }
   #thumbs .thumb { position: relative; }
   #thumbs img { height: 56px; border-radius: 8px; border: 1px solid var(--border); display: block; }
+  /* 上传文件的 chip（与图片缩略图同区展示） */
+  #thumbs .filechip {
+    display: flex; align-items: center; gap: 6px; height: 56px; padding: 0 12px;
+    border: 1px solid var(--border); border-radius: 8px; background: var(--card);
+    font-size: 12px; color: var(--text); max-width: 200px;
+  }
+  #thumbs .filechip .fname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #thumbs .rm {
     position: absolute; top: -6px; right: -6px; width: 18px; height: 18px;
     border-radius: 50%; border: none; background: var(--err); color: #fff;
@@ -733,10 +752,12 @@ if(__exports != exports)module.exports = exports;return module.exports}));
     <textarea id="q" rows="1" placeholder="有什么想让清灵帮你查的？" autocomplete="off"></textarea>
     <div class="composer-row">
       <button id="attach" class="iconbtn" title="发送图片"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+      <button id="upload-doc" class="iconbtn" title="上传文件给清灵（交作业等场景）"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 12 15 15"/></svg></button>
       <button id="mic" class="iconbtn" title="语音输入"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg></button>
       <span class="composer-hint">Enter 发送 · Shift+Enter 换行</span>
       <button id="send" disabled>发送</button>
       <input id="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
+      <input id="doc-file" type="file" multiple hidden>
     </div>
   </div>
   <p id="disclaimer">清灵的回答可能存在误差，重要信息请以学校官方信息为准</p>
@@ -1599,7 +1620,10 @@ const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 const PLACEHOLDER = "有什么想让清灵帮你查的？";
 let rec = null;
 let wantListen = false;   // 用户是否处于聆听状态（区分主动停止与服务端自动断开）
-let voiceBase = "";       // 开始聆听时输入框已有内容
+let voiceBefore = "";     // 开始聆听时光标前的内容（语音插入到光标位置，不是末尾）
+let voiceAfter = "";      // 开始聆听时光标后的内容
+let voiceSepL = "";       // before 与语音文本之间的连接空格（开始时定好，避免重复加）
+let voiceSepR = "";       // 语音文本与 after 之间的连接空格
 let voiceText = "";       // 跨实例累计的最终识别文本
 let instanceFinal = "";   // 当前识别实例内已定稿的文本
 if (!SR) {
@@ -1609,7 +1633,11 @@ if (!SR) {
     toast("当前访问方式不支持语音输入：请用 http://127.0.0.1:3457 打开本页后再试", "err");
 } else {
   const renderVoice = (interim) => {
-    q.value = (voiceBase ? voiceBase + " " : "") + voiceText + instanceFinal + interim;
+    const inserted = voiceText + instanceFinal + interim;
+    q.value = voiceBefore + voiceSepL + inserted + voiceSepR + voiceAfter;
+    // 光标跟随已插入语音文本的末尾
+    const pos = (voiceBefore + voiceSepL + inserted).length;
+    try { q.setSelectionRange(pos, pos); } catch {}
     resizeQ();
   };
   const resetMicUi = () => {
@@ -1661,7 +1689,14 @@ if (!SR) {
   micBtn.onclick = () => {
     if (rec) { wantListen = false; rec.stop(); return; }
     wantListen = true;
-    voiceBase = q.value.trim();
+    // 锚定光标位置：语音文本插入到这里，而不是追加到整段文字末尾
+    const selStart = q.selectionStart ?? q.value.length;
+    const selEnd = q.selectionEnd ?? selStart;
+    voiceBefore = q.value.slice(0, selStart);
+    voiceAfter = q.value.slice(selEnd);
+    // 前后各补一个空格（已有空白/为空时不补），避免语音和原文字粘连
+    voiceSepL = voiceBefore && !/\s$/.test(voiceBefore) ? " " : "";
+    voiceSepR = voiceAfter && !/^\s/.test(voiceAfter) ? " " : "";
     voiceText = "";
     try {
       listenOnce();
@@ -1682,7 +1717,9 @@ const attachBtn = document.getElementById("attach");
 const fileInput = document.getElementById("file");
 const thumbs = document.getElementById("thumbs");
 const MAX_IMGS = 4, MAX_IMG_BYTES = 4.5 * 1024 * 1024;
+const MAX_DOC_BYTES = 50 * 1024 * 1024; // 与后端 /api/upload 上限一致
 let pendingImages = []; // data URL
+let pendingFiles = [];  // {name, path, sizeBytes} 已上传成功的文件
 fetch("/api/capabilities").then((r) => r.json()).then((c) => {
   if (!c.vision) attachBtn.style.display = "none";
 }).catch(() => {});
@@ -1697,9 +1734,36 @@ fileInput.onchange = () => {
   }
   fileInput.value = "";
 };
+
+/* ---- 文件上传（交给清灵的文件，如待交的作业 PDF；区别于发给模型看的图片） ---- */
+const uploadDocBtn = document.getElementById("upload-doc");
+const docFileInput = document.getElementById("doc-file");
+uploadDocBtn.onclick = () => docFileInput.click();
+docFileInput.onchange = async () => {
+  for (const f of docFileInput.files) {
+    if (f.size > MAX_DOC_BYTES) { toast(`「${f.name}」超过 50MB，请压缩后再传`, "err"); continue; }
+    if (f.size === 0) { toast(`「${f.name}」是空文件`, "err"); continue; }
+    try {
+      const resp = await fetch("/api/upload?name=" + encodeURIComponent(f.name), {
+        method: "POST",
+        body: f,
+      });
+      if (resp.status === 401) { toast("请先登录后再上传文件", "err"); break; }
+      if (!resp.ok) throw new Error(await resp.text());
+      const saved = await resp.json(); // {name, path, sizeBytes}
+      pendingFiles.push(saved);
+      renderThumbs();
+      toast(`已上传「${saved.name}」，发送消息时清灵就能使用它`);
+    } catch (e) {
+      toast(`上传「${f.name}」失败：` + (e.message || "网络错误"), "err");
+    }
+  }
+  docFileInput.value = "";
+};
+
 function renderThumbs() {
   thumbs.innerHTML = "";
-  thumbs.hidden = pendingImages.length === 0;
+  thumbs.hidden = pendingImages.length === 0 && pendingFiles.length === 0;
   pendingImages.forEach((url, i) => {
     const wrap = document.createElement("div");
     wrap.className = "thumb";
@@ -1710,6 +1774,22 @@ function renderThumbs() {
     rm.textContent = "×";
     rm.onclick = () => { pendingImages.splice(i, 1); renderThumbs(); };
     wrap.appendChild(img);
+    wrap.appendChild(rm);
+    thumbs.appendChild(wrap);
+  });
+  pendingFiles.forEach((f, i) => {
+    const wrap = document.createElement("div");
+    wrap.className = "thumb";
+    const chip = document.createElement("div");
+    chip.className = "filechip";
+    chip.title = f.path;
+    chip.innerHTML = `<span>📄</span><span class="fname"></span>`;
+    chip.querySelector(".fname").textContent = f.name;
+    const rm = document.createElement("button");
+    rm.className = "rm";
+    rm.textContent = "×";
+    rm.onclick = () => { pendingFiles.splice(i, 1); renderThumbs(); };
+    wrap.appendChild(chip);
     wrap.appendChild(rm);
     thumbs.appendChild(wrap);
   });
@@ -1725,6 +1805,12 @@ const TOOL_LABELS = {
   book_library_seat: "预约图书馆座位", book_library_room: "预约研讨间",
   cancel_library_booking: "取消图书馆预约", get_my_library_bookings: "我的预约",
   get_sports_resources: "体育场馆", book_sports_field: "预约体育场馆", pay_sports_order: "体育订单支付",
+  get_learn_courses: "学堂课程", get_learn_notices: "学堂通知",
+  get_learn_homework: "学堂作业", submit_learn_homework: "提交学堂作业",
+  get_learn_files: "学堂课件", download_learn_file: "下载学堂课件",
+  get_learn_calendar: "学堂日历",
+  get_emails: "清华邮箱", send_email: "发送邮件", show_email_image: "邮件图片",
+  show_learn_image: "学堂图片",
 };
 const toolLabel = (name) => TOOL_LABELS[name] ?? name;
 
@@ -1821,6 +1907,36 @@ function renderMd(el, raw) {
     }
   });
   el.querySelectorAll("a").forEach((a) => { a.target = "_blank"; a.rel = "noopener noreferrer"; });
+  // 图片处理：临时图（/api/temp-image/）加「✓ 已用完」按钮——本地文件在用户
+  // 点击确认后才删除（DELETE 端点）；在此之前刷新历史也能正常显示。
+  // 已清理的图（404）替换为说明文字；能加载时点击放大到新标签页看原图。
+  el.querySelectorAll("img").forEach((img) => {
+    const src = img.getAttribute("src") || "";
+    img.addEventListener("click", () => { if (img.src) window.open(img.src, "_blank"); });
+    if (!src.startsWith("/api/temp-image/")) return;
+    const wrap = document.createElement("div");
+    wrap.className = "inline-img";
+    img.replaceWith(wrap);
+    wrap.appendChild(img);
+    const btn = document.createElement("button");
+    btn.className = "img-done";
+    btn.textContent = "✓ 已用完，删除";
+    wrap.appendChild(btn);
+    const toNote = (text) => {
+      const note = document.createElement("div");
+      note.className = "img-gone";
+      note.textContent = text;
+      wrap.replaceWith(note);
+    };
+    img.addEventListener("error", () => toNote("（临时图片已清理，可让清灵重新获取）"));
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      try {
+        await fetch(src, {method: "DELETE"});
+      } catch { /* 网络失败也按已清理展示；服务端 TTL 会兜底删文件 */ }
+      toNote("（图片已按你的确认从本地删除）");
+    });
+  });
   if (el.classList.contains("bot")) attachMsgActions(el);
 }
 
@@ -2075,6 +2191,7 @@ async function logout() {
     updateLoginButton();
     hideHistoryForLogout();
     pendingImages = [];
+    pendingFiles = [];
     renderThumbs();
     toast("已退出登录；历史对话已隐藏，重新登录后可查看", "ok");
   }
@@ -2615,25 +2732,37 @@ async function ask(question, images) {
   }
 }
 
-/* 统一发送入口：发送按钮与"重新生成"共用 */
-function submit(text, imgs) {
-  if ((!text && imgs.length === 0) || busy) return;
+/* 统一发送入口：发送按钮与"重新生成"共用。
+   agentText 是给模型看的文本（可能带文件路径上下文），text 是气泡里展示的文本 */
+function submit(text, imgs, agentText) {
+  const payloadText = agentText ?? text;
+  if ((!payloadText && imgs.length === 0) || busy) return;
   if (rec) rec.stop(); // 发送时停止语音输入
   try { speechSynthesis.cancel(); } catch {} // 新一轮开始时停止朗读
   addUserMsg(text, imgs);
   sfx.send();
-  ask(text, imgs).catch((e) => { showErrorCard("网络错误：" + e.message); sfx.error(); });
+  ask(payloadText, imgs).catch((e) => { showErrorCard("网络错误：" + e.message); sfx.error(); });
 }
 sendBtn.onclick = () => {
   if (busy) { stopCurrentChat(); return; } // 等服务端确认清理完成后再允许下一问
   const text = q.value.trim();
   const imgs = pendingImages;
-  if (!text && imgs.length === 0) return;
+  const files = pendingFiles;
+  if (!text && imgs.length === 0 && files.length === 0) return;
   q.value = "";
   resizeQ();
   pendingImages = [];
+  pendingFiles = [];
   renderThumbs();
-  submit(text, imgs);
+  // 文件路径只给模型看（气泡不刷屏）：模型据此调 submit_learn_homework 等工具
+  const display = text + (files.length ? `${text ? "\n" : ""}📎 ${files.map((f) => f.name).join("、")}` : "");
+  const agentText = files.length
+    ? files.map((f) =>
+        `（用户已上传文件「${f.name}」，保存在本机路径：${f.path}。` +
+        `需要本地文件路径的工具（如 submit_learn_homework 的 filePath）可直接使用该路径。）`,
+      ).join("\n") + "\n\n" + (text || "（用户上传了上述文件，请结合对话确认它的用途。）")
+    : text;
+  submit(display, imgs, agentText);
 };
 /* textarea 自动伸缩 + Enter 发送 / Shift+Enter 换行 */
 function resizeQ() {

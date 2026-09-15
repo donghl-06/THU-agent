@@ -17,7 +17,9 @@ Harness             ← Agent 运行时：工具注册、Agent Loop（src/harnes
 THU Skills          ← Agent 可调用的原子能力（src/skills/）
 ThuClient           ← 统一封装登录/会话/重试（src/client/）
 SportsClient        ← 新版体育场馆系统客户端（src/client/sports/，独立链路）
+LearnClient         ← 网络学堂客户端（src/client/learn/，封装 thu-learn-lib）
 @thu-info/lib       ← 清华校园服务 SDK（npm 依赖 + 本地补丁）
+thu-learn-lib       ← 网络学堂（learn.tsinghua.edu.cn）SDK（npm 依赖）
 ```
 
 ## 环境要求
@@ -72,7 +74,20 @@ pnpm agent   # 命令行 Agent：注册全部查询技能，模型自主决定�
 pnpm step1   # InfoHelper 实例化（不联网）
 pnpm step2   # 真实登录 + 获取用户信息
 pnpm step3   # 获取真实课表
+pnpm learn   # 网络学堂真链验证（课程/通知/作业/课件/日历）
 ```
+
+### 网络学堂（learn.tsinghua.edu.cn）
+
+清灵已接入网络学堂（复用同一账号与信任设备，无需二次登录）：
+
+- `get_learn_courses` / `get_learn_notices` / `get_learn_homework` / `get_learn_files` / `get_learn_calendar`：
+  查课程、通知、作业（含截止时间与成绩）、课件列表、学堂日历 + 作业截止聚合；
+- `submit_learn_homework`：把本地 PDF 等文件提交到指定作业（写操作，需用户在确认弹窗同意）；
+- `download_learn_file`：把课件下载到本地目录（写操作，需确认）。
+
+可以试试：「我有什么作业要交？」「数据结构最近有什么通知？」
+「帮我把桌面上的 hw3.pdf 交到数据结构的第三次作业」。
 
 ### Web UI 图形化登录
 
