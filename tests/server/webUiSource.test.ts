@@ -109,7 +109,7 @@ describe("Web UI 请求状态", () => {
         expect(html).toContain("persistSessions(true)");
     });
 
-    it("多标签页消息合并保留双端追加并让完整回答覆盖半成品", () => {
+  it("多标签页消息合并保留双端追加并让完整回答覆盖半成品", () => {
         const functionSource = [
             /function legacyMessageId\(record, sessionId, occurrence\) \{[\s\S]*?\n\}/.exec(html)?.[0],
             /function normalizeMessageRecords\(records, sessionId\) \{[\s\S]*?\n\}/.exec(html)?.[0],
@@ -156,5 +156,14 @@ describe("Web UI 请求状态", () => {
         expect(mergeMessageRecords(indexedA, indexedB, "s_test")).toHaveLength(2);
 
         expect(mergeMessageRecords([{role: "bot", text: ""}], [], "s_test")).toHaveLength(0);
+    });
+
+    it("云盘视频和音频会渲染成受限媒体卡片而不是任意 HTML", () => {
+        expect(html).toContain("cloud-media");
+        expect(html).toContain('alt.startsWith("video:")');
+        expect(html).toContain('alt.startsWith("audio:")');
+        expect(html).toContain('document.createElement(kind)');
+        expect(html).toContain("isTsinghuaMediaUrl");
+        expect(html).toContain("cloud.tsinghua.edu.cn");
     });
 });

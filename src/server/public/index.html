@@ -356,6 +356,27 @@
   }
   .md .img-done:hover { color: var(--ok); border-color: var(--ok); }
   .md .img-done:disabled { opacity: .5; cursor: default; }
+  /* 清华云盘媒体消息：视频/音频边下边播，不把大文件落成本地临时文件 */
+  .md .cloud-media {
+    margin: 8px 0; padding: 10px; max-width: min(540px, 100%);
+    background: var(--card); border: 1px solid var(--border-soft);
+    border-radius: var(--r-lg); box-shadow: var(--shadow-1);
+  }
+  .md .cloud-media-title {
+    display: flex; align-items: center; gap: 8px; min-width: 0;
+    font-size: var(--fs-sm); font-weight: 600; color: var(--text);
+  }
+  .md .cloud-media-title span:last-child {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .md .cloud-media video {
+    display: block; width: 100%; max-height: 360px; margin-top: 8px;
+    border-radius: var(--r-md); background: #000;
+  }
+  .md .cloud-media audio { display: block; width: 100%; margin-top: 8px; }
+  .md .cloud-media-actions { display: flex; gap: 12px; margin-top: 8px; font-size: var(--fs-xs); }
+  .md .cloud-media-actions a { color: var(--tool); }
+  .md .cloud-media-error { margin-top: 6px; font-size: var(--fs-xs); color: var(--muted); }
   .md > :first-child { margin-top: 0; }
   .md > :last-child { margin-bottom: 0; }
   .md p { margin: 0 0 10px; }
@@ -1811,6 +1832,8 @@ const TOOL_LABELS = {
   get_learn_calendar: "学堂日历",
   get_emails: "清华邮箱", send_email: "发送邮件", show_email_image: "邮件图片",
   show_learn_image: "学堂图片",
+  get_cloud_libraries: "云盘资料库", get_cloud_directory: "云盘目录", search_cloud_files: "云盘搜索",
+  show_cloud_file: "云盘文件",
 };
 const toolLabel = (name) => TOOL_LABELS[name] ?? name;
 
@@ -1907,6 +1930,56 @@ function renderMd(el, raw) {
     }
   });
   el.querySelectorAll("a").forEach((a) => { a.target = "_blank"; a.rel = "noopener noreferrer"; });
+  // 云盘媒体消息：Skill 返回 ![video:文件名](url) / ![audio:文件名](url)。
+  // 这里在安全清理后转换为受控 <video>/<audio>，避免放开任意 HTML。
+  const isTsinghuaMediaUrl = (src) => {
+    try {
+      const url = new URL(src, window.location.href);
+      return (url.protocol === "https:" || url.protocol === "http:") &&
+        (url.hostname === "cloud.tsinghua.edu.cn" || url.hostname.endsWith(".tsinghua.edu.cn"));
+    } catch { return false; }
+  };
+  el.querySelectorAll("img").forEach((img) => {
+    const alt = (img.getAttribute("alt") || "").trim();
+    const kind = alt.startsWith("video:") ? "video" : alt.startsWith("audio:") ? "audio" : "";
+    const src = img.getAttribute("src") || "";
+    if (!kind) return;
+    const name = alt.slice(kind.length + 1).trim() || "清华云盘文件";
+    if (!isTsinghuaMediaUrl(src)) { img.remove(); return; }
+
+    const card = document.createElement("div");
+    card.className = "cloud-media";
+    const title = document.createElement("div");
+    title.className = "cloud-media-title";
+    const icon = document.createElement("span");
+    icon.textContent = kind === "video" ? "🎬" : "🎧";
+    const nameEl = document.createElement("span");
+    nameEl.textContent = name;
+    title.append(icon, nameEl);
+
+    const media = document.createElement(kind);
+    media.controls = true;
+    media.preload = "metadata";
+    media.src = src;
+
+    const actions = document.createElement("div");
+    actions.className = "cloud-media-actions";
+    const link = document.createElement("a");
+    link.href = src;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = kind === "video" ? "新窗口打开 / 下载" : "下载音频";
+    actions.appendChild(link);
+
+    const error = document.createElement("div");
+    error.className = "cloud-media-error";
+    error.hidden = true;
+    error.textContent = "云盘访问链接已过期或浏览器暂不支持该编码，可让清灵重新打开。";
+    media.addEventListener("error", () => { error.hidden = false; });
+
+    card.append(title, media, actions, error);
+    img.replaceWith(card);
+  });
   // 图片处理：临时图（/api/temp-image/）加「✓ 已用完」按钮——本地文件在用户
   // 点击确认后才删除（DELETE 端点）；在此之前刷新历史也能正常显示。
   // 已清理的图（404）替换为说明文字；能加载时点击放大到新标签页看原图。

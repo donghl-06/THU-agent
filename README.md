@@ -18,6 +18,7 @@ THU Skills          ← Agent 可调用的原子能力（src/skills/）
 ThuClient           ← 统一封装登录/会话/重试（src/client/）
 SportsClient        ← 新版体育场馆系统客户端（src/client/sports/，独立链路）
 LearnClient         ← 网络学堂客户端（src/client/learn/，封装 thu-learn-lib）
+CloudClient         ← 清华云盘客户端（src/client/cloud/，Seafile API）
 @thu-info/lib       ← 清华校园服务 SDK（npm 依赖 + 本地补丁）
 thu-learn-lib       ← 网络学堂（learn.tsinghua.edu.cn）SDK（npm 依赖）
 ```
@@ -75,6 +76,7 @@ pnpm step1   # InfoHelper 实例化（不联网）
 pnpm step2   # 真实登录 + 获取用户信息
 pnpm step3   # 获取真实课表
 pnpm learn   # 网络学堂真链验证（课程/通知/作业/课件/日历）
+pnpm cloud   # 清华云盘真链验证（资料库/搜索）
 ```
 
 ### 网络学堂（learn.tsinghua.edu.cn）
@@ -88,6 +90,19 @@ pnpm learn   # 网络学堂真链验证（课程/通知/作业/课件/日历）
 
 可以试试：「我有什么作业要交？」「数据结构最近有什么通知？」
 「帮我把桌面上的 hw3.pdf 交到数据结构的第三次作业」。
+
+### 清华云盘（cloud.tsinghua.edu.cn）
+
+清灵已接入清华云盘的只读查询能力。登录复用清华统一身份认证账号和本机信任设备：
+
+- `get_cloud_libraries`：列出云盘资料库；
+- `get_cloud_directory`：浏览某个资料库的一层目录；
+- `search_cloud_files`：全局搜索文件名。
+- `show_cloud_file`：在对话中打开/播放文件；视频和音频直接显示播放器，普通文件给下载链接。
+
+可以试试：「我云盘里有哪些资料库？」「帮我找数据结构课件」「打开程序设计训练录屏里的 2025010550.mp4」。
+大文件不会先下载到本地：Web UI 使用云盘签发的可复用临时链接，让浏览器按需拉取视频数据。
+当前刻意不做上传、删除、移动或分享；云盘 API Token 只保留在进程内存，不写入日志。
 
 ### Web UI 图形化登录
 
@@ -173,7 +188,7 @@ pnpm --silent mcp # 以 MCP stdio 模式启动，供 Codex 调用校园 Skill
 
 项目同时提供本地 MCP Server，可让 Codex 直接调用清华校园查询 Skill。MCP Server 不替代现有 Web/EXE 模式：Codex 负责理解和规划，服务器复用 `src/skills/` 与 `src/client/`；预约、取消、充值等写操作在 MCP 模式下默认拒绝，继续使用 Web/EXE 的确认界面完成。
 
-详细配置步骤见 [docs/codex-mcp.md](docs/codex-mcp.md)。开发者构建后的 MCP 入口为 `dist/scripts/mcp-server.cjs`，普通用户应直接下载 `清灵-MCP` 发布包。MCP 模式同样支持查询校园动态/资讯详情。
+详细配置步骤见 [docs/codex-mcp.md](docs/codex-mcp.md)。开发者构建后的 MCP 入口为 `dist/scripts/mcp-server.cjs`，普通用户应直接下载 `清灵-MCP` 发布包。MCP 模式同样支持查询校园动态/资讯与清华云盘只读信息。
 
 ## 注意事项
 

@@ -36,9 +36,14 @@ import {createDownloadLearnFileSkill} from "./learn/downloadLearnFile";
 import {createGetLearnCalendarSkill} from "./learn/getLearnCalendar";
 import {createShowLearnImageSkill} from "./learn/showLearnImage";
 import {MailClient} from "../client/mail/MailClient";
+import {CloudClient} from "../client/cloud/CloudClient";
 import {createGetEmailsSkill} from "./mail/getEmails";
 import {createSendEmailSkill} from "./mail/sendEmail";
 import {createShowEmailImageSkill} from "./mail/showEmailImage";
+import {createGetCloudLibrariesSkill} from "./cloud/getCloudLibraries";
+import {createGetCloudDirectorySkill} from "./cloud/getCloudDirectory";
+import {createSearchCloudFilesSkill} from "./cloud/searchCloudFiles";
+import {createShowCloudFileSkill} from "./cloud/showCloudFile";
 import type {TempImageStore} from "../utils/tempImageStore";
 import {resolveStableFingerprint} from "../client/fingerprintStore";
 import {createChaojiyingSolver, createChaojiyingCodeSolver} from "../client/captcha/chaojiying";
@@ -131,6 +136,9 @@ export function createAllSkills(opts: SkillAssemblyOptions = {}): Skill[] {
         smtpHost: config.email.smtpHost,
         smtpPort: config.email.smtpPort,
     });
+    // 清华云盘（Seafile）：独立按域名隔离的 SSO 会话，复用统一身份认证凭证。
+    // 先提供只读能力：资料库/目录/搜索，不上传、删除或分享。
+    const cloud = new CloudClient(opts.credentials);
     return [
         createGetScheduleSkill(thu),
         createGetCampusNewsSkill(thu),
@@ -164,6 +172,11 @@ export function createAllSkills(opts: SkillAssemblyOptions = {}): Skill[] {
         createGetEmailsSkill(mail),
         createSendEmailSkill(mail),
         createShowEmailImageSkill(mail, opts.imageStore),
+        // 清华云盘：只读查询（后续如加下载/上传，必须走确认通道）
+        createGetCloudLibrariesSkill(cloud),
+        createGetCloudDirectorySkill(cloud),
+        createSearchCloudFilesSkill(cloud),
+        createShowCloudFileSkill(cloud),
         createBookSportsFieldSkill(sports, {captchaSolver}),
         createBookLibrarySeatSkill(thu),
         createBookLibraryRoomSkill(thu),
