@@ -1,16 +1,22 @@
 import {useCallback, useEffect, useRef, useState} from "react";
 import {ApiError, errorMessage, readStream, request, type StreamEvent} from "./api";
-import {deriveTitle, mergeHistory, newId, parseHistory, persistHistory, readHistory, SESSIONS_KEY, storage, updateSession} from "./history";
+import {deriveTitle, newId, updateSession} from "./history";
+import {defaultPreferences, type Preferences, type UserProfile, type WorkspaceData} from "../../shared/workspace";
+import {migrateBrowserData} from "./legacyStorage";
 import {applyTurnEvent, finishTurn, turnText} from "./turn";
 import {isAccessMode, type AccessMode} from "../../harness/accessMode";
 import type {AuthState, Confirmation, Message, Notice, Result, SessionsState, Turn, UploadedFile, Usage} from "./types";
 
 export function useAssistant() {
-    const [accessMode, setAccessMode] = useState<AccessMode>(() => {
-        const saved = storage.get("thu-assistant-access-mode-v1", "request-approval");
-        return isAccessMode(saved) ? saved : "request-approval";
-    });
-    const [history, setHistory] = useState(readHistory);
+    const [preferences, setPreferences] = useState<Preferences>(defaultPreferences);
+    const [profile, setProfile] = useState<UserProfile>();
+    const [workspaceReady, setWorkspaceReady] = useState(false);
+    const accessMode = preferences.accessMode;
+    const preferenceWrites = useRef(Promise.resolve());
+    const pendingPreferences = useRef(0);
+    const selectionWrites = useRef(Promise.resolve());
+    const revision = useRef("");
+    const [history, setHistory] = useState<SessionsState>(() => ({activeId: newId(), sessions: [], deletedSessionIds: []}));
     const historyRef = useRef(history);
     const [authenticated, setAuthenticated] = useState(false);
     const authenticatedRef = useRef(false);
@@ -37,8 +43,7 @@ export function useAssistant() {
 
     function changeAccessMode(mode: AccessMode) {
         if (chatAbort.current || loginAbort.current || confirmBusy || !isAccessMode(mode)) return;
-        setAccessMode(mode);
-        storage.set("thu-assistant-access-mode-v1", mode);
+        changePreferences({accessMode: mode});
     }
 
     const notify = useCallback((message: string, type: Notice["type"] = "info") => {
@@ -47,9 +52,9 @@ export function useAssistant() {
         noticeTimers.current.push(setTimeout(() => setNotices(prev => prev.filter(n => n.id !== id)), 3600));
     }, []);
 
-    const commit = useCallback((update: (state: SessionsState) => SessionsState, persist = true) => {
+    const commit = useCallback((update: (state: SessionsState) => SessionsState) => {
         const next = update(historyRef.current);
-        historyRef.current = persist ? persistHistory(next) : next;
+        historyRef.current = next;
         setHistory(historyRef.current);
     }, []);
 
@@ -62,8 +67,7 @@ export function useAssistant() {
     const setLoggedIn = useCallback((value: boolean) => {
         authenticatedRef.current = value;
         setAuthenticated(value);
-        if (value) commit(state => mergeHistory(state, readHistory()), false);
-    }, [commit]);
+    }, []);
 
     const openLogin = useCallback(() => {
         if (loginAbort.current || chatAbort.current) return;
@@ -99,6 +103,7 @@ export function useAssistant() {
         try {
             const response = await request("/api/auth/login", {username: username.trim(), password}, controller.signal);
             await readStream(response, ({event, data}) => { if (event === "auth") handleAuth(data); });
+            await checkAuth();
         } catch (e) {
             if (!controller.signal.aborted) setAuth({phase: "login", origin: "login", message: errorMessage(e), error: true});
         } finally {
@@ -133,14 +138,51 @@ export function useAssistant() {
         await checkAuth();
     }
 
+    const applyWorkspace = useCallback((data: WorkspaceData, initial = false) => {
+        setLoggedIn(data.authenticated);
+        setProfile(data.profile);
+        if (!pendingPreferences.current) setPreferences(data.preferences);
+        if (!chatAbort.current) {
+            const local = historyRef.current;
+            const activeId = !initial && local.activeId && !data.history.deletedSessionIds.includes(local.activeId)
+                ? local.activeId : data.history.activeId || newId();
+            commit(() => ({...data.history, activeId}));
+            setResults(data.history.sessions.find(session => session.id === activeId)?.results ?? []);
+        }
+        revision.current = data.revision;
+        setWorkspaceReady(true);
+    }, [commit, setLoggedIn]);
+
     const checkAuth = useCallback(async () => {
         try {
-            const data = await (await request("/api/auth/status")).json() as {authenticated: boolean};
-            setLoggedIn(data.authenticated === true);
+            let data = await (await request("/api/workspace")).json() as WorkspaceData;
+            await migrateBrowserData(data.authenticated);
+            data = await (await request("/api/workspace")).json() as WorkspaceData;
+            applyWorkspace(data, true);
         } catch (e) {
             if (e instanceof ApiError && e.status === 403) setUiLocked(true);
+            else notify("无法读取或迁移已保存的数据，请检查后台连接后刷新。", "error");
         } finally { setAuthChecked(true); }
-    }, [setLoggedIn]);
+    }, [applyWorkspace, notify]);
+
+    function changePreferences(patch: Partial<Preferences>) {
+        if (!workspaceReady) return;
+        setPreferences(current => ({...current, ...patch}));
+        pendingPreferences.current++;
+        preferenceWrites.current = preferenceWrites.current.then(async () => {
+            try { await request("/api/workspace/preferences", patch); }
+            catch { notify("设置未能保存到后台，请重试。", "error"); }
+            finally { pendingPreferences.current--; }
+        });
+    }
+
+    function selectRemote(id: string) {
+        if (!authenticatedRef.current) return;
+        selectionWrites.current = selectionWrites.current.then(async () => {
+            try { await request("/api/workspace/select", {activeId: id}); }
+            catch { notify("对话位置未能保存，请检查后台连接。", "error"); }
+        });
+    }
 
     useEffect(() => {
         void checkAuth();
@@ -175,10 +217,7 @@ export function useAssistant() {
             try {
                 const data = await (await request("/api/notifications")).json() as {notifications?: {id?: string; title: string; message: string; sessionId?: string}[]};
                 for (const n of data.notifications ?? []) {
-                    if (n.sessionId) commit(state => updateSession(state, n.sessionId!, session => ({...session,
-                        title: session.title === "新对话" ? n.title.slice(0, 18) : session.title,
-                        messages: [...session.messages, {id: n.id ?? newId(), role: "bot", text: `${n.title}：${n.message}`, notification: true}],
-                    })));
+
                     notify(`${n.title}：${n.message}`, "success");
                     if ("Notification" in window && Notification.permission === "granted") new Notification(`清灵 · ${n.title}`, {body: n.message});
                 }
@@ -186,12 +225,18 @@ export function useAssistant() {
         };
         const notificationTimer = setInterval(() => void poll(), 30000);
         const firstPoll = setTimeout(() => void poll(), 1200);
-        const sync = (event: StorageEvent) => {
-            if (event.key === SESSIONS_KEY && event.newValue) commit(state => mergeHistory(state, parseHistory(event.newValue!)), false);
+        let refreshing = false;
+        const refresh = async () => {
+            if (refreshing || stopped || chatAbort.current || loginAbort.current || pendingPreferences.current) return;
+            refreshing = true;
+            try {
+                const data = await (await request(`/api/workspace?revision=${revision.current}`)).json() as WorkspaceData & {unchanged?: boolean};
+                if (!chatAbort.current && !data.unchanged) applyWorkspace(data);
+            } catch { /* Keep the current in-memory view until the backend reconnects. */ }
+            finally { refreshing = false; }
         };
-        const save = () => { persistHistory(historyRef.current); };
-        window.addEventListener("storage", sync);
-        window.addEventListener("pagehide", save);
+        const workspaceTimer = setInterval(() => void refresh(), 1500);
+        window.addEventListener("focus", refresh);
         if (import.meta.env.PROD && "serviceWorker" in navigator && window.isSecureContext) {
             void navigator.serviceWorker.register("/service-worker.js").catch(() => {});
         }
@@ -202,12 +247,12 @@ export function useAssistant() {
             clearInterval(notificationTimer);
             clearTimeout(firstPoll);
             noticeTimers.current.forEach(clearTimeout);
-            window.removeEventListener("storage", sync);
-            window.removeEventListener("pagehide", save);
+            clearInterval(workspaceTimer);
+            window.removeEventListener("focus", refresh);
             chatAbort.current?.abort();
             loginAbort.current?.abort();
         };
-    }, [checkAuth, commit, notify]);
+    }, [checkAuth, commit, notify, applyWorkspace]);
 
     async function generate(question: string, images: string[], retryId?: string) {
         if (chatAbort.current || loginAbort.current) return;
@@ -224,13 +269,12 @@ export function useAssistant() {
         let text = "";
         let usage: Usage | undefined;
         let finalAnswer = false;
-        let lastSaved = Date.now();
-        const updateBot = (persist = false) => {
+        const updateBot = () => {
             commit(state => updateSession(state, sessionId, session => {
                 const message: Message = {id: messageId, role: "bot", text, usage, turn: currentTurn};
                 const exists = session.messages.some(m => m.id === messageId);
                 return {...session, messages: exists ? session.messages.map(m => m.id === messageId ? message : m) : [...session.messages, message]};
-            }), persist);
+            }));
         };
         updateBot();
         const eventHandler = ({event, data}: StreamEvent) => {
@@ -239,9 +283,7 @@ export function useAssistant() {
                 currentTurn = nextTurn;
                 text = turnText(currentTurn);
                 setTurn(currentTurn);
-                const save = Date.now() - lastSaved > 1000;
-                if (save) lastSaved = Date.now();
-                updateBot(save);
+                updateBot();
             }
             if (event === "confirm") {
                 setConfirmation({kind: "write", id: String(data.id), name: String(data.name), args: (data.args ?? {}) as Record<string, unknown>});
@@ -259,7 +301,10 @@ export function useAssistant() {
             }
         };
         try {
-            const response = await request("/api/chat", {question, sessionId, accessMode: turnAccessMode, ...(images.length ? {images} : {})}, controller.signal);
+            await selectionWrites.current;
+            const userMessage = historyRef.current.sessions.find(s => s.id === sessionId)?.messages.findLast(m => m.role === "user");
+            const response = await request("/api/chat", {question, sessionId, messageId, userMessageId: userMessage?.id,
+                displayQuestion: userMessage?.text, retry: Boolean(retryId), accessMode: turnAccessMode, ...(images.length ? {images} : {})}, controller.signal);
             await readStream(response, eventHandler);
             if (currentTurn.status === "running") {
                 currentTurn = finishTurn(currentTurn, "error");
@@ -282,6 +327,8 @@ export function useAssistant() {
                 messages: session.messages.filter(m => m.id !== messageId || Boolean(m.text) || Boolean(m.turn?.items.length)),
                 tokens: (session.tokens ?? 0) + (usage?.totalTokens ?? 0),
             })));
+            try { await request("/api/workspace/history", {history: historyRef.current}); }
+            catch { notify("对话同步失败，已收到的内容暂保留在当前页面。", "error"); }
             setTurn(null);
             setStopping(false);
             setConfirmation(prev => prev?.kind === "write" ? null : prev);
@@ -337,6 +384,7 @@ export function useAssistant() {
         if (chatAbort.current || loginAbort.current) { notify("请等待当前操作完成"); return; }
         if (!authenticatedRef.current) return;
         commit(state => ({...state, activeId: id}));
+        selectRemote(id);
         setError(null);
         setResults([]);
         lastQuestion.current = null;
@@ -345,7 +393,8 @@ export function useAssistant() {
     function newChat() {
         if (chatAbort.current || loginAbort.current) { notify("请等待当前操作完成"); return; }
         const id = newId();
-        commit(state => ({...state, activeId: id, sessions: [...state.sessions, {id, title: "新对话", createdAt: Date.now(), messages: []}]}));
+        commit(state => ({...state, activeId: id}));
+        selectRemote(id);
         setError(null);
         setResults([]);
         lastQuestion.current = null;
@@ -370,6 +419,7 @@ export function useAssistant() {
                 await request("/api/auth/logout", {});
                 commit(state => state);
                 setLoggedIn(false);
+                setProfile(undefined);
                 setResults([]);
                 setError(null);
                 notify("已退出登录，历史对话将在下次登录后恢复", "success");
@@ -386,7 +436,7 @@ export function useAssistant() {
     }
 
     const session = history.sessions.find(s => s.id === history.activeId);
-    return {history, session, messages: authenticated ? session?.messages ?? [] : [], authenticated, authChecked, accessMode, changeAccessMode,
+    return {preferences, changePreferences, profile, workspaceReady, history, session, messages: authenticated ? session?.messages ?? [] : [], authenticated, authChecked, accessMode, changeAccessMode,
         auth, authBusy, loginPending, uiLocked, lifecycle, turn, stopping, confirmation, confirmBusy, results, error, vision, notices,
         notify, openLogin, startLogin, cancelAuth, submitAuth, unlock, send, stop, retry, switchSession, newChat, respond, requestConfirmation};
 }

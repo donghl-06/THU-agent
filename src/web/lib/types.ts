@@ -30,6 +30,7 @@ export interface Session {
     titleLlm?: boolean;
     tokens?: number;
     messages: Message[];
+    results?: Result[];
 }
 
 export interface SessionsState {

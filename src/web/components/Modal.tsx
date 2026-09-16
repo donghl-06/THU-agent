@@ -4,7 +4,7 @@ import {motion, useReducedMotion} from "motion/react";
 import {X} from "lucide-react";
 import {IconButton} from "./Controls";
 
-export function Modal({title, children, close, className = ""}: {title: string; children: ReactNode; close?: () => void; className?: string}) {
+export function Modal({title, titleAccessory, children, close, className = ""}: {title: string; titleAccessory?: ReactNode; children: ReactNode; close?: () => void; className?: string}) {
     const dialog = useRef<HTMLDialogElement>(null);
     const heading = useId();
     const reduced = useReducedMotion();
@@ -20,6 +20,6 @@ export function Modal({title, children, close, className = ""}: {title: string; 
         transition={{duration: .23, ease: [.22, 1, .36, 1]}}
         onCancel={e => { e.preventDefault(); close?.(); }} onClick={e => { if (e.target === e.currentTarget && close) { const rect = e.currentTarget.getBoundingClientRect(); if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) close(); } }}>
         {close && <IconButton className="modal-close" icon={X} label="关闭弹窗" onClick={close}/>}
-        <h2 id={heading}>{title}</h2>{children}
+        <h2 id={heading}>{title}{titleAccessory}</h2>{children}
     </motion.dialog>, document.body);
 }

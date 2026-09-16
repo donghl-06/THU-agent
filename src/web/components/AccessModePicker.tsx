@@ -1,5 +1,5 @@
 import {useEffect, useId, useRef, useState} from "react";
-import {Check, ChevronDown, Hand, ShieldAlert} from "lucide-react";
+import {Check, Hand, ShieldAlert} from "lucide-react";
 import type {AccessMode} from "../../harness/accessMode";
 
 const modes = [
@@ -39,8 +39,13 @@ export function AccessModePicker({mode, change, disabled}: {mode: AccessMode; ch
             options[next]?.focus();
         }
     }}>
-        <button ref={trigger} type="button" className={`access-mode-trigger ${mode === "full-access" ? "full-access" : ""}`} aria-label={`访问模式：${current.label}`} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined} disabled={disabled} onClick={() => setOpen(!open)}>
-            <Icon size={16}/><span>{current.label}</span><ChevronDown size={12} className={open ? "expanded" : ""}/>
+        <button ref={trigger} type="button" className={`access-mode-trigger ${mode === "full-access" ? "full-access" : ""}`} aria-label={`访问模式：${current.label}`} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined} disabled={disabled}
+            onMouseDown={event => {
+                // Keep focus inside the picker until click; Safari can blur to the body first.
+                if (event.button === 0) event.preventDefault();
+            }}
+            onClick={() => { if (open) close(true); else setOpen(true); }}>
+            <Icon size={19} strokeWidth={1.7}/><span>{current.label}</span>
         </button>
         {open && <div id={menuId} className="access-mode-menu" role="menu" aria-label="访问模式">{modes.map(({value, label, detail, icon: ModeIcon}) =>
             <button type="button" key={value} className={`access-mode-option ${value === "full-access" ? "full-access" : ""}`} role="menuitemradio" aria-checked={mode === value} tabIndex={-1} onClick={() => { change(value); close(true); }}>

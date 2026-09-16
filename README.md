@@ -33,7 +33,7 @@ Agent 自主判断并组合多个校园能力（查课表 → 推理空闲时间
 ## 环境要求
 
 - Windows + WSL2 Ubuntu（或任意 Linux/macOS）
-- Node.js ≥ 22.12
+- Node.js ≥ 22.13（Web 数据库使用内置 `node:sqlite`）
 - pnpm 10（`npm install -g pnpm`）
 - 清华大学 Info 账号（用于登录校园服务）
 - 使用内置 CLI / Web 自然语言对话时，需配置 OpenAI 兼容的 LLM API；直接 Skill / MCP 调用不需要
@@ -139,7 +139,7 @@ pnpm learn   # 网络学堂真链验证（课程/通知/作业/课件/日历）
 
 ### Web UI 图形化登录
 
-运行 `pnpm web` 后打开 <http://127.0.0.1:3457>，点击右上角“登录”，
+运行 `pnpm web` 后打开 <http://127.0.0.1:3457>，点击左下角“连接清华账号”，
 即可在页面输入清华 Info 学号和密码。需要二次认证时，页面会弹出 TOTP、短信或微信
 认证方式选择，并在同一窗口输入验证码；登录凭证传给本地后端，不会写入浏览器本地存储。
 Web UI 登录成功后才会开放校园 Skill 查询。
@@ -156,7 +156,13 @@ Web 前端使用 **React + TypeScript + Vite**，界面组件位于 `src/web/com
   首次运行先执行 `pnpm exec playwright install chromium`。
 
 开发时 `PORT` 控制页面端口，`WEB_API_PORT` 控制 API 端口；API 通过 Vite 同源代理访问。
-前端保留原有本地历史数据格式，登录后自动恢复；图片预览和登录密码不写入历史。
+聊天历史（包括思考、工具时序、用量和已发送图片）、模型上下文、上传附件、账号展示信息及
+主题/声音/访问模式/侧栏偏好统一保存在后端 `data/qingling.sqlite`。文件权限为 `0600`；
+上传附件同时在 `data/uploads/` 生成供校园工具使用的文件副本。密码、验证码不写入工作区数据库。
+浏览器只保留当前页面的内存视图，不再使用 localStorage、sessionStorage 或 IndexedDB 保存应用数据。
+升级时登录一次，页面会把旧浏览器历史导入数据库，确认成功后清除原记录；旧后端
+`data/sessions.json` 自动迁移一次。静态离线缓存只包含界面资源，不缓存工作区 API 数据。
+数据库属于此本地单用户服务；同一服务的新浏览器也能恢复历史和偏好。备份前停止服务，再复制数据库。
 静态资源与离线壳一起打包，无需 CDN。界面截图见 [Web UI 截图](docs/web-ui.md)。
 
 非 WSL 环境默认监听 `127.0.0.1`，WSL 默认监听 `0.0.0.0`，可通过 `HOST` / `PORT` 覆盖。

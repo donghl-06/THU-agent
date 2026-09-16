@@ -1,7 +1,7 @@
 import {useEffect, useRef, useState, type CSSProperties} from "react";
 import {AnimatePresence, motion} from "motion/react";
-import {ArrowUpRight, Check, ChevronsUpDown, CircleHelp, Command, LockKeyhole, MessageCircle, PanelLeftClose, Search, SquarePen, Trash2, UserRound, X} from "lucide-react";
-import {storage} from "../lib/history";
+import {Command, LockKeyhole, MessageCircle, PanelLeftClose, Search, SquarePen, Trash2, X} from "lucide-react";
+import {AccountMenu} from "./AccountMenu";
 import type {Assistant} from "../lib/useAssistant";
 import {Brand, EmptyState, IconButton} from "./Controls";
 
@@ -10,7 +10,7 @@ export function Sidebar({app, collapsed, mobileOpen, closeMobile, collapse, abou
 }) {
     const [query, setQuery] = useState("");
     const [searching, setSearching] = useState(false);
-    const [width, setWidth] = useState(() => Math.max(220, Math.min(400, Number(storage.get("sidebar-width", "264")) || 264)));
+    const width = app.preferences.sidebarWidth;
     const sidebar = useRef<HTMLElement>(null);
     const searchRef = useRef<HTMLInputElement>(null);
     const [resizing, setResizing] = useState(false);
@@ -22,6 +22,7 @@ export function Sidebar({app, collapsed, mobileOpen, closeMobile, collapse, abou
         const previous = document.activeElement as HTMLElement | null;
         sidebar.current?.querySelector<HTMLButtonElement>("button")?.focus();
         const keydown = (event: KeyboardEvent) => {
+            if (document.querySelector("dialog[open]")) return;
             if (event.key === "Escape") closeMobile();
             if (event.key !== "Tab") return;
             const buttons = sidebar.current?.querySelectorAll<HTMLElement>("button:not(:disabled), input, [tabindex='0']");
@@ -36,8 +37,7 @@ export function Sidebar({app, collapsed, mobileOpen, closeMobile, collapse, abou
 
     function resize(next: number) {
         const value = Math.round(Math.max(220, Math.min(400, window.innerWidth * .4, next)));
-        setWidth(value);
-        storage.set("sidebar-width", String(value));
+        app.changePreferences({sidebarWidth: value});
     }
 
     return <>
@@ -68,13 +68,7 @@ export function Sidebar({app, collapsed, mobileOpen, closeMobile, collapse, abou
                     })}
                 </nav>
                 <div className="sidebar-bottom">
-                    {app.authenticated && Boolean(app.session?.tokens) && <span className="session-usage">本次对话 · {app.session?.tokens?.toLocaleString()} tokens</span>}
-                    <button className="guide-link" onClick={about}><CircleHelp size={17}/><span>校园服务指南</span><ArrowUpRight size={14}/></button>
-                    <button className="account" disabled={Boolean(app.turn) || app.loginPending || app.confirmBusy} onClick={() => app.authenticated ? app.requestConfirmation({kind: "logout"}) : app.openLogin()}>
-                        <span className="account-avatar"><UserRound size={19}/></span>
-                        <span className="account-copy"><strong>{app.authenticated ? "清华 Info" : "连接清华账号"}</strong><small>{app.authenticated ? <><Check size={11}/>已连接校园服务</> : "登录，开启校园服务"}</small></span>
-                        <ChevronsUpDown size={15}/>
-                    </button>
+                    <AccountMenu app={app} about={about}/>
                 </div>
             </div>
             <div className="sidebar-resizer" role="separator" aria-orientation="vertical" aria-label="调节侧栏宽度" aria-valuemin={220} aria-valuemax={400} aria-valuenow={width} tabIndex={0}

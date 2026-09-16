@@ -871,7 +871,7 @@ describe("Web 服务端", () => {
             body: JSON.stringify({sessionId: "s_del"}),
         });
         expect(destroy.status).toBe(200);
-        await askIn("s_del", "我叫什么？");
+        await askIn("s_new_after_delete", "我叫什么？");
         expect(JSON.stringify(llm.seen[1])).not.toContain("小明");
     });
 
@@ -884,7 +884,7 @@ describe("Web 服务端", () => {
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({all: true}),
         });
-        await askIn("s_x1", "暗号是什么？");
+        await askIn("s_new_after_clear", "暗号是什么？");
         const lastCall = JSON.stringify(llm.seen[2]);
         expect(lastCall).not.toContain("橘子");
         expect(lastCall).not.toContain("香蕉");

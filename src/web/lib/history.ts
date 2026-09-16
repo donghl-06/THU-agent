@@ -1,17 +1,7 @@
 import type {Message, Session, SessionsState, Turn} from "./types";
 
-export const SESSIONS_KEY = "thu-assistant-sessions-v1";
-const LEGACY_KEY = "thu-assistant-chat-v1";
 const MAX_MESSAGES = 100;
 export const newId = () => `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
-export const storage = {
-    get(key: string, fallback: string) {
-        try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; }
-    },
-    set(key: string, value: string) {
-        try { localStorage.setItem(key, value); } catch { /* Private mode / storage quota. */ }
-    },
-};
 
 function isTurn(value: unknown): value is Turn {
     if (!value || typeof value !== "object") return false;
@@ -85,30 +75,19 @@ export function parseHistory(raw: string): SessionsState {
             title: typeof s.title === "string" ? s.title : "新对话",
             createdAt: Number(s.createdAt) || Date.now(),
             messages: normalizeMessages(Array.isArray(s.messages) ? s.messages : [], s.id),
-        }));
-        return {sessions, deletedSessionIds, activeId: sessions.some(s => s.id === parsed.activeId) ? parsed.activeId : sessions[0]?.id ?? newId()};
+        })).filter(s => s.messages.length > 0);
+        // An ID without a saved session represents the current, unsent draft.
+        const activeId = typeof parsed.activeId === "string" && parsed.activeId && !deletedSessionIds.includes(parsed.activeId)
+            ? parsed.activeId : sessions[0]?.id ?? newId();
+        return {sessions, deletedSessionIds, activeId};
     } catch { return {sessions: [], activeId: newId(), deletedSessionIds: []}; }
-}
-
-export function readHistory(): SessionsState {
-    const state = parseHistory(storage.get(SESSIONS_KEY, ""));
-    if (!state.sessions.length) {
-        try {
-            const legacy = JSON.parse(storage.get(LEGACY_KEY, "[]")) as Message[];
-            if (Array.isArray(legacy) && legacy.length) {
-                const messages = normalizeMessages(legacy, state.activeId);
-                state.sessions.push({id: state.activeId, title: deriveTitle(messages), createdAt: Date.now(), messages});
-            }
-        } catch { /* Ignore malformed legacy storage. */ }
-    }
-    return state;
 }
 
 export function mergeHistory(local: SessionsState, remote: SessionsState): SessionsState {
     const deletedSessionIds = [...new Set([...local.deletedSessionIds, ...remote.deletedSessionIds])];
     const byId = new Map<string, Session>();
     for (const session of [...local.sessions, ...remote.sessions]) {
-        if (deletedSessionIds.includes(session.id)) continue;
+        if (deletedSessionIds.includes(session.id) || !session.messages.length) continue;
         const prev = byId.get(session.id);
         if (!prev) { byId.set(session.id, {...session}); continue; }
         const localNewer = (prev.updatedAt ?? prev.createdAt) >= (session.updatedAt ?? session.createdAt);
@@ -122,16 +101,8 @@ export function mergeHistory(local: SessionsState, remote: SessionsState): Sessi
         });
     }
     const sessions = [...byId.values()];
-    return {sessions, deletedSessionIds, activeId: byId.has(local.activeId) ? local.activeId : sessions[0]?.id ?? local.activeId};
-}
-
-export function persistHistory(state: SessionsState): SessionsState {
-    const merged = mergeHistory(state, readHistory());
-    merged.sessions = merged.sessions.sort((a, b) => b.createdAt - a.createdAt).filter((s, i) => i < 29 || s.id === merged.activeId);
-    const saved = {...merged, sessions: merged.sessions.map(s => ({...s, messages: s.messages.map(({images, ...m}) => ({...m, imageCount: images?.length || m.imageCount}))}))};
-    storage.set(SESSIONS_KEY, JSON.stringify(saved));
-    storage.set(LEGACY_KEY, "[]");
-    return merged;
+    const activeId = deletedSessionIds.includes(local.activeId) ? sessions[0]?.id ?? newId() : local.activeId;
+    return {sessions, deletedSessionIds, activeId};
 }
 
 export function deriveTitle(messages: Message[]) {

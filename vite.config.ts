@@ -10,7 +10,7 @@ export default defineConfig({
     plugins: [react(), {
         name: "qingling-offline-shell",
         async writeBundle(options, bundle) {
-            const assets = Object.keys(bundle).filter(name => /\.(js|css)$/.test(name)).map(name => `/${name}`);
+            const assets = Object.keys(bundle).filter(name => /\.(js|css|svg|png|jpe?g|webp)$/.test(name)).map(name => `/${name}`);
             const version = createHash("sha256").update(assets.join("|")).digest("hex").slice(0, 12);
             const path = join(options.dir!, "service-worker.js");
             const worker = await readFile(path, "utf8");

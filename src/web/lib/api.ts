@@ -5,6 +5,7 @@ export class ApiError extends Error {
 export async function request(path: string, body?: unknown, signal?: AbortSignal): Promise<Response> {
     const response = await fetch(path, body === undefined ? {signal, cache: "no-store"} : {
         method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body), signal,
+        keepalive: path === "/api/workspace/preferences" || path === "/api/workspace/select",
     });
     if (!response.ok) throw new ApiError(response.status);
     return response;

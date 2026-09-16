@@ -1,6 +1,7 @@
 import {useState, type FormEvent} from "react";
 import {AnimatePresence} from "motion/react";
-import {ArrowUpRight, BookOpen, CalendarDays, Check, Fingerprint, Hand, KeyRound, LoaderCircle, LockKeyhole, LogOut, MessageCircle, Newspaper, Power, ShieldAlert, Smartphone, Trash2, Unplug, Volleyball} from "lucide-react";
+import {ArrowUpRight, BookOpen, CalendarDays, Check, Hand, KeyRound, LoaderCircle, LockKeyhole, LogOut, MessageCircle, Newspaper, Power, ShieldAlert, Smartphone, Trash2, Unplug, Volleyball} from "lucide-react";
+import tsinghuaEmblem from "../assets/tsinghua-emblem.jpg";
 import type {Assistant} from "../lib/useAssistant";
 import {toolLabels} from "../lib/api";
 import {Modal} from "./Modal";
@@ -36,8 +37,7 @@ function AuthDialog({app}: {app: Assistant}) {
         {id: "mobile", icon: Smartphone, title: "短信验证码", detail: "发送到已绑定的手机号"},
         {id: "wechat", icon: MessageCircle, title: "微信验证", detail: "使用已关联的清华身份认证"},
     ];
-    return <Modal title={auth.phase === "login" ? "连接清华 Info" : "验证你的身份"} close={() => void app.cancelAuth()} className="auth-modal">
-        <span className="dialog-icon"><Fingerprint size={30} strokeWidth={1.5}/></span>
+    return <Modal title={auth.phase === "login" ? "连接清华 Info" : "验证你的身份"} titleAccessory={auth.phase === "login" ? <span className="tsinghua-emblem" aria-hidden="true"><img src={tsinghuaEmblem} alt="" width="1400" height="600"/></span> : undefined} close={() => void app.cancelAuth()} className="auth-modal">
         <p className={auth.error ? "form-error" : "dialog-description"} role={auth.error ? "alert" : "status"}>{auth.message}</p>
         <form onSubmit={event => void submit(event)}>
             {auth.phase === "login" && <div className="form-fields"><label>学号<input autoFocus autoComplete="username" inputMode="numeric" placeholder="输入学号" maxLength={128} value={username} onChange={e => setUsername(e.target.value)} required/></label><label>密码<input type="password" autoComplete="current-password" placeholder="输入密码" maxLength={512} value={password} onChange={e => setPassword(e.target.value)} required/></label><p className="field-note">凭证只发送至本机服务。本机会话可能被登记为可信设备，可在清华身份认证页面撤销。</p></div>}

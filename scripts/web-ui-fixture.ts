@@ -4,9 +4,13 @@ import {createWebServer} from "../src/server/webServer";
 import type {Agent} from "../src/harness/agentLoop";
 import type {Skill} from "../src/skills/base/types";
 import {ToolRegistry} from "../src/harness/toolRegistry";
+import {WebDatabase} from "../src/server/webDatabase";
+import {defaultPreferences} from "../src/shared/workspace";
+import {newId} from "../src/web/lib/history";
 process.env.UI_TOKEN = "";
 process.env.LLM_VISION = "1";
 const fakeWrite: Skill = {name: "book_library_seat", description: "UI 测试预约", inputSchema: {}, requiresConfirmation: true, execute: async () => ({success: true})};
+const database = new WebDatabase();
 const server = createWebServer((confirm, authHooks, credentials) => ({
     login: async () => {
         if (credentials?.username === "2000000000") {
@@ -62,5 +66,15 @@ const server = createWebServer((confirm, authHooks, credentials) => ({
     snapshotMessages: () => [],
     loadMessages: () => {},
     appendAssistantMessage: () => {},
-}) as unknown as Agent, {port: 3461, requireLogin: true, titleLlm: {chat: async () => ({role: "assistant", content: "今日课程安排"})}});
+}) as unknown as Agent, {port: 3461, database, getUserProfile: async () => ({name: "测试同学", email: "fixture@tsinghua.edu.cn"}), requireLogin: true, titleLlm: {chat: async () => ({role: "assistant", content: "今日课程安排"})}});
+// Fixture-only reset; production never exposes this route.
+const handlers = server.listeners("request");
+server.removeAllListeners("request");
+server.on("request", (req, res) => {
+    if (req.url === "/__fixture/reset" && req.method === "POST") {
+        database.put("history", {activeId: newId(), sessions: [], deletedSessionIds: []});
+        database.put("preferences", {...defaultPreferences, sound: false});
+        res.writeHead(200).end("{}");
+    } else for (const handler of handlers) handler.call(server, req, res);
+});
 server.listen(3461, "127.0.0.1", () => console.log("Offline UI fixture: http://127.0.0.1:3461"));

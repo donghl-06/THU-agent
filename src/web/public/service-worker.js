@@ -1,4 +1,4 @@
-// Vite injects the exact JS/CSS files and a build-specific cache version.
+// Vite injects the exact script, style, and image assets and a build-specific cache version.
 const CACHE_NAME = "qingling-react-__WEB_VERSION__";
 const WEB_ASSETS = "__WEB_ASSETS__";
 const SHELL = ["/", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png", ...WEB_ASSETS];

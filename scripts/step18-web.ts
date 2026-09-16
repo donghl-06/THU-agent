@@ -126,6 +126,12 @@ const server = createWebServer(
     {
         port: PORT,
         indexHtmlPath,
+        databasePath: join(scriptDirectory, "..", "data", "qingling.sqlite"),
+        getUserProfile: async () => {
+            thuClient ??= new ThuClient({}, undefined, authSessionPath);
+            const info = await thuClient.getUserInfo();
+            return {name: info.fullName, email: info.emailName || undefined};
+        },
         sessionStorePath: join(scriptDirectory, "..", "data", "sessions.json"),
         authSessionPath,
         scheduler,

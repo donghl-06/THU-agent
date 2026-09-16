@@ -1,9 +1,9 @@
 import {useCallback, useEffect, useLayoutEffect, useRef, useState} from "react";
 import {AnimatePresence, MotionConfig, motion, useReducedMotion} from "motion/react";
-import {ArrowDown, Bell, BellOff, Check, CircleHelp, Hand, Info, Moon, PanelLeft, ShieldAlert, Sun, Volume2, VolumeX, X} from "lucide-react";
+import {ArrowDown, Bell, BellOff, Check, Hand, Info, Moon, PanelLeft, ShieldAlert, Sun, Volume2, VolumeX, X} from "lucide-react";
 import {useAssistant} from "./lib/useAssistant";
+import {useTheme} from "./lib/useTheme";
 import type {UploadedFile} from "./lib/types";
-import {storage} from "./lib/history";
 import {Sidebar} from "./components/Sidebar";
 import {Composer} from "./components/Composer";
 import {Welcome} from "./components/Welcome";
@@ -17,10 +17,11 @@ export default function App() {
 
 function Workspace() {
     const app = useAssistant();
-    const [theme, setTheme] = useState(() => storage.get("theme", "light") === "dark" ? "dark" : "light");
-    const [sound, setSound] = useState(() => storage.get("snd", "1") === "1");
-    const [tts, setTts] = useState(() => storage.get("tts", "0") === "1");
-    const [collapsed, setCollapsed] = useState(() => storage.get("sidebar-collapsed", "0") === "1");
+    const {theme, toggleTheme} = useTheme(app.preferences.theme, theme => app.changePreferences({theme}));
+    const {sound, tts, sidebarCollapsed: collapsed} = app.preferences;
+    const setSound = (sound: boolean) => app.changePreferences({sound});
+    const setTts = (tts: boolean) => app.changePreferences({tts});
+    const setCollapsed = (sidebarCollapsed: boolean) => app.changePreferences({sidebarCollapsed});
     const [mobileOpen, setMobileOpen] = useState(false);
     const [about, setAbout] = useState(false);
     const [draft, setDraft] = useState("");
@@ -32,14 +33,7 @@ function Workspace() {
     const audio = useRef<AudioContext | null>(null);
     const reducedMotion = useReducedMotion();
     const closeMobile = useCallback(() => setMobileOpen(false), []);
-    useEffect(() => {
-        document.documentElement.dataset.theme = theme;
-        document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme === "dark" ? "#17171a" : "#f7f7fa");
-        storage.set("theme", theme);
-    }, [theme]);
-    useEffect(() => { storage.set("sidebar-collapsed", collapsed ? "1" : "0"); }, [collapsed]);
-    useEffect(() => { storage.set("snd", sound ? "1" : "0"); }, [sound]);
-    useEffect(() => { storage.set("tts", tts ? "1" : "0"); if (!tts) window.speechSynthesis?.cancel(); }, [tts]);
+    useEffect(() => { if (!tts) window.speechSynthesis?.cancel(); }, [tts]);
     useEffect(() => {
         const timer = setInterval(() => setDate(new Date()), 60000);
         const resize = () => { if (window.innerWidth > 768) setMobileOpen(false); };
@@ -124,12 +118,10 @@ function Workspace() {
         <main className="workspace" inert={mobileOpen || undefined}>
             <header className="toolbar">
                 <div className="toolbar-leading"><IconButton icon={PanelLeft} label="展开侧栏" className={`sidebar-toggle ${collapsed ? "is-collapsed" : ""}`} onClick={() => window.innerWidth <= 768 ? setMobileOpen(true) : setCollapsed(false)}/><span className="workspace-title">{app.authenticated && !empty ? app.session?.title ?? "新对话" : "校园助手"}</span><span className="toolbar-divider"/><span className="toolbar-date">{date.toLocaleDateString("zh-CN", {month: "long", day: "numeric", weekday: "long"})}</span></div>
-                <div className="toolbar-actions"><span className="connection"><span className={`connection-dot ${app.authenticated ? "connected" : ""}`}/>{app.authenticated ? "Info 已连接" : "尚未登录"}</span>
-                    <IconButton icon={theme === "dark" ? Sun : Moon} label={theme === "dark" ? "切换到浅色模式" : "切换到深色模式"} onClick={() => setTheme(theme === "dark" ? "light" : "dark")}/>
+                <div className="toolbar-actions">
+                    <IconButton icon={theme === "dark" ? Sun : Moon} label={theme === "dark" ? "切换到浅色模式" : "切换到深色模式"} onClick={event => void toggleTheme(event)}/>
                     <IconButton icon={tts ? Volume2 : VolumeX} label={tts ? "关闭朗读回复" : "开启朗读回复"} aria-pressed={tts} onClick={() => setTts(!tts)}/>
                     <IconButton icon={sound ? Bell : BellOff} label={sound ? "关闭提示音" : "开启提示音"} aria-pressed={sound} onClick={() => setSound(!sound)}/>
-                    <IconButton icon={CircleHelp} label="服务指南" className="header-help" onClick={() => setAbout(true)}/>
-                    {!app.authenticated && <button className="login-button" onClick={app.openLogin} disabled={app.loginPending}>登录</button>}
                 </div>
             </header>
             <div ref={chat} className={`chat-scroll ${empty ? "is-empty" : ""}`} onScroll={() => {

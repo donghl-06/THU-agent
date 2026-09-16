@@ -2,7 +2,7 @@ import {expect, test, type Page} from "@playwright/test";
 import {mkdir} from "node:fs/promises";
 
 async function login(page: Page, username = "2000000001") {
-    await page.getByRole("button", {name: "登录", exact: true}).click();
+    await page.getByRole("button", {name: /连接清华账号/}).click();
     const dialog = page.getByRole("dialog", {name: "连接清华 Info"});
     await dialog.getByLabel("学号").fill(username);
     await dialog.getByLabel("密码").fill("fixture-password");
@@ -12,7 +12,7 @@ async function login(page: Page, username = "2000000001") {
 
 test.beforeEach(async ({page, request}) => {
     await request.post("/api/auth/logout", {data: {}});
-    await page.addInitScript(() => { localStorage.setItem("snd", "0"); });
+    await request.post("/__fixture/reset", {data: {}});
 });
 
 test("桌面浅色/深色界面、Lucide 图标与偏好持久化", async ({page}) => {
@@ -28,6 +28,7 @@ test("桌面浅色/深色界面、Lucide 图标与偏好持久化", async ({page
     await page.screenshot({path: "docs/screenshots/web-desktop-light.png", animations: "disabled"});
     await page.getByRole("button", {name: "切换到深色模式"}).click();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect(page.locator("html")).not.toHaveAttribute("data-theme-transition");
     await page.screenshot({path: "docs/screenshots/web-desktop-dark.png", animations: "disabled"});
     await page.reload();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
@@ -44,11 +45,198 @@ test("未登录隐藏历史，登录恢复，退出不删除历史", async ({pag
     await expect(page.getByText("历史回答仅登录后可见")).not.toBeVisible();
     await login(page);
     await expect(page.getByText("历史回答仅登录后可见")).toBeVisible();
-    await page.getByRole("button", {name: /清华 Info 已连接校园服务/}).click();
+    await page.getByRole("button", {name: /^账户：/}).click();
+    await page.getByRole("menuitem", {name: "退出登录"}).click();
     await page.getByRole("button", {name: "确认退出"}).click();
     await expect(page.getByText("历史回答仅登录后可见")).not.toBeVisible();
     await login(page);
     await expect(page.getByText("历史回答仅登录后可见")).toBeVisible();
+});
+
+test("账户面板向上展开显示用户信息，点击账号不会退出，支持键盘和手机", async ({page}) => {
+    let logouts = 0;
+    page.on("request", request => { if (request.url().endsWith("/api/auth/logout")) logouts++; });
+    await page.goto("/");
+    await login(page);
+    await expect(page.locator(".workspace")).toHaveCSS("background-image", "none");
+    await expect(page.locator(".toolbar")).not.toContainText(/Info 已连接|尚未登录/);
+    await expect(page.getByRole("button", {name: "新建对话"})).toHaveCSS("border-width", "0px");
+    const account = page.getByRole("button", {name: "账户：测试同学"});
+    await expect(account).toContainText("2000000001");
+    await account.click();
+    const menu = page.getByRole("menu", {name: "账户菜单"});
+    await expect(menu).toContainText("fixture@tsinghua.edu.cn");
+    await expect(menu).toHaveCSS("opacity", "1");
+    expect(logouts).toBe(0);
+    expect((await menu.boundingBox())!.y).toBeLessThan((await account.boundingBox())!.y);
+    await page.screenshot({path: "docs/screenshots/web-account-menu.png", animations: "disabled"});
+    await page.keyboard.press("End");
+    await expect(page.getByRole("menuitem", {name: "退出登录"})).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(account).toBeFocused();
+    await expect(menu).not.toBeVisible();
+    await page.setViewportSize({width: 390, height: 844});
+    await page.getByRole("button", {name: "展开侧栏"}).click();
+    await account.click();
+    await expect(menu).toBeVisible();
+    await expect(menu).toHaveCSS("opacity", "1");
+    const bounds = (await menu.boundingBox())!;
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.y).toBeGreaterThanOrEqual(0);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
+    await page.screenshot({path: "docs/screenshots/web-account-menu-mobile.png", animations: "disabled"});
+    await page.keyboard.press("Escape");
+    await expect(page.locator("main")).toHaveAttribute("inert", "");
+    expect(logouts).toBe(0);
+});
+
+test("对话和偏好在全新浏览器恢复，浏览器不保存应用数据", async ({page, browser}) => {
+    await page.goto("/");
+    await login(page);
+    await page.getByRole("textbox", {name: "发送给清灵的消息"}).fill("数据库保存今天的课表");
+    await page.getByRole("button", {name: "发送消息"}).click();
+    await expect(page.locator(".markdown table")).toBeVisible();
+    await expect(page.getByRole("button", {name: "停止生成", exact: true})).not.toBeVisible();
+    const stored = page.waitForResponse("**/api/workspace/preferences");
+    await page.getByRole("button", {name: "切换到深色模式"}).click();
+    await stored;
+    expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
+    const context = await browser.newContext({serviceWorkers: "block"});
+    try {
+        const fresh = await context.newPage();
+        await fresh.goto("http://127.0.0.1:3461/");
+        await expect(fresh.locator("html")).toHaveAttribute("data-theme", "dark");
+        await expect(fresh.locator(".markdown table")).toBeVisible();
+        await expect(fresh.getByRole("button", {name: "账户：测试同学"})).toBeVisible();
+        expect(await fresh.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
+        const workspace = await (await fresh.request.get("/api/workspace")).json();
+        expect(workspace.history.sessions[0].messages[1].turn.status).toBe("completed");
+        expect(workspace.history.sessions[0].tokens).toBe(384);
+    } finally { await context.close(); }
+});
+
+test("输入聚焦无外圈、官方校徽紧邻标题，顶部入口精简", async ({page}) => {
+    await page.goto("/");
+    const toolbar = page.locator(".toolbar");
+    await expect(toolbar.getByRole("button", {name: "登录", exact: true})).toHaveCount(0);
+    await expect(toolbar.getByRole("button", {name: "服务指南", exact: true})).toHaveCount(0);
+    const input = page.getByRole("textbox", {name: "发送给清灵的消息"});
+    await input.fill("输入时只显示细流光边框");
+    await expect(input).toHaveCSS("outline-style", "none");
+    await expect(input).toHaveCSS("box-shadow", "none");
+    await page.screenshot({path: "docs/screenshots/web-composer-focus.png", animations: "disabled"});
+    await page.getByRole("button", {name: "搜索对话"}).click();
+    await expect(page.getByRole("textbox", {name: "搜索历史对话"})).toHaveCSS("outline-style", "none");
+    await page.getByRole("button", {name: /连接清华账号/}).click();
+    const dialog = page.getByRole("dialog", {name: "连接清华 Info"});
+    await expect(dialog.locator(".lucide-fingerprint")).toHaveCount(0);
+    const emblem = dialog.locator("h2 .tsinghua-emblem");
+    await expect(emblem).toBeVisible();
+    await expect.poll(() => emblem.locator("img").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth === 1400)).toBe(true);
+    await expect(dialog).toHaveCSS("opacity", "1");
+    const heading = await dialog.getByRole("heading").boundingBox();
+    const mark = await emblem.boundingBox();
+    expect(mark!.x).toBeGreaterThan(heading!.x + 100);
+    expect(mark!.y).toBeGreaterThanOrEqual(heading!.y);
+    for (const label of ["学号", "密码"]) {
+        await dialog.getByLabel(label).focus();
+        await expect(dialog.getByLabel(label)).toHaveCSS("outline-style", "none");
+        await expect(dialog.getByLabel(label)).toHaveCSS("box-shadow", "none");
+    }
+    await page.screenshot({path: "docs/screenshots/web-login-emblem.png", animations: "disabled"});
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", {name: "切换到深色模式"}).click();
+    await expect(page.locator("html")).not.toHaveAttribute("data-theme-transition");
+    await page.getByRole("button", {name: /连接清华账号/}).click();
+    await expect(dialog).toHaveCSS("opacity", "1");
+    await page.screenshot({path: "docs/screenshots/web-login-emblem-dark.png", animations: "disabled"});
+});
+
+test("主题以按钮为圆心展开和收拢，不支持过渡时直接切换", async ({page}) => {
+    await page.addInitScript(() => {
+        const animate = Element.prototype.animate;
+        Element.prototype.animate = function(keyframes, options) {
+            const animation = animate.call(this, keyframes, options);
+            if (typeof options === "object" && options.pseudoElement?.startsWith("::view-transition-")) {
+                animation.pause();
+                Object.assign(window, {themeAnimation: animation});
+            }
+            return animation;
+        };
+    });
+    await page.goto("/");
+    await expect(page.locator(".suggestions")).toHaveCSS("opacity", "1");
+    await expect(page.locator(".composer")).toHaveCSS("opacity", "1");
+    const button = page.getByRole("button", {name: "切换到深色模式"});
+    const bounds = (await button.boundingBox())!;
+    await button.click();
+    await page.waitForFunction(() => Boolean((window as Window & {themeAnimation?: Animation}).themeAnimation));
+    const details = await page.evaluate(() => {
+        const animation = (window as unknown as {themeAnimation: Animation}).themeAnimation;
+        const effect = animation.effect as KeyframeEffect;
+        animation.currentTime = 320;
+        return {frames: effect.getKeyframes().map(frame => String(frame.clipPath)), pseudo: effect.pseudoElement};
+    });
+    expect(details.pseudo).toBe("::view-transition-new(root)");
+    const center = details.frames[0].match(/at ([\d.]+)px ([\d.]+)px/)!;
+    expect(Number(center[1])).toBeCloseTo(bounds.x + bounds.width / 2, 0);
+    expect(Number(center[2])).toBeCloseTo(bounds.y + bounds.height / 2, 0);
+    expect(details.frames[0]).toMatch(/^circle\(0px/);
+    await page.screenshot({path: "docs/screenshots/web-theme-transition.png"});
+    await page.evaluate(() => (window as unknown as {themeAnimation: Animation}).themeAnimation.finish());
+    await expect(page.locator("html")).not.toHaveAttribute("data-theme-transition");
+    await page.evaluate(() => { delete (window as Window & {themeAnimation?: Animation}).themeAnimation; });
+    await page.getByRole("button", {name: "切换到浅色模式"}).click();
+    await page.waitForFunction(() => Boolean((window as Window & {themeAnimation?: Animation}).themeAnimation));
+    const reverse = await page.evaluate(() => {
+        const animation = (window as unknown as {themeAnimation: Animation}).themeAnimation;
+        const effect = animation.effect as KeyframeEffect;
+        const details = {frames: effect.getKeyframes().map(frame => String(frame.clipPath)), pseudo: effect.pseudoElement};
+        animation.finish();
+        return details;
+    });
+    expect(reverse.pseudo).toBe("::view-transition-old(root)");
+    expect(reverse.frames).toEqual(details.frames.toReversed());
+    await expect(page.locator("html")).not.toHaveAttribute("data-theme-transition");
+    await page.evaluate(() => Object.defineProperty(document, "startViewTransition", {value: undefined}));
+    await page.getByRole("button", {name: "切换到深色模式"}).click();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect(page.locator("html")).not.toHaveAttribute("data-theme-transition");
+    expect((await (await page.request.get("/api/workspace")).json()).preferences.theme).toBe("dark");
+    expect(await page.evaluate(() => localStorage.length)).toBe(0);
+});
+
+test("新对话在首次发送后才保存，旧空记录清理且刷新保留草稿位置", async ({page}) => {
+    await page.route("**/api/chat", route => route.fulfill({contentType: "text/event-stream", body: 'event: answer\ndata: {"text":"这是首次回复"}\n\nevent: done\ndata: {}\n\n'}));
+    await page.addInitScript(() => {
+        if (localStorage.getItem("fixture-history-seeded")) return;
+        localStorage.setItem("fixture-history-seeded", "1");
+        localStorage.setItem("thu-assistant-sessions-v1", JSON.stringify({activeId: "old", sessions: [
+            {id: "old", title: "已有对话", createdAt: 1, messages: [{role: "user", text: "之前的问题"}, {role: "bot", text: "之前的回复"}]},
+            {id: "empty", title: "新对话", createdAt: 2, messages: []},
+        ]}));
+    });
+    await page.goto("/");
+    await login(page);
+    await expect(page.locator(".session-item")).toHaveCount(1);
+    await expect(page.getByText("之前的回复", {exact: true})).toBeVisible();
+    for (let i = 0; i < 5; i++) await page.getByRole("button", {name: "新建对话"}).click();
+    await expect(page.locator(".session-item")).toHaveCount(1);
+    await expect(page.locator(".session-item.active")).toHaveCount(0);
+    const draft = (await (await page.request.get("/api/workspace")).json()).history;
+    expect(draft.sessions.map((s: {id: string}) => s.id)).toEqual(["old"]);
+    expect(draft.activeId).not.toBe("old");
+    await page.reload();
+    await expect(page.getByRole("heading", {name: "今天，有什么可以帮你？"})).toBeVisible();
+    expect((await (await page.request.get("/api/workspace")).json()).history.activeId).toBe(draft.activeId);
+    await page.getByRole("textbox", {name: "发送给清灵的消息"}).fill("第一个实际问题");
+    await page.getByRole("button", {name: "发送消息"}).click();
+    await expect(page.getByText("这是首次回复", {exact: true})).toBeVisible();
+    await expect(page.locator(".session-item")).toHaveCount(2);
+    const saved = (await (await page.request.get("/api/workspace")).json()).history;
+    expect(saved.sessions.find((s: {id: string}) => s.id === draft.activeId).messages).toHaveLength(2);
+    await page.getByRole("button", {name: "新建对话"}).click();
+    await expect(page.locator(".session-item")).toHaveCount(2);
 });
 
 test("输入框工具精简、权限菜单支持键盘和持久化，手机菜单不溢出", async ({page}) => {
@@ -76,6 +264,10 @@ test("输入框工具精简、权限菜单支持键盘和持久化，手机菜�
     await expect(full).toBeVisible();
     await full.click();
     await expect(page.getByRole("menuitemradio", {name: /完全访问/})).toHaveAttribute("aria-checked", "true");
+    await full.click();
+    await expect(full).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByRole("menu", {name: "访问模式"})).toHaveCount(0);
+    await full.click();
     await page.screenshot({path: "docs/screenshots/web-access-modes.png", animations: "disabled"});
     await page.keyboard.press("Escape");
     await expect(full).toBeFocused();
@@ -88,6 +280,9 @@ test("输入框工具精简、权限菜单支持键盘和持久化，手机菜�
     expect(bounds!.x).toBeGreaterThanOrEqual(0);
     expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await full.click();
+    await expect(page.getByRole("menu", {name: "访问模式"})).toHaveCount(0);
+    await full.click();
     await page.locator(".toolbar").click();
     await expect(page.getByRole("menu")).toHaveCount(0);
 });
@@ -158,8 +353,9 @@ test("完全访问统一应用于界面操作，删除和退出不再弹出确�
     await deleted;
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(page.getByText("测试回复", {exact: true})).not.toBeVisible();
-    await page.getByRole("button", {name: /清华 Info 已连接校园服务/}).click();
-    await expect(page.getByRole("button", {name: "登录", exact: true})).toBeVisible();
+    await page.getByRole("button", {name: /^账户：/}).click();
+    await page.getByRole("menuitem", {name: "退出登录"}).click();
+    await expect(page.getByRole("button", {name: /连接清华账号/})).toBeVisible();
     await expect(page.getByRole("dialog")).toHaveCount(0);
 });
 
@@ -406,11 +602,19 @@ test("手机布局、抽屉、弹窗焦点和减少动态效果", async ({page})
     await expect(page.locator("main")).toHaveAttribute("inert", "");
     await page.keyboard.press("Escape");
     await expect(page.locator("main")).not.toHaveAttribute("inert", "");
-    await page.getByRole("button", {name: "登录", exact: true}).click();
+    await page.getByRole("button", {name: "展开侧栏"}).click();
+    const account = page.getByRole("button", {name: /连接清华账号/});
+    await account.click();
     await expect(page.getByLabel("学号")).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog")).not.toBeVisible();
-    await expect(page.getByRole("button", {name: "登录", exact: true})).toBeFocused();
+    await expect(account).toBeFocused();
+    await expect(page.locator("main")).toHaveAttribute("inert", "");
+    await page.keyboard.press("Escape");
+    await expect(page.locator("main")).not.toHaveAttribute("inert", "");
+    await page.getByRole("button", {name: "切换到深色模式"}).click();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect(page.locator("html")).not.toHaveAttribute("data-theme-transition");
 });
 
 test("图片附件与输入法 Enter 不会误发", async ({page}) => {
@@ -447,7 +651,8 @@ test("文件上传不依赖视觉模型，发送保留文件上下文且历史�
     await expect(page.locator(".user-message")).toHaveText("📎 作业.pdf");
     await expect(page.locator(".markdown")).toHaveText("已收到文件，请说明用途。");
     await expect(page.locator(".file-attachment")).toHaveCount(0);
-    expect(await page.evaluate(() => localStorage.getItem("thu-assistant-sessions-v1"))).not.toContain("/fixture/uploads/");
+    expect(await page.evaluate(() => localStorage.length)).toBe(0);
+    expect(JSON.stringify((await (await page.request.get("/api/workspace")).json()).history)).not.toContain("/fixture/uploads/");
     await page.reload();
     await expect(page.locator(".user-message")).toHaveText("📎 作业.pdf");
 });
