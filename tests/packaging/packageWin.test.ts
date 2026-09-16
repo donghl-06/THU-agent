@@ -4,6 +4,7 @@ import {describe, expect, it} from "vitest";
 
 const root = process.cwd();
 const packageScript = readFileSync(join(root, "scripts", "package-win.mjs"), "utf8");
+const mcpPackageScript = readFileSync(join(root, "scripts", "package-mcp-win.mjs"), "utf8");
 const launcherSource = readFileSync(join(root, "packaging", "WindowsLauncher", "Program.cs"), "utf8");
 
 describe("Windows launcher packaging", () => {
@@ -80,5 +81,17 @@ describe("Windows launcher packaging", () => {
         expect(launcherSource).toContain("e.Graphics.ResetClip()");
         expect(launcherSource).toContain("separator.Size = new Size(Scale(144, scale), Scale(13, scale))");
         expect(launcherSource).toContain("OnRenderToolStripBorder");
+    });
+
+    it("repackaging MCP does not delete an in-use runtime or local credentials", () => {
+        const buildIndex = mcpPackageScript.indexOf('execFileSync(pnpmCommand, ["run", "build"]');
+        const cleanupIndex = mcpPackageScript.indexOf("for (const entry of await readdir(release");
+
+        expect(buildIndex).toBeGreaterThan(-1);
+        expect(cleanupIndex).toBeGreaterThan(buildIndex);
+        expect(mcpPackageScript).not.toContain("rm(release, {recursive: true");
+        expect(mcpPackageScript).toContain('entry.name === "runtime"');
+        expect(mcpPackageScript).toContain('entry.name === ".env"');
+        expect(mcpPackageScript).toContain("保留现有文件");
     });
 });
