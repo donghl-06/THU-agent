@@ -166,4 +166,13 @@ describe("Web UI 请求状态", () => {
         expect(html).toContain("isTsinghuaMediaUrl");
         expect(html).toContain("cloud.tsinghua.edu.cn");
     });
+
+    it("图片附件同时保留视觉输入和可传云盘的本机路径", () => {
+        expect(html).toContain("let pendingImages = []; // {dataUrl, file?}");
+        expect(html).toContain('fetch("/api/upload?name=" + encodeURIComponent(f.name)');
+        expect(html).toContain("item.file = await resp.json();");
+        expect(html).toContain("const imageFiles = pendingImages.map((item) => item.file).filter(Boolean);");
+        expect(html).toContain("const modelFiles = [...files, ...imageFiles];");
+        expect(html).toContain("upload_cloud_file 的 localFilePath");
+    });
 });

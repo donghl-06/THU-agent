@@ -44,6 +44,12 @@ import {createGetCloudLibrariesSkill} from "./cloud/getCloudLibraries";
 import {createGetCloudDirectorySkill} from "./cloud/getCloudDirectory";
 import {createSearchCloudFilesSkill} from "./cloud/searchCloudFiles";
 import {createShowCloudFileSkill} from "./cloud/showCloudFile";
+import {createUploadCloudFileSkill} from "./cloud/uploadCloudFile";
+import {createCreateCloudFolderSkill} from "./cloud/createCloudFolder";
+import {createRenameCloudItemSkill} from "./cloud/renameCloudItem";
+import {createTransferCloudItemSkill} from "./cloud/transferCloudItem";
+import {createDeleteCloudItemSkill} from "./cloud/deleteCloudItem";
+import {createCloudShareLinkSkill} from "./cloud/createCloudShareLink";
 import type {TempImageStore} from "../utils/tempImageStore";
 import {resolveStableFingerprint} from "../client/fingerprintStore";
 import {createChaojiyingSolver, createChaojiyingCodeSolver} from "../client/captcha/chaojiying";
@@ -137,7 +143,6 @@ export function createAllSkills(opts: SkillAssemblyOptions = {}): Skill[] {
         smtpPort: config.email.smtpPort,
     });
     // 清华云盘（Seafile）：独立按域名隔离的 SSO 会话，复用统一身份认证凭证。
-    // 先提供只读能力：资料库/目录/搜索，不上传、删除或分享。
     const cloud = new CloudClient(opts.credentials);
     return [
         createGetScheduleSkill(thu),
@@ -177,6 +182,13 @@ export function createAllSkills(opts: SkillAssemblyOptions = {}): Skill[] {
         createGetCloudDirectorySkill(cloud),
         createSearchCloudFilesSkill(cloud),
         createShowCloudFileSkill(cloud),
+        // 云盘写操作：和预约/发邮件一样走 Web UI 确认；MCP 默认隐藏
+        createUploadCloudFileSkill(cloud),
+        createCreateCloudFolderSkill(cloud),
+        createRenameCloudItemSkill(cloud),
+        createTransferCloudItemSkill(cloud),
+        createDeleteCloudItemSkill(cloud),
+        createCloudShareLinkSkill(cloud),
         createBookSportsFieldSkill(sports, {captchaSolver}),
         createBookLibrarySeatSkill(thu),
         createBookLibraryRoomSkill(thu),

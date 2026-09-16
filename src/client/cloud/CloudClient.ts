@@ -10,6 +10,7 @@
  * Token 只保存在进程内存，不写日志、不返回给 Skill/LLM。
  */
 import {sm2} from "sm-crypto";
+import {randomUUID} from "node:crypto";
 import {config} from "../../config/env";
 import {ThuError} from "../errors";
 import type {LoginCredentials} from "../auth";
@@ -65,6 +66,25 @@ export interface CloudFile {
     canPreview: boolean;
 }
 
+export interface CloudShareLink {
+    token: string;
+    url: string;
+    downloadUrl: string | null;
+    libraryId: string;
+    libraryName: string;
+    path: string;
+    objectName: string;
+    isDirectory: boolean;
+    expiresAt: string | null;
+    isExpired: boolean;
+}
+
+export interface CloudUploadFile {
+    name: string;
+    sizeBytes: number;
+    content: Blob | ReadableStream<Uint8Array>;
+}
+
 interface RawRepo {
     id?: string;
     repo_id?: string;
@@ -111,6 +131,19 @@ interface RawFileDetail {
     last_modified?: string;
     permission?: string;
     can_preview?: boolean;
+}
+
+interface RawShareLink {
+    token?: string;
+    link?: string;
+    download_link?: string;
+    repo_id?: string;
+    repo_name?: string;
+    path?: string;
+    obj_name?: string;
+    is_dir?: boolean;
+    expire_date?: string;
+    is_expired?: boolean;
 }
 
 function cookieNameValue(setCookie: string): [string, string] | undefined {
@@ -205,9 +238,80 @@ function normalizeFileDetail(raw: RawFileDetail, repoId: string, path: string): 
     };
 }
 
+function normalizeShareLink(raw: RawShareLink, repoId: string, path: string): CloudShareLink | undefined {
+    const token = firstString(raw.token);
+    const url = firstString(raw.link);
+    if (!token || !url || !/^https?:\/\//i.test(url)) return undefined;
+    const rawPath = firstString(raw.path) ?? path;
+    return {
+        token,
+        url,
+        downloadUrl: firstString(raw.download_link) ?? null,
+        libraryId: firstString(raw.repo_id) ?? repoId,
+        libraryName: firstString(raw.repo_name) ?? "",
+        path: rawPath.startsWith("/") ? rawPath : `/${rawPath}`,
+        objectName: firstString(raw.obj_name) ?? rawPath.split("/").filter(Boolean).pop() ?? "",
+        isDirectory: raw.is_dir === true,
+        expiresAt: normalizeTime(raw.expire_date),
+        isExpired: raw.is_expired === true,
+    };
+}
+
 function firstString(value: unknown): string | undefined {
     if (typeof value === "string" && value.trim()) return value.trim();
     return undefined;
+}
+
+export function multipartUploadBody(
+    parentDir: string,
+    file: CloudUploadFile,
+): {body: ReadableStream<Uint8Array>; contentType: string} {
+    const boundary = `----QingLing${randomUUID().replace(/-/g, "")}`;
+    const encoder = new TextEncoder();
+    const safeFilename = file.name.replace(/["\\\r\n]/g, "_");
+    const prefix = encoder.encode(
+        `--${boundary}\r\n` +
+        `Content-Disposition: form-data; name="parent_dir"\r\n\r\n${parentDir}\r\n` +
+        `--${boundary}\r\n` +
+        `Content-Disposition: form-data; name="relative_path"\r\n\r\n\r\n` +
+        `--${boundary}\r\n` +
+        `Content-Disposition: form-data; name="file"; filename="${safeFilename}"\r\n` +
+        `Content-Type: application/octet-stream\r\n\r\n`,
+    );
+    const suffix = encoder.encode(`\r\n--${boundary}--\r\n`);
+    const source = file.content instanceof ReadableStream
+        ? file.content
+        : file.content.stream();
+    const iterator = (source as unknown as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]();
+    let prefixSent = false;
+    let suffixSent = false;
+
+    return {
+        contentType: `multipart/form-data; boundary=${boundary}`,
+        body: new ReadableStream<Uint8Array>({
+            async pull(controller) {
+                if (!prefixSent) {
+                    prefixSent = true;
+                    controller.enqueue(prefix);
+                    return;
+                }
+
+                const {value, done} = await iterator.next();
+                if (!done && value) {
+                    controller.enqueue(value);
+                    return;
+                }
+                if (!suffixSent) {
+                    suffixSent = true;
+                    controller.enqueue(suffix);
+                    controller.close();
+                }
+            },
+            async cancel() {
+                await iterator.return?.().catch(() => undefined);
+            },
+        }),
+    };
 }
 
 function parseJson(text: string): unknown {
@@ -222,6 +326,26 @@ function apiUrlErrorMessage(status: number, body: unknown): string {
     const detail = firstString((body as {detail?: unknown} | undefined)?.detail);
     const message = firstString((body as {message?: unknown} | undefined)?.message);
     return detail ?? message ?? `HTTP ${status}`;
+}
+
+export function normalizeUploadResponse(
+    status: number,
+    text: string,
+    file: CloudUploadFile,
+): unknown {
+    const body = parseJson(text);
+    if (status < 200 || status >= 300) {
+        throw new ThuError(
+            "UPSTREAM_ERROR",
+            `清华云盘上传接口报错：${apiUrlErrorMessage(status, body)}`,
+        );
+    }
+    // Seafile upload-api 在部分部署下上传成功会返回 HTTP 200 + 空/纯文本体，
+    // 不能把“非 JSON 响应”误判成失败；此时由 Skill 使用本地文件名兜底。
+    return body !== undefined ? body : [{
+        name: file.name,
+        response: text.trim().slice(0, 200),
+    }];
 }
 
 export class CloudClient {
@@ -307,6 +431,12 @@ export class CloudClient {
         if (cookie) headers.set("cookie", cookie);
         if (this.apiToken) headers.set("authorization", `Token ${this.apiToken}`);
         headers.set("accept", "application/json");
+        const method = init.method?.toUpperCase() ?? "GET";
+        if (method !== "GET" && method !== "HEAD") {
+            for (const [name, value] of Object.entries(this.csrfHeader())) {
+                headers.set(name, value);
+            }
+        }
         return fetch(url, {
             ...init,
             headers,
@@ -427,15 +557,15 @@ export class CloudClient {
         return this.loginPromise;
     }
 
-    private async api<T>(path: string): Promise<T> {
+    private async apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
         await this.login();
-        let response = await this.cloudRequest(path);
+        let response = await this.cloudRequest(path, init);
         if (response.status === 401 || response.status === 403 || REDIRECT_STATUS.has(response.status)) {
             this.loggedIn = false;
             this.apiToken = undefined;
             this.jar.delete(new URL(CLOUD_BASE).hostname);
             await this.login();
-            response = await this.cloudRequest(path);
+            response = await this.cloudRequest(path, init);
         }
 
         const text = await response.text();
@@ -447,6 +577,10 @@ export class CloudClient {
             );
         }
         return body as T;
+    }
+
+    private async api<T>(path: string): Promise<T> {
+        return this.apiRequest<T>(path);
     }
 
     async listLibraries(): Promise<CloudLibrary[]> {
@@ -505,5 +639,157 @@ export class CloudClient {
             throw new ThuError("UPSTREAM_ERROR", "清华云盘没有返回有效的文件访问链接");
         }
         return body;
+    }
+
+    /**
+     * 生成只读分享链接。默认不设置密码、不开放编辑/上传权限；
+     * expireDays 由上层校验，未传时遵循云盘默认的永久有效策略。
+     */
+    async createShareLink(
+        repoId: string,
+        path: string,
+        options: {expireDays?: number} = {},
+    ): Promise<CloudShareLink> {
+        const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+        const form = new URLSearchParams({
+            repo_id: repoId,
+            path: normalizedPath,
+        });
+        if (options.expireDays !== undefined) form.set("expiration_time", String(options.expireDays));
+        const body = await this.apiRequest<RawShareLink>("/api/v2.1/share-links/", {
+            method: "POST",
+            body: form,
+        });
+        const link = normalizeShareLink(body, repoId, normalizedPath);
+        if (!link) throw new ThuError("UPSTREAM_ERROR", "清华云盘没有返回有效的分享链接");
+        return link;
+    }
+
+    /**
+     * 上传文件到云盘。文件内容由 Skill 层以流或 Blob 提供，
+     * 这里只负责申请一次性 upload token 和提交 multipart 表单。
+     */
+    async uploadFile(
+        repoId: string,
+        parentDir: string,
+        file: CloudUploadFile,
+    ): Promise<unknown> {
+        const normalizedDir = parentDir.startsWith("/") ? parentDir : `/${parentDir}`;
+        const uploadLink = await this.api<string>(
+            `/api2/repos/${encodeURIComponent(repoId)}/upload-link/` +
+            `?p=${encodeURIComponent(normalizedDir)}&from=api`,
+        );
+        if (typeof uploadLink !== "string" || !/^https?:\/\//i.test(uploadLink)) {
+            throw new ThuError("UPSTREAM_ERROR", "清华云盘没有返回有效的上传链接");
+        }
+
+        const uploadBody = multipartUploadBody(normalizedDir, file);
+        let response: Response;
+        try {
+            const uploadInit: RequestInit & {duplex?: "half"} = {
+                method: "POST",
+                headers: {"content-type": uploadBody.contentType},
+                body: uploadBody.body,
+                // 512MB 上限下给慢速网络留足时间，避免大文件上传中途被固定 10 分钟截断。
+                signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS * 60),
+                duplex: "half",
+            };
+            response = await fetch(uploadLink, uploadInit);
+        } catch (error) {
+            throw new ThuError("NETWORK_ERROR", `清华云盘文件上传失败：${(error as Error).message}`, error);
+        }
+
+        return normalizeUploadResponse(response.status, await response.text(), file);
+    }
+
+    async createFolder(repoId: string, path: string): Promise<string> {
+        const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+        const parts = normalizedPath.split("/").filter(Boolean);
+        let currentPath = "/";
+        for (const part of parts) {
+            const entries = await this.getDirectory(repoId, currentPath);
+            const existing = entries.find((item) => item.name === part);
+            if (existing) {
+                if (existing.type !== "dir") {
+                    throw new ThuError(
+                        "UPSTREAM_ERROR",
+                        `清华云盘路径「${currentPath === "/" ? "" : currentPath}/${part}」已被同名文件占用`,
+                    );
+                }
+                currentPath = `${currentPath === "/" ? "" : currentPath}/${part}`;
+                continue;
+            }
+
+            const targetPath = `${currentPath === "/" ? "" : currentPath}/${part}`;
+            const body = await this.apiRequest<{name?: unknown; obj_name?: unknown}>(
+                `/api/v2.1/repos/${encodeURIComponent(repoId)}/dir/?p=${encodeURIComponent(targetPath)}`,
+                {
+                    method: "POST",
+                    body: new URLSearchParams({operation: "mkdir"}),
+                },
+            );
+            const createdName = firstString(body.name) ?? firstString(body.obj_name);
+            if (!createdName) throw new ThuError("UPSTREAM_ERROR", "清华云盘没有返回新文件夹名称");
+            currentPath = `${currentPath === "/" ? "" : currentPath}/${createdName}`;
+        }
+        return currentPath;
+    }
+
+    async renameDirent(
+        repoId: string,
+        path: string,
+        type: CloudDirent["type"],
+        newName: string,
+    ): Promise<string> {
+        const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+        const resource = type === "dir" ? "dir" : "file";
+        const body = await this.apiRequest<{name?: unknown; obj_name?: unknown}>(
+            `/api/v2.1/repos/${encodeURIComponent(repoId)}/${resource}/` +
+            `?p=${encodeURIComponent(normalizedPath)}`,
+            {
+                method: "POST",
+                body: new URLSearchParams({
+                    operation: "rename",
+                    newname: newName,
+                }),
+            },
+        );
+        const actualName = firstString(body.name) ?? firstString(body.obj_name) ?? newName.trim();
+        const parentDir = normalizedPath.slice(0, normalizedPath.lastIndexOf("/")) || "/";
+        return `${parentDir === "/" ? "" : parentDir}/${actualName}`;
+    }
+
+    async deleteDirent(repoId: string, path: string, type: CloudDirent["type"]): Promise<void> {
+        const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+        const resource = type === "dir" ? "dir" : "file";
+        await this.apiRequest<unknown>(
+            `/api/v2.1/repos/${encodeURIComponent(repoId)}/${resource}/` +
+            `?p=${encodeURIComponent(normalizedPath)}`,
+            {method: "DELETE"},
+        );
+    }
+
+    async transferDirent(
+        repoId: string,
+        sourceParentDir: string,
+        name: string,
+        destinationRepoId: string,
+        destinationDir: string,
+        operation: "copy" | "move",
+    ): Promise<unknown> {
+        const sourceDir = sourceParentDir.startsWith("/") ? sourceParentDir : `/${sourceParentDir}`;
+        const targetDir = destinationDir.startsWith("/") ? destinationDir : `/${destinationDir}`;
+        return this.apiRequest<unknown>(
+            `/api2/repos/${encodeURIComponent(repoId)}/fileops/${operation}/` +
+            `?p=${encodeURIComponent(sourceDir)}`,
+            {
+                method: "POST",
+                body: new URLSearchParams({
+                    dst_repo: destinationRepoId,
+                    dst_dir: targetDir,
+                    file_names: name,
+                }),
+            },
+        );
     }
 }

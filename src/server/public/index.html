@@ -1739,19 +1739,50 @@ const fileInput = document.getElementById("file");
 const thumbs = document.getElementById("thumbs");
 const MAX_IMGS = 4, MAX_IMG_BYTES = 4.5 * 1024 * 1024;
 const MAX_DOC_BYTES = 50 * 1024 * 1024; // 与后端 /api/upload 上限一致
-let pendingImages = []; // data URL
+let pendingImages = []; // {dataUrl, file?}；file 是后端保存后的本机路径信息
 let pendingFiles = [];  // {name, path, sizeBytes} 已上传成功的文件
 fetch("/api/capabilities").then((r) => r.json()).then((c) => {
   if (!c.vision) attachBtn.style.display = "none";
 }).catch(() => {});
 attachBtn.onclick = () => fileInput.click();
-fileInput.onchange = () => {
+fileInput.onchange = async () => {
   for (const f of fileInput.files) {
     if (pendingImages.length >= MAX_IMGS) { addMsg("bot", `最多一次发 ${MAX_IMGS} 张图。`); break; }
     if (f.size > MAX_IMG_BYTES) { addMsg("bot", `「${f.name}」超过 4.5MB，请先压缩。`); continue; }
-    const rd = new FileReader();
-    rd.onload = () => { pendingImages.push(rd.result); renderThumbs(); };
-    rd.readAsDataURL(f);
+    if (f.size === 0) { toast(`「${f.name}」是空图片`, "err"); continue; }
+    const item = {dataUrl: null, file: null};
+    pendingImages.push(item);
+    try {
+      item.dataUrl = await new Promise((resolve, reject) => {
+        const rd = new FileReader();
+        rd.onload = () => resolve(rd.result);
+        rd.onerror = () => reject(rd.error || new Error("读取失败"));
+        rd.readAsDataURL(f);
+      });
+    } catch (e) {
+      pendingImages.splice(pendingImages.indexOf(item), 1);
+      toast(`读取「${f.name}」失败，已移除`, "err");
+      continue;
+    }
+    renderThumbs();
+
+    // 图片除了给视觉模型看，也保存为本机文件；upload_cloud_file 等 Skill 才能拿到真实路径。
+    try {
+      const resp = await fetch("/api/upload?name=" + encodeURIComponent(f.name), {
+        method: "POST",
+        body: f,
+      });
+      if (resp.status === 401) {
+        toast(`「${f.name}」可用于识图；请先登录后才能上传到云盘`, "err");
+      } else if (!resp.ok) {
+        throw new Error(await resp.text());
+      } else {
+        item.file = await resp.json();
+      }
+    } catch (e) {
+      toast(`「${f.name}」可用于识图，但暂不能作为云盘上传源：` + (e.message || "网络错误"), "err");
+    }
+    renderThumbs();
   }
   fileInput.value = "";
 };
@@ -1785,11 +1816,12 @@ docFileInput.onchange = async () => {
 function renderThumbs() {
   thumbs.innerHTML = "";
   thumbs.hidden = pendingImages.length === 0 && pendingFiles.length === 0;
-  pendingImages.forEach((url, i) => {
+  pendingImages.forEach((item, i) => {
     const wrap = document.createElement("div");
     wrap.className = "thumb";
     const img = document.createElement("img");
-    img.src = url;
+    img.src = item.dataUrl;
+    wrap.title = item.file?.path || (item.dataUrl ? "仅用于视觉理解，暂无本机路径" : "正在读取图片…");
     const rm = document.createElement("button");
     rm.className = "rm";
     rm.textContent = "×";
@@ -1833,7 +1865,9 @@ const TOOL_LABELS = {
   get_emails: "清华邮箱", send_email: "发送邮件", show_email_image: "邮件图片",
   show_learn_image: "学堂图片",
   get_cloud_libraries: "云盘资料库", get_cloud_directory: "云盘目录", search_cloud_files: "云盘搜索",
-  show_cloud_file: "云盘文件",
+  show_cloud_file: "云盘文件", upload_cloud_file: "上传到云盘", create_cloud_folder: "新建云盘文件夹",
+  rename_cloud_item: "重命名云盘项目", transfer_cloud_item: "复制/移动云盘项目",
+  delete_cloud_item: "删除云盘项目", create_cloud_share_link: "生成云盘分享链接",
 };
 const toolLabel = (name) => TOOL_LABELS[name] ?? name;
 
@@ -2819,9 +2853,11 @@ function submit(text, imgs, agentText) {
 sendBtn.onclick = () => {
   if (busy) { stopCurrentChat(); return; } // 等服务端确认清理完成后再允许下一问
   const text = q.value.trim();
-  const imgs = pendingImages;
+  const imgs = pendingImages.map((item) => item.dataUrl).filter(Boolean);
   const files = pendingFiles;
-  if (!text && imgs.length === 0 && files.length === 0) return;
+  const imageFiles = pendingImages.map((item) => item.file).filter(Boolean);
+  const modelFiles = [...files, ...imageFiles];
+  if (!text && imgs.length === 0 && modelFiles.length === 0) return;
   q.value = "";
   resizeQ();
   pendingImages = [];
@@ -2829,10 +2865,10 @@ sendBtn.onclick = () => {
   renderThumbs();
   // 文件路径只给模型看（气泡不刷屏）：模型据此调 submit_learn_homework 等工具
   const display = text + (files.length ? `${text ? "\n" : ""}📎 ${files.map((f) => f.name).join("、")}` : "");
-  const agentText = files.length
-    ? files.map((f) =>
+  const agentText = modelFiles.length
+    ? modelFiles.map((f) =>
         `（用户已上传文件「${f.name}」，保存在本机路径：${f.path}。` +
-        `需要本地文件路径的工具（如 submit_learn_homework 的 filePath）可直接使用该路径。）`,
+        `需要本地文件路径的工具（如 submit_learn_homework 的 filePath、upload_cloud_file 的 localFilePath）可直接使用该路径。）`,
       ).join("\n") + "\n\n" + (text || "（用户上传了上述文件，请结合对话确认它的用途。）")
     : text;
   submit(display, imgs, agentText);
