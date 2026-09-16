@@ -13,7 +13,7 @@ export const MessageView = memo(function MessageView({message, streaming, retry,
         {bot && <div className="message-author">{message.notification ? <Bell size={17}/> : <Brand/>}<span>{message.notification ? "任务通知" : "清灵"}</span></div>}
         <div className="message-content">
             {message.images?.length ? <div className="message-images">{message.images.map((url, index) => <img src={url} key={index} alt={`附件 ${index + 1}`}/>)}</div> : Boolean(message.imageCount) && <p className="saved-attachment"><Image size={14}/>{message.imageCount} 张图片附件 · 预览未保存</p>}
-            {bot && message.turn ? <AgentTurn key={message.turn.startedAt} turn={message.turn} active={streaming}/>
+            {bot && message.turn ? <AgentTurn turn={message.turn} active={streaming}/>
                 : bot && !streaming ? <Suspense fallback={<div className="plain-message">{message.text}</div>}><MarkdownContent text={message.text}/></Suspense> : <div className="plain-message">{message.text}{streaming && <span className="stream-cursor"/>}</div>}
         </div>
         {bot && !streaming && <div className="message-footer"><div className="message-actions"><IconButton icon={Copy} label="复制回答" onClick={() => copy(message.text)}/>{retry && <IconButton icon={RotateCcw} label="重新生成" onClick={retry}/>}</div>{message.usage && <span className="usage">{message.usage.totalTokens.toLocaleString()} tokens{message.usage.costYuan !== undefined && ` · ¥${message.usage.costYuan.toFixed(3)}`}</span>}</div>}

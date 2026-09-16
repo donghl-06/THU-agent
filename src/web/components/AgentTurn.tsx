@@ -51,6 +51,9 @@ export function AgentTurn({turn, active}: {turn: Turn; active: boolean}) {
     const expanded = disclosure?.status === status ? disclosure.open : status !== "completed";
     const [now, setNow] = useState(Date.now);
     const contentId = useId();
+    // A retry starts a fresh disclosure. A completed server checkpoint may correct
+    // startedAt; that synchronization must not collapse what the user just opened.
+    useEffect(() => { if (running) setDisclosure(null); }, [running, turn.startedAt]);
     useEffect(() => {
         if (!running) return;
         setNow(Date.now());

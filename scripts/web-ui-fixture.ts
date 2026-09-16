@@ -1,4 +1,4 @@
-/** Offline UI fixture. No THU clients, scheduler, or real LLM calls. */
+/** Offline UI fixture. Scheduled runs use this fake Agent; no THU clients or real LLM calls. */
 import {setTimeout as delay} from "node:timers/promises";
 import {createWebServer} from "../src/server/webServer";
 import type {Agent} from "../src/harness/agentLoop";

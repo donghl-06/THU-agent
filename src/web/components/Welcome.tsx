@@ -1,6 +1,7 @@
 import {motion} from "motion/react";
 import {ArrowUpRight, BookOpen, CalendarDays, Clock3, CreditCard, Newspaper, Volleyball} from "lucide-react";
 import {Brand} from "./Controls";
+import {contentReveal as reveal, staggeredReveal} from "../lib/motion";
 
 export const suggestions = [
     {icon: CalendarDays, title: "今天的课表", detail: "课程、时间与上课地点", question: "我今天有什么课？"},
@@ -12,7 +13,7 @@ export const suggestions = [
 ];
 
 export function Welcome({send, authenticated}: {send: (question: string) => void; authenticated: boolean}) {
-    return <motion.section className="welcome" initial="hidden" animate="visible" variants={{hidden: {}, visible: {transition: {staggerChildren: .065}}}}>
+    return <motion.section className="welcome" initial="hidden" animate="visible" variants={staggeredReveal}>
         <motion.div className="welcome-identity" variants={reveal}><Brand large/><h1>清灵<span>QingLing</span></h1></motion.div>
         <motion.div variants={reveal}><h2>今天，有什么可以帮你？</h2><p className="welcome-sub">查课表、找座位、安排日程。校园里的事，一起理清。</p></motion.div>
         <motion.div className="suggestions" variants={reveal}>
@@ -21,4 +22,3 @@ export function Welcome({send, authenticated}: {send: (question: string) => void
         {!authenticated && <motion.p className="welcome-login-note" variants={reveal}>连接清华 Info 后，即可查询你的校园信息</motion.p>}
     </motion.section>;
 }
-const reveal = {hidden: {opacity: 0, y: 12}, visible: {opacity: 1, y: 0, transition: {duration: .5}}};

@@ -10,6 +10,7 @@ import {Welcome} from "./components/Welcome";
 import {Dialogs} from "./components/Dialogs";
 import {ErrorNotice, MessageView, ResultView} from "./components/Conversation";
 import {IconButton} from "./components/Controls";
+import {TasksPage, TaskConversationBanner} from "./components/TasksPage";
 
 export default function App() {
     return <MotionConfig reducedMotion="user" transition={{ease: [.22, 1, .36, 1], duration: .25}}><Workspace/></MotionConfig>;
@@ -80,7 +81,7 @@ function Workspace() {
     }
 
     async function send(text: string, images: string[] = [], files: UploadedFile[] = []) {
-        if (app.turn || app.loginPending) return;
+        if (app.turn || app.loginPending || app.backgroundRunning) return;
         if (!app.authenticated) { setDraft(text); app.openLogin(); return; }
         setDraft("");
         window.speechSynthesis?.cancel();
@@ -116,14 +117,16 @@ function Workspace() {
     return <div className="app-shell">
         <Sidebar app={app} collapsed={collapsed} mobileOpen={mobileOpen} closeMobile={closeMobile} collapse={() => setCollapsed(true)} about={() => setAbout(true)}/>
         <main className="workspace" inert={mobileOpen || undefined}>
-            <header className="toolbar">
+            {app.page === "chat" && <header className="toolbar">
                 <div className="toolbar-leading"><IconButton icon={PanelLeft} label="展开侧栏" className={`sidebar-toggle ${collapsed ? "is-collapsed" : ""}`} onClick={() => window.innerWidth <= 768 ? setMobileOpen(true) : setCollapsed(false)}/><span className="workspace-title">{app.authenticated && !empty ? app.session?.title ?? "新对话" : "校园助手"}</span><span className="toolbar-divider"/><span className="toolbar-date">{date.toLocaleDateString("zh-CN", {month: "long", day: "numeric", weekday: "long"})}</span></div>
                 <div className="toolbar-actions">
                     <IconButton icon={theme === "dark" ? Sun : Moon} label={theme === "dark" ? "切换到浅色模式" : "切换到深色模式"} onClick={event => void toggleTheme(event)}/>
                     <IconButton icon={tts ? Volume2 : VolumeX} label={tts ? "关闭朗读回复" : "开启朗读回复"} aria-pressed={tts} onClick={() => setTts(!tts)}/>
                     <IconButton icon={sound ? Bell : BellOff} label={sound ? "关闭提示音" : "开启提示音"} aria-pressed={sound} onClick={() => setSound(!sound)}/>
                 </div>
-            </header>
+            </header>}
+            {app.page === "tasks" ? <TasksPage app={app} sidebarToggle={<IconButton icon={PanelLeft} label="展开侧栏" className={`sidebar-toggle ${collapsed ? "is-collapsed" : ""}`} onClick={() => window.innerWidth <= 768 ? setMobileOpen(true) : setCollapsed(false)}/>}/> : <>
+            {app.authenticated && (app.session?.scheduledTaskId || app.backgroundRunning) && <TaskConversationBanner app={app}/>}
             <div ref={chat} className={`chat-scroll ${empty ? "is-empty" : ""}`} onScroll={() => {
                 const element = chat.current;
                 if (!element) return;
@@ -131,7 +134,7 @@ function Workspace() {
                 setShowScroll(!following.current);
             }}>
                 {empty ? <Welcome authenticated={app.authenticated} send={text => void send(text)}/> : <div className="conversation" role="log" aria-label="对话内容" aria-live="off">
-                    {app.messages.map(message => <MessageView key={message.id} message={message} streaming={app.turn?.messageId === message.id} copy={text => void copy(text)} retry={!app.turn && message.id === lastBot?.id ? () => void app.retry() : undefined}/>)}
+                    {app.messages.map(message => <MessageView key={message.id} message={message} streaming={app.turn?.messageId === message.id || (app.backgroundRunning && message.turn?.status === "running")} copy={text => void copy(text)} retry={!app.turn && !app.backgroundRunning && message.id === lastBot?.id ? () => void app.retry() : undefined}/>)}
                     {app.error && <ErrorNotice message={app.error} retry={() => void app.retry()} disabled={Boolean(app.turn)}/>}
                     {app.results.map(result => <ResultView key={result.id} result={result}/>)}
                 </div>}
@@ -142,10 +145,11 @@ function Workspace() {
                     setShowScroll(false);
                     chat.current?.scrollTo({top: chat.current.scrollHeight, behavior: reducedMotion ? "instant" : "smooth"});
                 }}><ArrowDown size={18}/></motion.button>}</AnimatePresence>
-                {!empty && <div className="quick-actions">{["今天有什么课", "图书馆座位", "校园动态", "校园卡余额"].map(text => <button key={text} disabled={Boolean(app.turn)} onClick={() => void send(text)}>{text}</button>)}</div>}
+                {!empty && <div className="quick-actions">{["今天有什么课", "图书馆座位", "校园动态", "校园卡余额"].map(text => <button key={text} disabled={Boolean(app.turn) || app.backgroundRunning} onClick={() => void send(text)}>{text}</button>)}</div>}
                 <Composer app={app} value={draft} setValue={setDraft} onSend={(text, images, files) => void send(text, images, files)}/>
             </div>
             {empty && <span className="workspace-footnote">{app.accessMode === "full-access" ? <><ShieldAlert size={13}/>完全访问，按你的指令直接执行</> : <><Hand size={13}/>请求批准，操作前由你确认</>}</span>}
+            </>}
         </main>
         <div className="toast-stack" role="status" aria-live="polite"><AnimatePresence>{app.notices.map(notice => <motion.div key={notice.id} className={`toast ${notice.type}`} initial={{opacity: 0, y: -10, scale: .96}} animate={{opacity: 1, y: 0, scale: 1}} exit={{opacity: 0, y: -8, scale: .96}}>{notice.type === "success" ? <Check size={17}/> : notice.type === "error" ? <X size={17}/> : <Info size={17}/>}<span>{notice.message}</span></motion.div>)}</AnimatePresence></div>
         <Dialogs app={app} about={about} closeAbout={() => setAbout(false)}/>

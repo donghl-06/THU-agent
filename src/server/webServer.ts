@@ -35,6 +35,7 @@
  *   GET  /api/notifications → {notifications} 任务执行通知（drain 即消费，前端 30s 轮询）
  *   GET  /api/tasks         → {tasks} 定时任务列表
  *   POST /api/tasks/cancel  → {id} 取消定时任务
+ *   GET/POST /api/scheduled-tasks[/action] → 定时 Agent 计划、执行和历史管理
  *   POST /api/session/title → {sessionId} → {title|null} 概括式会话标题（每会话只生成一次）
  *   POST /api/confirm   → {id, approved} 应答确认请求
  *   POST /api/auth/login  → {username, password} → SSE 登录流
@@ -74,6 +75,9 @@ import type {TempImageStore} from "../utils/tempImageStore";
 import type {TaskScheduler} from "../tasks/scheduler";
 import type {LoginCredentials, TwoFactorHooks} from "../client/auth";
 import {handleTaskSkillCall} from "./taskSkillBridge";
+import {ScheduledTasks, TaskBusyError, TaskInputError} from "../tasks/scheduledTasks";
+import type {ScheduledState} from "../tasks/scheduledTypes";
+import {executeScheduledRun} from "./scheduledRun";
 
 /** 确认请求 5 分钟不应答按拒绝处理（防 Promise 悬挂） */
 const CONFIRM_TIMEOUT_MS = 5 * 60 * 1000;
@@ -383,6 +387,76 @@ export function createWebServer(
         return created;
     };
 
+    const scheduledTasks = new ScheduledTasks({
+        load: () => database.get<ScheduledState>("scheduled-tasks"),
+        save: state => database.put("scheduled-tasks", state),
+        canRun: () => !busy && (!requireLogin || authenticated),
+        execute: async (task, run, signal) => {
+            busy = true;
+            let needsAttention = false;
+            currentConfirm = async () => { needsAttention = true; return false; };
+            currentAuthHooks = {
+                twoFactorMethodHook: async () => { needsAttention = true; return undefined; },
+                twoFactorAuthHook: async () => { needsAttention = true; return undefined; },
+            };
+            try {
+                const result = await executeScheduledRun(database, getOrCreateAgent(run.sessionId!), task, run, signal, () => needsAttention);
+                // The run already contains the full reply; notify without appending a duplicate message.
+                hub?.push(task.id, task.title, result.status === "completed" ? "定时任务已完成，可在执行历史中查看。" : result.summary);
+                return result;
+            } finally {
+                busy = false;
+                currentConfirm = async () => false;
+                currentAuthHooks = {};
+            }
+        },
+    });
+
+    const handleScheduledTasks = async (req: IncomingMessage, res: ServerResponse, path: string) => {
+        res.setHeader("Cache-Control", "no-store");
+        const json = (status: number, value: unknown) => res.writeHead(status, {"Content-Type": "application/json"}).end(JSON.stringify(value));
+        if (requireLogin && !authenticated) { json(401, {error: "请先连接清华账号。"}); return; }
+        if (req.method === "GET" && path === "/api/scheduled-tasks") {
+            json(200, {...scheduledTasks.snapshot(), busy}); return;
+        }
+        if (req.method !== "POST") { json(405, {error: "不支持的请求方式。"}); return; }
+        if (req.headers["content-type"]?.split(";")[0] !== "application/json") { json(415, {error: "需要 JSON 请求。"}); return; }
+        let sameOrigin = req.headers["sec-fetch-site"] !== "cross-site";
+        try { if (req.headers.origin && new URL(req.headers.origin).host !== req.headers.host) sameOrigin = false; }
+        catch { sameOrigin = false; }
+        if (!sameOrigin) {
+            json(403, {error: "不允许跨站请求。"}); return;
+        }
+        let body;
+        try { body = JSON.parse(await readBody(req)); } catch { json(400, {error: "无效的任务数据。"}); return; }
+        if (!body || typeof body !== "object") { json(400, {error: "无效的任务数据。"}); return; }
+        if (requireLogin && !authenticated) { json(401, {error: "请先连接清华账号。"}); return; }
+        try {
+            if (path === "/api/scheduled-tasks/create") scheduledTasks.create(body);
+            else {
+                if (typeof body.id !== "string") throw new TaskInputError("缺少任务编号。");
+                if (path === "/api/scheduled-tasks/update") scheduledTasks.update(body.id, body);
+                else if (path === "/api/scheduled-tasks/toggle") {
+                    if (typeof body.enabled !== "boolean") throw new TaskInputError("任务状态无效。");
+                    scheduledTasks.toggle(body.id, body.enabled);
+                } else if (path === "/api/scheduled-tasks/delete") scheduledTasks.remove(body.id);
+                else if (path === "/api/scheduled-tasks/run") {
+                    const run = scheduledTasks.runNow(body.id);
+                    json(202, {run}); return;
+                } else if (path === "/api/scheduled-tasks/stop") scheduledTasks.cancelRun(body.id);
+                else if (path === "/api/scheduled-tasks/delete-run") {
+                    if (busy) throw new TaskBusyError("请等待当前操作结束后删除执行记录。");
+                    const sessionId = scheduledTasks.deleteRun(body.id);
+                    if (sessionId) { database.deleteSession(sessionId); agents.delete(sessionId); store?.delete(sessionId); }
+                } else { json(404, {error: "任务操作不存在。"}); return; }
+            }
+            json(200, {...scheduledTasks.snapshot(), busy});
+        } catch (error) {
+            if (error instanceof TaskInputError || error instanceof TaskBusyError) json(error instanceof TaskBusyError ? 409 : 400, {error: error.message});
+            else json(500, {error: "任务未能保存，请检查本地存储后重试。"});
+        }
+    };
+
     // 任务提醒不只做系统通知：同时作为一条助手消息回写到创建任务的会话，
     // 浏览器当时未打开也不会丢，后续继续对话时模型也能看到这条任务结果。
     hub?.onPersist((notification) => {
@@ -493,7 +567,8 @@ export function createWebServer(
             res.writeHead(400).end("username and password required");
             return;
         }
-
+        // Reading the body yields to the scheduler; acquire the shared slot only after it completes.
+        if (busy) { res.writeHead(409).end("another operation is in flight"); return; }
         busy = true;
         writeSseHeaders(res);
         let authUsed = false;
@@ -613,6 +688,7 @@ export function createWebServer(
             res.writeHead(409).end("session was deleted");
             return;
         }
+        if (busy) { res.writeHead(409).end("another question is in flight"); return; }
         let savedTurn: Turn = {sessionId, messageId, startedAt: Date.now(), status: "running", phase: "thinking", items: []};
         let savedUsage: Usage | undefined;
         let savedResults: Result[] = [];
@@ -855,6 +931,7 @@ export function createWebServer(
             res.writeHead(400).end("bad json");
             return;
         }
+        if (busy) { res.writeHead(409).end("another operation is in flight"); return; }
         if (parsed.all === true) {
             agents.clear();
             store?.clear();
@@ -937,6 +1014,7 @@ export function createWebServer(
 
     /** 取消定时任务 */
     const handleTaskCancel = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+        if (requireLogin && !authenticated) { res.writeHead(401).end("not authenticated"); return; }
         if (!scheduler) {
             res.writeHead(404).end("scheduler unavailable");
             return;
@@ -1183,6 +1261,7 @@ export function createWebServer(
                 return;
             }
             if (url.pathname.startsWith("/api/workspace")) return handleWorkspace(req, res, url.pathname);
+            if (url.pathname.startsWith("/api/scheduled-tasks")) return handleScheduledTasks(req, res, url.pathname);
             if (req.method === "GET" && url.pathname === "/api/auth/status") return handleAuthStatus(res);
             if (req.method === "POST" && url.pathname === "/api/auth/login") return handleAuthLogin(req, res);
             if (req.method === "POST" && url.pathname === "/api/ui/auth") return handleUiAuth(req, res);
@@ -1208,6 +1287,7 @@ export function createWebServer(
             res.end(String(e));
         });
     });
-    server.once("close", () => database.close());
+    server.once("listening", () => scheduledTasks.start());
+    server.once("close", () => { void scheduledTasks.stop().finally(() => database.close()).catch(() => {}); });
     return server;
 }
