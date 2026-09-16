@@ -7,9 +7,14 @@ import {ToolRegistry} from "../src/harness/toolRegistry";
 import {WebDatabase} from "../src/server/webDatabase";
 import {defaultPreferences} from "../src/shared/workspace";
 import {newId} from "../src/web/lib/history";
+import {createRechargeCampusCardSkill} from "../src/skills/card/rechargeCampusCard";
 process.env.UI_TOKEN = "";
 process.env.LLM_VISION = "1";
 const fakeWrite: Skill = {name: "book_library_seat", description: "UI 测试预约", inputSchema: {}, requiresConfirmation: true, execute: async () => ({success: true})};
+const fakeRecharge = createRechargeCampusCardSkill({
+    rechargeCampusCardBank: async () => {},
+    rechargeCampusCardQr: async () => "https://qr.alipay.com/synthetic-ui-test",
+});
 const database = new WebDatabase();
 const server = createWebServer((confirm, authHooks, credentials) => ({
     login: async () => {
@@ -47,6 +52,17 @@ const server = createWebServer((confirm, authHooks, credentials) => ({
             return {answer, toolCalls: [], usage: {promptTokens: 256, completionTokens: 128, totalTokens: 384}};
         }
         if (question.includes("错误")) throw new Error("Fixture service unavailable");
+        if (question.includes("银行卡充值")) {
+            const input = JSON.stringify({amountYuan: 100, method: "bank"});
+            const result = await new ToolRegistry([fakeRecharge], confirm).execute({
+                id: "bank_test_call", type: "function", function: {name: fakeRecharge.name, arguments: input},
+            }, options?.accessMode);
+            const parsed = JSON.parse(result) as {success: boolean; data?: {message: string}};
+            return {
+                answer: parsed.success ? parsed.data!.message : "已取消，未执行银行卡充值。",
+                toolCalls: [{name: fakeRecharge.name, input, result}],
+            };
+        }
         if (question.includes("预约")) {
             const result = await new ToolRegistry([fakeWrite], confirm).execute({id: "test_call", type: "function", function: {name: fakeWrite.name, arguments: JSON.stringify({图书馆: "测试图书馆", 座位: "A101", 时间: "14:00–16:00"})}}, options?.accessMode);
             const approved = (JSON.parse(result) as {success: boolean}).success;

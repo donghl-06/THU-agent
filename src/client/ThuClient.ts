@@ -226,9 +226,15 @@ export class ThuClient {
         return this.call(() => this.helper.getEleRechargePayCode(money));
     }
 
+    /** 银行卡圈存：直接提交扣款充值，不返回付款链接，也不自动重试。
+     * 库的空返回值只表示调用完成；上层不能据此声称已到账。 */
+    async rechargeCampusCardBank(amount: number): Promise<void> {
+        await this.call(() => this.helper.rechargeCampusCard(amount, "", CardRechargeType.Bank));
+    }
+
     /** 校园卡充值（微信/支付宝扫码）。Alipay 返回 alipayqr:// 深链
      *  （内嵌 https://qr.alipay.com/<payCode>）；Wechat 返回微信扫码链接。
-     *  交易密码只对银行卡通道有用，扫码通道传空串（库实现如此，见 index.js）。
+     *  当前库的充值实现不使用交易密码，传空串。
      *  只生成二维码，用户扫码确认前钱不动 */
     async rechargeCampusCardQr(amount: number, alipay: boolean): Promise<string> {
         const result = await this.call(() =>
