@@ -149,7 +149,7 @@ describe("show_learn_image Skill（假数据，无网络）", () => {
 });
 
 describe("show_learn_image 公告/作业正文内嵌图（假数据，无网络）", () => {
-    const makeNotice = (title: string, content: string): Notification => ({
+    const makeNotice = (title: string, content: string, attachmentName?: string): Notification => ({
         id: `n-${title}`,
         title,
         content,
@@ -159,12 +159,25 @@ describe("show_learn_image 公告/作业正文内嵌图（假数据，无网络�
         publishTime: new Date("2026-09-10T02:00:00Z"),
         publisher: "李老师",
         isFavorite: false,
+        ...(attachmentName
+            ? {
+                attachment: {
+                    id: `att-${title}`,
+                    name: attachmentName,
+                    downloadUrl: `https://learn.tsinghua.edu.cn/download/${attachmentName}`,
+                    previewUrl: "",
+                    size: "1M",
+                },
+            }
+            : {}),
     });
 
     const notices = [
         makeNotice("分组名单", `<p>名单见图：</p><img src="/upload/group.png"><p>群二维码：</p><img src="https://learn.tsinghua.edu.cn/upload/qr.jpg">`),
         makeNotice("纯文字公告", `<p>没有图片</p>`),
         makeNotice("名单补充说明", `<p>补一张</p><img src="/upload/extra.png">`),
+        makeNotice("课表截图公告", `<p>课表见附件</p>`, "schedule.png"),
+        makeNotice("讲义公告", `<p>讲义见附件</p>`, "讲义.pdf"),
     ];
     const homeworks = [
         {title: "上机作业", description: `<p>按下图连线：</p><img src="/upload/topo.jpg">`} as unknown as Homework,
@@ -225,5 +238,32 @@ describe("show_learn_image 公告/作业正文内嵌图（假数据，无网络�
         expect(both.error!.code).toBe("INVALID_INPUT");
         expect(both.error!.message).toContain("三选一");
         expect((await exec(skill, {course: "数据结构", notice: "分组名单", index: 0})).error!.code).toBe("INVALID_INPUT");
+    });
+
+    it("notice + attachment=true 显示公告附件图片", async () => {
+        const skill = setup(inlineClient);
+        const r = await exec(skill, {course: "数据结构", notice: "课表截图", attachment: true});
+        expect(r.success).toBe(true);
+        expect(r.data!.title).toBe("课表截图公告（附件）");
+        // octet-stream 按附件名扩展名 .png 归一化
+        expect(r.data!.contentType).toBe("image/png");
+        expect(r.data!.markdown).toBe(`![课表截图公告（附件）](${r.data!.imageUrl})`);
+    });
+
+    it("公告无附件 NOT_FOUND；附件非图片提示用 download_learn_file", async () => {
+        const skill = setup(inlineClient);
+        const noAtt = await exec(skill, {course: "数据结构", notice: "纯文字", attachment: true});
+        expect(noAtt.error!.code).toBe("NOT_FOUND");
+        expect(noAtt.error!.message).toContain("没有附件");
+        const pdf = await exec(skill, {course: "数据结构", notice: "讲义公告", attachment: true});
+        expect(pdf.error!.code).toBe("INVALID_INPUT");
+        expect(pdf.error!.message).toContain("download_learn_file");
+    });
+
+    it("attachment=true 必须配合 notice 使用", async () => {
+        const skill = setup(inlineClient);
+        const r = await exec(skill, {course: "数据结构", attachment: true});
+        expect(r.error!.code).toBe("INVALID_INPUT");
+        expect(r.error!.message).toContain("只配合 notice");
     });
 });
