@@ -50,6 +50,8 @@
  * 把转发目标切到本轮 SSE 连接的桥上（busy 互斥保证同时只有一轮）。
  */
 import {createServer, type IncomingMessage, type ServerResponse, type Server} from "node:http";
+import {DashboardService} from "./dashboard";
+import type {Skill} from "../skills/base/types";
 import {createReadStream, mkdirSync, readFileSync, readdirSync, writeFileSync} from "node:fs";
 import {dirname, extname, join} from "node:path";
 import {randomUUID} from "node:crypto";
@@ -213,6 +215,8 @@ export interface WebServerOptions {
     databasePath?: string;
     database?: WebDatabase;
     getUserProfile?: () => Promise<{name?: string; email?: string}>;
+    /** Isolated read clients, assembled from the same Skills; credentials remain in memory. */
+    createDashboardSkills?: (credentials?: LoginCredentials) => Skill[];
     /** 单页 HTML 的路径（测试可注入临时文件） */
     indexHtmlPath?: string;
     /** 是否要求先通过 /api/auth/login；生产 Web UI 默认开启。 */
@@ -336,6 +340,13 @@ export function createWebServer(
     /** 会话 Agent 上限（LRU 淘汰最久未用的，防长驻进程泄漏） */
     const MAX_SESSION_AGENTS = 50;
     let authenticated = false;
+    let dashboard: DashboardService | undefined;
+    let dashboardCredentials: LoginCredentials | undefined;
+    const clearDashboard = () => {
+        dashboard?.dispose();
+        dashboard = undefined;
+        dashboardCredentials = undefined;
+    };
     // 登录会话存档：有存档则启动即视为已登录（ThuClient 侧同步灌回 cookie，见 factory）
     if (authPersist?.has()) {
         authenticated = true;
@@ -585,9 +596,11 @@ export function createWebServer(
         });
 
         try {
+            clearDashboard();
             const loginAgent = agentFactory(delegatingConfirm, delegatingAuthHooks, credentials);
             await loginAgent.login();
             authenticated = true;
+            dashboardCredentials = credentials;
             const profile: UserProfile = {username: credentials.username};
             try { Object.assign(profile, await opts.getUserProfile?.()); } catch { /* Account ID remains available when profile lookup is unavailable. */ }
             database.put("profile", profile);
@@ -620,6 +633,7 @@ export function createWebServer(
             return;
         }
         agents.clear();
+        clearDashboard();
         authenticated = false;
         database.put("auth-updated-at", Date.now());
         authPersist?.clear(); // 登出清会话存档
@@ -1192,6 +1206,24 @@ export function createWebServer(
         res.writeHead(200, {"Content-Type": "application/json"}).end(JSON.stringify(workspace()));
     };
 
+    const handleDashboard = async (res: ServerResponse, url: URL): Promise<void> => {
+        const json = (status: number, data: unknown) => res.writeHead(status, {"Content-Type": "application/json", "Cache-Control": "no-store"}).end(JSON.stringify(data));
+        if (requireLogin && !authenticated) { json(401, {error: "请先连接清华账号。"}); return; }
+        if (!dashboard) {
+            if (busy) { json(409, {error: "当前操作完成后将自动加载看板。"}); return; }
+            dashboard = new DashboardService(opts.createDashboardSkills?.(dashboardCredentials) ?? [], {canRun: () => !busy && (!requireLogin || authenticated)});
+        }
+        if (url.pathname === "/api/dashboard/news") {
+            if (busy) { json(409, {error: "请等待当前操作完成。"}); return; }
+            const current = dashboard;
+            const ref = url.searchParams.get("ref") ?? "";
+            if (!ref || ref.length > 2048) { json(400, {error: "无效的资讯标识。"}); return; }
+            const detail = await current.newsDetail(ref);
+            if (dashboard !== current || (requireLogin && !authenticated)) { json(401, {error: "账号已变更，请重新加载看板。"}); return; }
+            json(detail ? 200 : 502, detail ?? {error: "暂时无法加载正文，请刷新资讯后重试。"});
+        } else json(200, dashboard.snapshot(url.searchParams.get("poll") !== "1", url.searchParams.get("refresh") ?? undefined));
+    };
+
     const server = createServer((req, res) => {
         void (async () => {
             const url = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
@@ -1261,6 +1293,7 @@ export function createWebServer(
                 return;
             }
             if (url.pathname.startsWith("/api/workspace")) return handleWorkspace(req, res, url.pathname);
+            if (req.method === "GET" && ["/api/dashboard", "/api/dashboard/news"].includes(url.pathname)) return handleDashboard(res, url);
             if (url.pathname.startsWith("/api/scheduled-tasks")) return handleScheduledTasks(req, res, url.pathname);
             if (req.method === "GET" && url.pathname === "/api/auth/status") return handleAuthStatus(res);
             if (req.method === "POST" && url.pathname === "/api/auth/login") return handleAuthLogin(req, res);
@@ -1287,6 +1320,7 @@ export function createWebServer(
             res.end(String(e));
         });
     });
+    server.once("close", clearDashboard);
     server.once("listening", () => scheduledTasks.start());
     server.once("close", () => { void scheduledTasks.stop().finally(() => database.close()).catch(() => {}); });
     return server;

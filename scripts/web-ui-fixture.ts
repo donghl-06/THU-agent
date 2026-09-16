@@ -8,6 +8,7 @@ import {WebDatabase} from "../src/server/webDatabase";
 import {defaultPreferences} from "../src/shared/workspace";
 import {newId} from "../src/web/lib/history";
 import {createRechargeCampusCardSkill} from "../src/skills/card/rechargeCampusCard";
+import {dashboardFixtureSkills} from "./dashboard-fixture";
 process.env.UI_TOKEN = "";
 process.env.LLM_VISION = "1";
 const fakeWrite: Skill = {name: "book_library_seat", description: "UI 测试预约", inputSchema: {}, requiresConfirmation: true, execute: async () => ({success: true})};
@@ -82,7 +83,7 @@ const server = createWebServer((confirm, authHooks, credentials) => ({
     snapshotMessages: () => [],
     loadMessages: () => {},
     appendAssistantMessage: () => {},
-}) as unknown as Agent, {port: 3461, database, getUserProfile: async () => ({name: "测试同学", email: "fixture@tsinghua.edu.cn"}), requireLogin: true, titleLlm: {chat: async () => ({role: "assistant", content: "今日课程安排"})}});
+}) as unknown as Agent, {port: 3461, database, createDashboardSkills: dashboardFixtureSkills, getUserProfile: async () => ({name: "测试同学", email: "fixture@tsinghua.edu.cn"}), requireLogin: true, titleLlm: {chat: async () => ({role: "assistant", content: "今日课程安排"})}});
 // Fixture-only reset; production never exposes this route.
 const handlers = server.listeners("request");
 server.removeAllListeners("request");

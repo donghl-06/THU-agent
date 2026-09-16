@@ -1,6 +1,6 @@
 import {useEffect, useRef, useState, type CSSProperties} from "react";
 import {AnimatePresence, motion} from "motion/react";
-import {Clock3, Command, LockKeyhole, MessageCircle, PanelLeftClose, Search, SquarePen, Trash2, X} from "lucide-react";
+import {Clock3, Command, LayoutDashboard, LockKeyhole, MessageCircle, PanelLeftClose, Search, SquarePen, Trash2, X} from "lucide-react";
 import {AccountMenu} from "./AccountMenu";
 import type {Assistant} from "../lib/useAssistant";
 import {Brand, EmptyState, IconButton} from "./Controls";
@@ -19,7 +19,7 @@ export function Sidebar({app, collapsed, mobileOpen, closeMobile, collapse, abou
     const searchRef = useRef<HTMLInputElement>(null);
     const [resizing, setResizing] = useState(false);
     const sessions = [...app.history.sessions].filter(s => !s.scheduledTaskId).sort((a, b) => b.createdAt - a.createdAt).filter(s => s.title.toLowerCase().includes(query.toLowerCase()));
-    const tasksSelected = app.page === "tasks" || (app.authenticated && Boolean(app.session?.scheduledTaskId));
+    const tasksSelected = app.page === "tasks" || (app.page === "chat" && app.authenticated && Boolean(app.session?.scheduledTaskId));
     const newChatSelected = app.page === "chat" && !tasksSelected && (!app.authenticated || !app.session?.messages.length);
     const today = new Date().toLocaleDateString();
     useEffect(() => { if (searching) searchRef.current?.focus(); }, [searching]);
@@ -57,6 +57,7 @@ export function Sidebar({app, collapsed, mobileOpen, closeMobile, collapse, abou
                 </div>
                 <button className={`new-chat ${newChatSelected ? "selected" : ""}`} aria-current={newChatSelected ? "page" : undefined} onClick={() => { app.newChat(); closeMobile(); }} disabled={Boolean(app.turn) || app.loginPending}>{newChatSelected && <Selection/>}<SquarePen size={19}/><span>新建对话</span><kbd><Command size={11}/>K</kbd></button>
                 <button className={`new-chat tasks-nav ${tasksSelected ? "selected" : ""}`} aria-current={tasksSelected ? "page" : undefined} onClick={() => { app.openTasks(); closeMobile(); }} disabled={Boolean(app.turn) || app.loginPending}>{tasksSelected && <Selection/>}<Clock3 size={19}/><span>定时任务</span></button>
+                <button className={`new-chat tasks-nav ${app.page === "dashboard" ? "selected" : ""}`} aria-current={app.page === "dashboard" ? "page" : undefined} onClick={() => { app.openDashboard(); closeMobile(); }} disabled={Boolean(app.turn) || app.loginPending}>{app.page === "dashboard" && <Selection/>}<LayoutDashboard size={19}/><span>状态看板</span></button>
                 <div className="sidebar-section-label"><span>历史对话</span><IconButton icon={searching ? X : Search} label={searching ? "关闭搜索" : "搜索对话"} onClick={() => { setSearching(!searching); setQuery(""); }}/></div>
                 <AnimatePresence>{searching && <motion.div className="session-search" initial={{height: 0, opacity: 0}} animate={{height: 42, opacity: 1}} exit={{height: 0, opacity: 0}}><Search size={15}/><input ref={searchRef} aria-label="搜索历史对话" placeholder="搜索对话" value={query} onChange={e => setQuery(e.target.value)}/></motion.div>}</AnimatePresence>
                 <motion.nav layoutScroll className="session-list" aria-label="历史对话">

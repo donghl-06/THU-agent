@@ -7,8 +7,11 @@ import {applyTurnEvent, finishTurn, turnText} from "./turn";
 import {isAccessMode, type AccessMode} from "../../harness/accessMode";
 import type {AuthState, Confirmation, Message, Notice, Result, SessionsState, Turn, UploadedFile, Usage} from "./types";
 
+type WorkspacePage = "chat" | "tasks" | "dashboard";
+const pageFromHash = (): WorkspacePage => window.location.hash === "#dashboard" ? "dashboard" : window.location.hash === "#tasks" ? "tasks" : "chat";
+
 export function useAssistant() {
-    const [page, setPage] = useState<"chat" | "tasks">(() => window.location.hash === "#tasks" ? "tasks" : "chat");
+    const [page, setPage] = useState<WorkspacePage>(pageFromHash);
     const [preferences, setPreferences] = useState<Preferences>(defaultPreferences);
     const [profile, setProfile] = useState<UserProfile>();
     const [workspaceReady, setWorkspaceReady] = useState(false);
@@ -42,13 +45,18 @@ export function useAssistant() {
     const lastQuestion = useRef<{question: string; images: string[]; messageId?: string} | null>(null);
     const noticeTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
-    function navigate(next: "chat" | "tasks") {
+    function navigate(next: WorkspacePage) {
         setPage(next);
-        if (window.location.hash !== (next === "tasks" ? "#tasks" : "")) window.location.hash = next === "tasks" ? "tasks" : "";
+        const hash = next === "chat" ? "" : `#${next}`;
+        if (window.location.hash !== hash) window.location.hash = hash;
     }
     function openTasks() {
         if (chatAbort.current || loginAbort.current) { notify("请等待当前操作完成"); return; }
         navigate("tasks");
+    }
+    function openDashboard() {
+        if (chatAbort.current || loginAbort.current) { notify("请等待当前操作完成"); return; }
+        navigate("dashboard");
     }
     async function openTaskSession(id: string) {
         if (chatAbort.current || loginAbort.current) { notify("请等待当前操作完成"); return; }
@@ -63,7 +71,7 @@ export function useAssistant() {
     useEffect(() => {
         const changed = () => {
             if (chatAbort.current || loginAbort.current) return;
-            setPage(window.location.hash === "#tasks" ? "tasks" : "chat");
+            setPage(pageFromHash());
         };
         window.addEventListener("hashchange", changed);
         return () => window.removeEventListener("hashchange", changed);
@@ -470,7 +478,7 @@ export function useAssistant() {
     const session = history.sessions.find(s => s.id === history.activeId);
     const backgroundSession = history.sessions.find(item => item.scheduledRunId && item.id !== turn?.sessionId && item.messages.some(message => message.turn?.status === "running"));
     const backgroundRunning = Boolean(authenticated && backgroundSession);
-    return {page, openTasks, openTaskSession, backgroundSession, backgroundRunning, preferences, changePreferences, profile, workspaceReady, history, session, messages: authenticated ? session?.messages ?? [] : [], authenticated, authChecked, accessMode, changeAccessMode,
+    return {page, openTasks, openDashboard, openTaskSession, backgroundSession, backgroundRunning, preferences, changePreferences, profile, workspaceReady, history, session, messages: authenticated ? session?.messages ?? [] : [], authenticated, authChecked, accessMode, changeAccessMode,
         auth, authBusy, loginPending, uiLocked, lifecycle, turn, stopping, confirmation, confirmBusy, results, error, vision, notices,
         notify, openLogin, startLogin, cancelAuth, submitAuth, unlock, send, stop, retry, switchSession, newChat, respond, requestConfirmation};
 }

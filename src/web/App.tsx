@@ -11,6 +11,7 @@ import {Dialogs} from "./components/Dialogs";
 import {ErrorNotice, MessageView, ResultView} from "./components/Conversation";
 import {IconButton} from "./components/Controls";
 import {TasksPage, TaskConversationBanner} from "./components/TasksPage";
+import {DashboardPage} from "./components/DashboardPage";
 
 export default function App() {
     return <MotionConfig reducedMotion="user" transition={{ease: [.22, 1, .36, 1], duration: .25}}><Workspace/></MotionConfig>;
@@ -125,7 +126,7 @@ function Workspace() {
                     <IconButton icon={sound ? Bell : BellOff} label={sound ? "关闭提示音" : "开启提示音"} aria-pressed={sound} onClick={() => setSound(!sound)}/>
                 </div>
             </header>}
-            {app.page === "tasks" ? <TasksPage app={app} sidebarToggle={<IconButton icon={PanelLeft} label="展开侧栏" className={`sidebar-toggle ${collapsed ? "is-collapsed" : ""}`} onClick={() => window.innerWidth <= 768 ? setMobileOpen(true) : setCollapsed(false)}/>}/> : <>
+            {app.page === "dashboard" ? <DashboardPage app={app} sidebarToggle={<IconButton icon={PanelLeft} label="展开侧栏" className={`sidebar-toggle ${collapsed ? "is-collapsed" : ""}`} onClick={() => window.innerWidth <= 768 ? setMobileOpen(true) : setCollapsed(false)}/>}/> : app.page === "tasks" ? <TasksPage app={app} sidebarToggle={<IconButton icon={PanelLeft} label="展开侧栏" className={`sidebar-toggle ${collapsed ? "is-collapsed" : ""}`} onClick={() => window.innerWidth <= 768 ? setMobileOpen(true) : setCollapsed(false)}/>}/> : <>
             {app.authenticated && (app.session?.scheduledTaskId || app.backgroundRunning) && <TaskConversationBanner app={app}/>}
             <div ref={chat} className={`chat-scroll ${empty ? "is-empty" : ""}`} onScroll={() => {
                 const element = chat.current;
