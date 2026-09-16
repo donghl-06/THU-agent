@@ -23,6 +23,9 @@ export interface ChatMessage {
     content: string | ContentPart[] | null;
     tool_calls?: ToolCall[];
     tool_call_id?: string;
+    /** Provider reasoning is separate from user-facing content; retained for tool continuations. */
+    reasoning_content?: string;
+    reasoning?: string;
 }
 
 /** 发给模型的工具描述（由 Skill 的 name/description/inputSchema 转换而来） */

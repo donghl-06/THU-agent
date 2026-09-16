@@ -22,6 +22,27 @@ function makeHooks(now: () => number) {
 }
 
 describe("TaskScheduler", () => {
+    it("上一次预约未完成时，重入 tick 不重复执行，也不执行期间取消的待办", async () => {
+        const {hooks, notifications} = makeHooks(() => 1_000_000);
+        let release!: () => void;
+        let calls = 0;
+        hooks.executeBooking = async () => {
+            calls++;
+            await new Promise<void>((resolve) => { release = resolve; });
+            return "已下单";
+        };
+        const scheduler = new TaskScheduler(hooks);
+        scheduler.add({kind: "booking", title: "一次预约", sessionId: "s", nextRunAt: 999_999});
+        const later = scheduler.add({kind: "reminder", title: "不再提醒", sessionId: "s", nextRunAt: 1_000_000});
+        const first = scheduler.tick();
+        scheduler.cancel(later.id);
+        await scheduler.tick();
+        expect(calls).toBe(1);
+        release();
+        await first;
+        expect(notifications).toHaveLength(1);
+        expect(notifications[0].message).toBe("已下单");
+    });
     it("reminder 到点通知并结束；未到点不执行", async () => {
         let t = 1_000_000;
         const {hooks, notifications} = makeHooks(() => t);

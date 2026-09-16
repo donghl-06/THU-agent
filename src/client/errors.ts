@@ -1,5 +1,5 @@
 /**
- * ThuClient 统一错误类型（plan4ai.md 第 4 节：error normalization）。
+ * ThuClient 统一错误类型与错误归一化。
  *
  * Skill 层和 Harness 层只面对 ThuError，不需要认识 @thu-info/lib 的错误体系。
  */

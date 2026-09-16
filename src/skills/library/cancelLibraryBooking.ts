@@ -1,7 +1,7 @@
 /**
  * Skill: cancel_library_booking —— 取消我的图书馆预约（座位或研讨间，写操作，真实生效）。
  *
- * 安全红线（plan4ai.md）：requiresConfirmation = true，Harness 必须先向用户
+ * 安全红线：requiresConfirmation = true，调用入口必须先向用户
  * 展示操作详情并拿到明确同意才会执行到这里。
  *
  * 模型只传语义参数（日期/位置或房间关键词），Skill 内部先拉"我的预约"记录再匹配。

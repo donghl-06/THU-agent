@@ -1,7 +1,7 @@
 /**
  * Skill: recharge_electricity —— 发起宿舍电费充值（写操作，生成待支付订单）。
  *
- * 安全红线（plan4ai.md）：requiresConfirmation = true，Harness 必须先向用户
+ * 安全红线：requiresConfirmation = true，调用入口必须先向用户
  * 展示操作详情并拿到明确同意才会执行到这里。
  *
  * 支付模型（扫码半自动，与 Step 19 路线一致）：

@@ -18,6 +18,7 @@ export function parseRunAt(s: string): number | null {
     const m = RUN_AT_RE.exec(s.trim());
     if (!m) return null;
     const [, y, mo, d, h, mi] = m;
+    if (Number(h) > 23 || Number(mi) > 59) return null;
     const date = new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi));
     if (date.getFullYear() !== Number(y) || date.getMonth() !== Number(mo) - 1 || date.getDate() !== Number(d)) {
         return null;
@@ -39,7 +40,7 @@ function noScheduler(): SkillResult<never> {
     return fail("SCHEDULER_UNAVAILABLE", "当前运行环境不支持定时任务（未装配任务调度器）。");
 }
 
-export function createCreateReminderSkill(scheduler: TaskScheduler): Skill {
+export function createCreateReminderSkill(scheduler?: TaskScheduler): Skill {
     return {
         name: "create_reminder",
         description:
@@ -76,7 +77,7 @@ export function createCreateReminderSkill(scheduler: TaskScheduler): Skill {
     };
 }
 
-export function createScheduleSportsBookingSkill(scheduler: TaskScheduler): Skill {
+export function createScheduleSportsBookingSkill(scheduler?: TaskScheduler): Skill {
     return {
         name: "schedule_sports_booking",
         description:
@@ -108,7 +109,7 @@ export function createScheduleSportsBookingSkill(scheduler: TaskScheduler): Skil
             if (raw.payType !== "PAY_ONLINE" && raw.payType !== "PAY_OFFLINE") {
                 return fail("INVALID_INPUT", "payType 必填：PAY_ONLINE（线上）或 PAY_OFFLINE（线下）；免费场次传 PAY_OFFLINE");
             }
-            if (raw.date !== undefined && typeof raw.date === "string" && parseDate(raw.date) === null) {
+            if (raw.date !== undefined && (typeof raw.date !== "string" || parseDate(raw.date) === null)) {
                 return fail("INVALID_INPUT", "date 必须是 YYYY-MM-DD 格式");
             }
             const checked = validateRunAt(raw.runAt);
@@ -135,25 +136,38 @@ export function createScheduleSportsBookingSkill(scheduler: TaskScheduler): Skil
     };
 }
 
-export function createListMyTasksSkill(scheduler: TaskScheduler): Skill {
+export function createListMyTasksSkill(scheduler?: TaskScheduler): Skill {
     return {
         name: "list_my_tasks",
-        description: "查询当前未完成的定时任务（提醒/监控/抢场）。无参数。",
-        inputSchema: {type: "object", properties: {}, required: []},
-        async execute(): Promise<SkillResult<unknown>> {
+        description: "查询定时任务（提醒/监控/抢场）。默认只列未完成任务；includeFinished=true 时也返回已完成/已取消任务及执行结果。",
+        inputSchema: {
+            type: "object",
+            properties: {includeFinished: {type: "boolean", description: "是否包括已完成/已取消任务及执行结果，默认 false"}},
+            required: [],
+        },
+        async execute(input: unknown): Promise<SkillResult<unknown>> {
+            const raw = (input ?? {}) as Record<string, unknown>;
+            if (raw.includeFinished !== undefined && typeof raw.includeFinished !== "boolean") {
+                return fail("INVALID_INPUT", "includeFinished 必须是布尔值");
+            }
             if (!scheduler) return noScheduler();
-            const tasks = scheduler.list(false).map((t) => ({
+            const includeFinished = raw.includeFinished === true;
+            const tasks = scheduler.list(includeFinished).map((t) => ({
                 id: t.id,
                 kind: t.kind,
                 title: t.title,
                 nextRunAt: new Date(t.nextRunAt).toLocaleString("zh-CN"),
+                done: t.done === true,
+                cancelled: t.cancelled === true,
+                lastMessage: t.lastMessage,
             }));
-            return ok({tasks, note: tasks.length === 0 ? "当前没有进行中的任务。" : `共 ${tasks.length} 个进行中的任务。`});
+            const label = includeFinished ? "任务" : "进行中的任务";
+            return ok({tasks, note: tasks.length === 0 ? `当前没有${label}。` : `共 ${tasks.length} 个${label}。`});
         },
     };
 }
 
-export function createCancelTaskSkill(scheduler: TaskScheduler): Skill {
+export function createCancelTaskSkill(scheduler?: TaskScheduler): Skill {
     return {
         name: "cancel_task",
         description: "取消一个定时任务（写操作，不可恢复）。taskId 从 list_my_tasks 获得。",
@@ -174,4 +188,14 @@ export function createCancelTaskSkill(scheduler: TaskScheduler): Skill {
             return ok({cancelled: task.id, note: `已取消任务：${task.title}`});
         },
     };
+}
+
+/** 本地调度器与外部 Agent 代理共用同一份能力定义；缺少调度器时仅供发现。 */
+export function createTaskSkills(scheduler?: TaskScheduler): Skill[] {
+    return [
+        createCreateReminderSkill(scheduler),
+        createScheduleSportsBookingSkill(scheduler),
+        createListMyTasksSkill(scheduler),
+        createCancelTaskSkill(scheduler),
+    ];
 }

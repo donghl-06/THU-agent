@@ -1,7 +1,7 @@
 /**
  * Skill: book_library_seat —— 预约图书馆座位（写操作，真实生效）。
  *
- * 安全红线（plan4ai.md）：requiresConfirmation = true，Harness 必须先向用户
+ * 安全红线：requiresConfirmation = true，调用入口必须先向用户
  * 展示操作详情并拿到明确同意才会执行到这里。
  *
  * 模型只传语义参数（馆/区域/座位号关键词），Skill 内部走 馆→楼层→区域→座位

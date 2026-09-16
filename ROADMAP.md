@@ -1,13 +1,10 @@
-# THU Assistant Agent — 新手开发路线图（框架流程详解）
+# THU Assistant Agent — 历史开发路线与排障记录
 
-> 这份文档是给 **Agent 开发纯新手** 的落地指南。
-> 它把 `plan4ai.md`（架构原则）和 `plan4me.md`（阶段规划）翻译成
-> “每一步具体做什么、为什么这么做、怎么验证做对了”。
->
-> 读完本文你应该能回答三个问题：
-> 1. 我在做一个什么东西？（概念）
-> 2. 它由哪几层组成，每层干什么？（架构）
-> 3. 下一步具体敲什么命令、写什么代码？（行动）
+> 本文已归档，不作为当前架构说明或待办清单。
+> 保留早期教学路线、Step 编号、校园接口踩坑和当时的验证状态，方便理解 Git 历史。
+> 下文的“当前重点”“下一步”、工具数量和测试结果均属于当时记录，不代表最新实现。
+> 当前架构请读 [docs/architecture.md](docs/architecture.md)，启动方式见 [README.md](README.md)，
+> 开发约定以 [AGENTS.md](AGENTS.md) 为准。新的功能状态不再追加到本文。
 
 ---
 
@@ -69,7 +66,7 @@
 最后才接 LLM（此时工具都已验证，出了问题容易定位）
 ```
 
-**调试哲学**（plan4ai.md 第 9 节，非常重要）：
+**调试哲学**（仍适用，现已收录到[当前架构](docs/architecture.md)）：
 
 ```text
 Skill 单独测试失败      → 问题在 Skill / ThuClient / @thu-info/lib
@@ -231,7 +228,7 @@ get_campus_card_info  →  get_classroom_state  →  get_library_seats  →  get
 **Step 11 · 单 Skill Agent（V0.1 里程碑 🎉）**
 - 测试句："我今天下午有什么课？"
 - 完成标准：DeepSeek 自主决定调 get_schedule → 拿到真实数据 → 用自然语言回答。
-  **这就是 plan4ai.md 第 18 节定义的第一个成功 Demo。**
+  **这就是早期规划定义的第一个成功 Demo。**
 
 **Step 12 · 多 Skill Agent（V0.2 里程碑 🎉🎉）**
 - 测试句："我今晚没课的话想去打羽毛球，帮我看看什么时候合适。"
@@ -297,13 +294,11 @@ get_campus_card_info  →  get_classroom_state  →  get_library_seats  →  get
 
 ---
 
-## 第五部分：项目目录（当前脚手架实际结构）
+## 第五部分：历史脚手架目录（非当前结构）
 
 ```text
 THU-agent/                        ← 项目根（git 仓库）
-├── plan4ai.md                    ← 给 AI 的架构约束（已存在）
-├── plan4me.md                    ← 给人的阶段规划（已存在）
-├── ROADMAP.md                    ← 本文档
+├── ROADMAP.md                    ← 本历史文档
 ├── reference/
 │   └── thu-info-app/             ← 参考仓库（只读！已加入 .gitignore）
 │       └── packages/thu-info-lib/ ← 第0层能力来源
@@ -338,7 +333,7 @@ THU-agent/                        ← 项目根（git 仓库）
 
 ---
 
-## 附：速查 —— 我当前在哪一步？
+## 附：历史实施与验证记录
 
 ```text
 [已完成] Step 0  环境 + 脚手架

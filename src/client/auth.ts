@@ -1,5 +1,5 @@
 /**
- * ThuClient 认证装配（plan4ai.md 第 4 节：authentication / credential handling）。
+ * ThuClient 认证装配：统一管理认证交互与凭证。
  *
  * 把指纹、设备信任、二次认证回调统一收口到这里，
  * Skill 和上层永远不需要接触这些细节。

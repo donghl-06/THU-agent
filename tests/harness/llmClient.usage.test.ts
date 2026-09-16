@@ -46,6 +46,23 @@ async function startEndpoint(handler: (body: Record<string, unknown>, res: Serve
 const messages: ChatMessage[] = [{role: "user", content: "你好"}];
 
 describe("llmClient usage 统计", () => {
+    it("思考与正文交错时按流顺序回调，并保留 provider 字段供工具续轮使用", async () => {
+        await startEndpoint((_body, res) => {
+            res.setHeader("content-type", "text/event-stream");
+            for (const delta of [{reasoning_content: "先思考"}, {content: "先查询"}, {reasoning_content: "再核对", content: "后回答"}]) {
+                const frame = `data: ${JSON.stringify({choices: [{delta}]})}\n\n`;
+                res.write(frame.slice(0, 13));
+                res.write(frame.slice(13));
+            }
+            res.end("data: [DONE]\n\n");
+        });
+        const events: string[] = [];
+        const message = await createLlmClient().chatStream!(messages, [], text => events.push(`text:${text}`), undefined, undefined, text => events.push(`reasoning:${text}`));
+        expect(events).toEqual(["reasoning:先思考", "text:先查询", "reasoning:再核对", "text:后回答"]);
+        expect(message.content).toBe("先查询后回答");
+        expect(message.reasoning_content).toBe("先思考再核对");
+    });
+
     it("非流式：解析响应里的 usage 并回调", async () => {
         await startEndpoint((_body, res) => {
             res.setHeader("content-type", "application/json");

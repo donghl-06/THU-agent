@@ -1,12 +1,12 @@
 /**
- * Agent Loop：plan4ai.md 第 11 节的最基础闭环。
+ * Agent Loop：内置自然语言对话的工具调用闭环。
  *
  *   用户消息 → 模型 → 要调工具？→ 是 → 执行 Skill → 结果塞回对话 → 模型继续
  *                          ↓ 否
  *                        返回文字回答
  *
- * 明确不做（plan4ai.md 红线）：多 Agent、Planner、长期记忆、RAG、工作流引擎。
- * 会话就是内存里的 messages 数组（Basic Session），进程结束即消失。
+ * 本模块不承担多 Agent、独立 Planner、长期记忆、RAG 或工作流引擎。
+ * 会话本体为内存 messages 数组；Web 层可通过快照接口单独持久化与恢复。
  *
  * Step 17 性能优化（基准见 eval/benchmark.ts）：
  *   - 流式：ask 带 onToken 时走 SSE，首字延迟从"整段生成"降到"首个 token"
@@ -21,6 +21,7 @@ import {createLlmClient, type LlmClient} from "./llmClient";
 import {ToolRegistry, type ConfirmFn} from "./toolRegistry";
 import {config} from "../config/env";
 import type {ChatMessage, TokenUsage} from "./types";
+import {accessModeInstruction, type AccessMode} from "./accessMode";
 
 /** 单轮对话最多允许的工具调用轮数（防模型失控死循环） */
 const MAX_TOOL_ROUNDS = 10;
@@ -66,14 +67,19 @@ export interface AgentRunResult {
 export interface ToolEvent {
     phase: "start" | "end";
     name: string;
+    toolCallId?: string;
     /** end 时有值 */
     ms?: number;
     success?: boolean;
 }
 
 export interface AskOptions {
-    /** 流式 token 回调（仅最终回答轮生效；中间的工具决策轮通常没有正文） */
+    /** 宿主为本轮选择的授权模式；省略时仍要求逐次批准。 */
+    accessMode?: AccessMode;
+    /** 各轮正文增量，包括工具调用之前的说明文字 */
     onToken?: (token: string) => void;
+    /** 模型提供的思考增量，与正文按到达顺序分别转发 */
+    onReasoning?: (token: string) => void;
     /** 工具开始/结束事件 */
     onToolEvent?: (e: ToolEvent) => void;
     /** 随问题附带的图片（data URL，如 data:image/png;base64,...）。需模型端点支持 vision */
@@ -166,9 +172,11 @@ export class Agent {
                 opts.signal?.throwIfAborted();
                 // 发送裁剪视图而非完整 messages（Step 21b）；有 onToken 且 LLM
                 // 支持流式 → 走流式；否则退回普通 chat
-                const view = this.viewForLlm();
+                const view = this.viewForLlm().map(message => message.role === "system" && opts.accessMode
+                    ? {...message, content: `${message.content ?? ""}\n\n${accessModeInstruction(opts.accessMode)}`}
+                    : message);
                 const message = opts.onToken && this.llm.chatStream
-                    ? await this.llm.chatStream(view, this.registry.schemas(), opts.onToken, opts.signal, onUsage)
+                    ? await this.llm.chatStream(view, this.registry.schemas(), opts.onToken, opts.signal, onUsage, opts.onReasoning)
                     : await this.llm.chat(view, this.registry.schemas(), opts.signal, onUsage);
                 opts.signal?.throwIfAborted();
                 this.messages.push(message);
@@ -294,19 +302,19 @@ export class Agent {
         opts: AskOptions,
     ): Promise<string> {
         const t0 = performance.now();
-        opts.onToolEvent?.({phase: "start", name});
+        opts.onToolEvent?.({phase: "start", name, toolCallId: call.id});
         try {
             opts.signal?.throwIfAborted();
-            const execution = this.registry.execute(call);
+            const execution = this.registry.execute(call, opts.accessMode);
             const result = opts.signal ? await waitForAbort(execution, opts.signal) : await execution;
             let success = false;
             try {
                 success = (JSON.parse(result) as {success?: boolean}).success === true;
             } catch { /* 非 JSON 结果视为成功 */ success = true; }
-            opts.onToolEvent?.({phase: "end", name, ms: performance.now() - t0, success});
+            opts.onToolEvent?.({phase: "end", name, toolCallId: call.id, ms: performance.now() - t0, success});
             return result;
         } catch (e) {
-            opts.onToolEvent?.({phase: "end", name, ms: performance.now() - t0, success: false});
+            opts.onToolEvent?.({phase: "end", name, toolCallId: call.id, ms: performance.now() - t0, success: false});
             if (opts.signal?.aborted) throw e;
             return JSON.stringify({
                 success: false,

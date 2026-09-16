@@ -2,9 +2,9 @@
  * Step 18 · 单用户 Web UI 启动脚本。
  *
  * 运行：pnpm web   然后浏览器打开 http://127.0.0.1:3457
- * WSL 下默认监听 0.0.0.0（NAT 内网仅 Windows 宿主机可达），localhost 转发失效时
- * 用启动日志打印的 WSL IP 访问；其他环境一律只监听 127.0.0.1。
- * 凭证不出 .env，前端永远拿不到。
+ * 非 WSL 默认监听 127.0.0.1；WSL 默认 0.0.0.0，HOST 可覆盖，须核对网络范围。
+ * localhost 转发失效时可用启动日志打印的 WSL IP 访问。
+ * Web 登录凭证只传给本地后端，不持久化到前端；环境凭证不返回浏览器。
  *
  * Step 23：进程内任务调度器（提醒/低电费监控/定时抢场）随服务启动；
  * 抢场执行走确定性代码路径直接调 book_sports_field 技能，不再经过 LLM。
@@ -26,6 +26,7 @@ import type {LoginCredentials} from "../src/client/auth";
 import {resolveStableFingerprint} from "../src/client/fingerprintStore";
 import {TempImageStore} from "../src/utils/tempImageStore";
 import {dirname, join} from "node:path";
+import {existsSync} from "node:fs";
 
 const scriptDirectory = dirname(process.argv[1] ?? process.cwd());
 process.env.OPENSSL_CONF ??= join(scriptDirectory, "..", "openssl.cnf");
@@ -34,7 +35,8 @@ const PORT = Number(process.env.PORT ?? 3457);
 // WSL 下默认监听 0.0.0.0，绕开 localhost 转发失效问题；Windows 原生/打包版保持 127.0.0.1。
 // 显式设置 HOST 环境变量时永远优先。
 const HOST = process.env.HOST ?? (process.env.WSL_DISTRO_NAME ? "0.0.0.0" : "127.0.0.1");
-const indexHtmlPath = join(scriptDirectory, "..", "src", "server", "public", "index.html");
+const builtWeb = join(scriptDirectory, "..", "build", "web", "index.html");
+const indexHtmlPath = existsSync(builtWeb) ? builtWeb : join(scriptDirectory, "..", "src", "server", "public", "index.html");
 
 const today = dateContextLine();
 
@@ -44,8 +46,8 @@ const SYSTEM_PROMPT = `你是"清灵"（QingLing），一个帮清华学生查�
 1. 需要实时校园信息（课表、校园动态/资讯、校园卡、教室、图书馆座位/研讨间、体育场馆、成绩单、宿舍电费、宿舍卫生、校园网、我的图书馆预约、网络学堂、邮箱、清华云盘）时，必须调用对应工具，不许编造。
 2. 用户说"今天/明天/这周"等相对日期时，先换算成具体日期再填参数。
 3. 工具返回错误时，把错误原因用大白话告诉用户，不要假装查到了。
-4. 预约/取消/充值等写操作前，先向用户复述一遍关键信息（对象、日期、时段、费用/金额），等用户明确说要执行，再调用工具。付费场次还要确认支付方式（线上/线下）；用户没主动说就先问，不要自己猜。
-5. 用户要"明早6点帮我抢场""下午提醒我"这类未来要做的事时，用任务类工具（create_reminder / schedule_sports_booking）登记，并向用户确认参数后再创建。
+4. 预约/取消/充值等写操作遵循本轮访问模式。核实对象、日期、时段、费用/金额；缺少必要参数时询问，参数明确时调用工具。付费场次需要支付方式（线上/线下）；用户没主动说就询问，不要自己猜。
+5. 用户要"明早6点帮我抢场""下午提醒我"这类未来要做的事时，用任务类工具（create_reminder / schedule_sports_booking）登记，信息齐全后按本轮访问模式创建。
 6. 用户想看邮件或网络学堂里的图片（课程群二维码、图片课件、截图等）时，调用 show_email_image 或 show_learn_image，并把返回的 markdown 字段原样写进回复，图片才会显示在对话里。
 7. 用户想打开或播放清华云盘文件（录屏、音频、普通文件）时，调用 show_cloud_file，并把返回的 markdown 字段原样写进回复，播放器/文件卡片才会显示。
 8. 用户明确要求上传、新建、重命名、移动、复制、删除清华云盘内容或生成分享链接时，先复述操作对象、目标和有效期；用户确认后使用对应云盘写工具。用户只是询问能否操作或要求整理方案时，不要执行写工具。
@@ -126,6 +128,12 @@ const server = createWebServer(
     {
         port: PORT,
         indexHtmlPath,
+        databasePath: join(scriptDirectory, "..", "data", "qingling.sqlite"),
+        getUserProfile: async () => {
+            thuClient ??= new ThuClient({}, undefined, authSessionPath);
+            const info = await thuClient.getUserInfo();
+            return {name: info.fullName, email: info.emailName || undefined};
+        },
         sessionStorePath: join(scriptDirectory, "..", "data", "sessions.json"),
         authSessionPath,
         scheduler,

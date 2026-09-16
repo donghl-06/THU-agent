@@ -2,7 +2,7 @@
  * 集成测试：get_schedule Skill 走真实 ThuClient → @thu-info/lib → 清华服务器。
  *
  * 需要 .env 里的真实凭证；需要 OPENSSL_CONF（已内置在 pnpm test 脚本中）。
- * 这是 Skill 的"独立可执行"验证（plan4ai.md 第 9 节）：
+ * 这是 Skill 的"独立可执行"验证：
  * 不依赖 DeepSeek / Harness / Chat UI。
  */
 import {describe, expect, it} from "vitest";

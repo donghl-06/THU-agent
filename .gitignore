@@ -4,6 +4,9 @@ node_modules/
 # 构建产物
 dist/
 release/
+build/
+playwright-report/
+test-results/
 packaging/**/bin/
 packaging/**/obj/
 

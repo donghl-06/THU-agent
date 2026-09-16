@@ -1,7 +1,7 @@
 /**
  * 任务调度器（Step 23）：进程内 setInterval 轮询 + 到点执行。
  *
- * 设计约束（plan4ai.md：每加一层都要有理由）：
+ * 设计约束（保持单用户任务执行简单、可测试）：
  *   - 不引任务队列/cron 库：单用户本机应用，30s 轮询足够；
  *   - 执行是确定性代码路径：booking 直接调 skill.execute（确认在创建时已完成），
  *     不再经过 LLM；
@@ -40,6 +40,7 @@ export interface AddTaskInput {
 export class TaskScheduler {
     private readonly tasks: Map<string, AgentTask>;
     private timer?: NodeJS.Timeout;
+    private readonly running = new Set<string>();
     private readonly now: () => number;
 
     constructor(
@@ -120,6 +121,9 @@ export class TaskScheduler {
         const now = this.now();
         const due = [...this.tasks.values()].filter((t) => !t.done && !t.cancelled && t.nextRunAt <= now);
         for (const task of due) {
+            // 真实预约可能超过一次轮询间隔；重入 tick 不能重复下单。
+            if (task.done || task.cancelled || this.running.has(task.id)) continue;
+            this.running.add(task.id);
             try {
                 if (task.kind === "reminder") {
                     this.hooks.notify(task, task.title);
@@ -152,8 +156,10 @@ export class TaskScheduler {
                 this.hooks.notify(task, message);
                 task.done = true;
                 task.lastMessage = message;
+            } finally {
+                this.persist();
+                this.running.delete(task.id);
             }
-            this.persist();
         }
     }
 

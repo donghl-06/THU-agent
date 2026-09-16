@@ -1,18 +1,17 @@
 /**
- * Web UI 服务端：单用户本地 HTTP + SSE 流式（plan4ai.md 层次：Harness 不动，
- * 这是新加的 server 适配层）。
+ * Web UI 服务端：单用户本地 HTTP + SSE 流式，适配共享 Harness 与任务调度器。
  *
  * 安全模型（单用户红线）：
- *   - 只监听 127.0.0.1，不对局域网开放——本机浏览器才能连
- *   - 登录凭证只通过本机回环地址传给后端，前端不持久化
- *   - 写操作确认走 SSE 推送 + /api/confirm 应答的桥，前端不点同意就不执行
+ *   - 监听地址由启动入口指定；WSL/HOST 覆盖可开放其他网卡，须核对网络范围
+ *   - 登录凭证传给本地后端，前端不持久化；UI_TOKEN 可启用访问口令
+ *   - 请求批准模式通过 SSE + /api/confirm 确认；完全访问由本轮显式授权直接执行
  *
  * 接口：
  *   GET  /              → 单页前端
  *   GET  /api/capabilities → {vision}  前端据此显隐图片上传入口
  *   POST /api/ui/auth   → {token} → 正确则种 ui_token cookie（.env 配 UI_TOKEN 才启用鉴权；
  *                          启用时豁免清单之外的所有请求都需携带该 cookie，否则 403）
- *   POST /api/chat      → {question, sessionId?, images?} → SSE 流，事件：
+ *   POST /api/chat      → {question, sessionId?, images?, accessMode?} → SSE 流，事件：
  *   POST /api/upload    → ?name=<文件名> + 原始字节 body → {name, path, sizeBytes}
  *                         把文件交给清灵（交作业等场景），需登录，单文件 ≤ 50MB
  *       （sessionId 标识前端会话，缺省/非法落到 "default"；每个会话一个
@@ -20,7 +19,8 @@
  *       （images 为 data URL 数组，最多 4 张、每张 base64 不超过 6MB 字符；
  *         仅当端点支持 vision 时可用，见 config.llm.vision）
  *       token   {text}                    回答的流式片段
- *       tool    {phase,name,ms?,success?} 工具进度（start/end）
+ *       reasoning {text}                  模型思考的流式片段
+ *       tool    {phase,name,toolCallId?,ms?,success?} 工具进度（start/end）
  *       confirm {id,name,args}            写操作待确认（前端弹窗）
  *       auth    {phase,...}                二次认证交互（前端弹窗）
  *       qr      {url, dataUrl?}           支付二维码（data URL 图片）
@@ -49,15 +49,21 @@
  * 把转发目标切到本轮 SSE 连接的桥上（busy 互斥保证同时只有一轮）。
  */
 import {createServer, type IncomingMessage, type ServerResponse, type Server} from "node:http";
-import {createReadStream, mkdirSync, readFileSync, writeFileSync} from "node:fs";
-import {dirname, join} from "node:path";
+import {createReadStream, mkdirSync, readFileSync, readdirSync, writeFileSync} from "node:fs";
+import {dirname, extname, join} from "node:path";
 import {randomUUID} from "node:crypto";
 import type {Agent} from "../harness/agentLoop";
+import {isAccessMode, type AccessMode} from "../harness/accessMode";
 import type {LlmClient} from "../harness/llmClient";
 import {createLlmClient} from "../harness/llmClient";
 import type {ConfirmFn} from "../harness/toolRegistry";
 import type {TokenUsage} from "../harness/types";
 import {config} from "../config/env";
+import {WebDatabase} from "./webDatabase";
+import {deriveTitle, newId} from "../web/lib/history";
+import {applyTurnEvent, finishTurn, turnText} from "../web/lib/turn";
+import type {Message, Result, Turn, Usage} from "../web/lib/types";
+import type {UserProfile} from "../shared/workspace";
 import {SessionStore} from "./sessionStore";
 import {NotificationHub} from "./notificationHub";
 import {extractCalendarEvent} from "./calendar";
@@ -67,6 +73,7 @@ import {taskSessionContext} from "../tasks/sessionContext";
 import type {TempImageStore} from "../utils/tempImageStore";
 import type {TaskScheduler} from "../tasks/scheduler";
 import type {LoginCredentials, TwoFactorHooks} from "../client/auth";
+import {handleTaskSkillCall} from "./taskSkillBridge";
 
 /** 确认请求 5 分钟不应答按拒绝处理（防 Promise 悬挂） */
 const CONFIRM_TIMEOUT_MS = 5 * 60 * 1000;
@@ -199,6 +206,9 @@ async function readBinaryBody(req: IncomingMessage, maxBytes: number): Promise<B
 
 export interface WebServerOptions {
     port?: number;
+    databasePath?: string;
+    database?: WebDatabase;
+    getUserProfile?: () => Promise<{name?: string; email?: string}>;
     /** 单页 HTML 的路径（测试可注入临时文件） */
     indexHtmlPath?: string;
     /** 是否要求先通过 /api/auth/login；生产 Web UI 默认开启。 */
@@ -232,7 +242,7 @@ export function createWebServer(
 ): Server {
     const port = opts.port ?? 3457;
     const requireLogin = opts.requireLogin ?? true;
-    const indexPath = opts.indexHtmlPath ?? join(process.cwd(), "src", "server", "public", "index.html");
+    const indexPath = opts.indexHtmlPath ?? join(process.cwd(), "build", "web", "index.html");
     const indexHtml = readFileSync(indexPath, "utf8");
     // PWA 静态资源（与 index.html 同目录）：读不到（如测试注入临时 HTML）时对应路由 404
     const readOptional = (p: string): Buffer | undefined => {
@@ -247,7 +257,15 @@ export function createWebServer(
     const icon192 = readOptional(join(publicDir, "icons", "icon-192.png"));
     const icon512 = readOptional(join(publicDir, "icons", "icon-512.png"));
     const serviceWorker = readOptional(join(publicDir, "service-worker.js"));
-    const store = opts.sessionStorePath ? new SessionStore(opts.sessionStorePath) : undefined;
+    // Only expose Vite's generated assets, never arbitrary paths from the workspace.
+    const webAssets = new Map<string, Buffer>();
+    try {
+        for (const entry of readdirSync(join(publicDir, "assets"), {withFileTypes: true})) {
+            if (entry.isFile()) webAssets.set(`/assets/${entry.name}`, readFileSync(join(publicDir, "assets", entry.name)));
+        }
+    } catch { /* Injected test pages may have no asset directory. */ }
+    const database = opts.database ?? new WebDatabase(opts.databasePath, opts.databasePath ? opts.sessionStorePath : undefined);
+    const store = !opts.databasePath && opts.sessionStorePath ? new SessionStore(opts.sessionStorePath) : undefined;
     const scheduler = opts.scheduler;
     const hub = opts.notificationHub;
     const authPersist = opts.authSessionPath ? new AuthSessionStore(opts.authSessionPath) : undefined;
@@ -302,7 +320,7 @@ export function createWebServer(
         // 口令种成持久 cookie：前端输一次即可，浏览器对所有请求自动携带（SameSite 防 CSRF）
         res.writeHead(200, {
             "Content-Type": "application/json",
-            "Set-Cookie": `ui_token=${config.ui.token}; Path=/; Max-Age=31536000; SameSite=Strict`,
+            "Set-Cookie": `ui_token=${config.ui.token}; Path=/; Max-Age=31536000; SameSite=Strict; HttpOnly`,
         }).end(JSON.stringify({ok: true}));
     };
 
@@ -337,7 +355,7 @@ export function createWebServer(
         onLoginSuccess: () => currentAuthHooks.onLoginSuccess?.(),
     };
 
-    /** 前端会话 id 白名单字符（对齐 localStorage 侧生成的 s_xxx 格式）；非法一律落 default */
+    /** 前端会话 id 白名单字符（对齐前端生成的 s_xxx 格式）；非法一律落 default */
     const normalizeSessionId = (value: unknown): string =>
         typeof value === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(value) ? value : DEFAULT_SESSION;
 
@@ -352,7 +370,7 @@ export function createWebServer(
             return existing;
         }
         const created = agentFactory(delegatingConfirm, delegatingAuthHooks);
-        const saved = store?.get(sessionId);
+        const saved = database.getContext(sessionId) ?? store?.get(sessionId);
         if (saved?.length) {
             created.loadMessages([created.snapshotMessages()[0], ...saved]);
         }
@@ -372,6 +390,11 @@ export function createWebServer(
         const agent = getOrCreateAgent(notification.sessionId);
         agent.appendAssistantMessage(`⏰ ${notification.title}：${notification.message}`);
         store?.set(notification.sessionId, agent.snapshotMessages());
+        database.setContext(notification.sessionId, agent.snapshotMessages());
+        database.updateSession(notification.sessionId, session => ({...session,
+            title: session.title === "新对话" ? notification.title : session.title,
+            messages: [...session.messages, {id: `notification_${randomUUID()}`, role: "bot", text: `${notification.title}：${notification.message}`, notification: true}],
+        }));
     });
 
     const closePendingAuth = (): void => {
@@ -490,6 +513,9 @@ export function createWebServer(
             const loginAgent = agentFactory(delegatingConfirm, delegatingAuthHooks, credentials);
             await loginAgent.login();
             authenticated = true;
+            const profile: UserProfile = {username: credentials.username};
+            try { Object.assign(profile, await opts.getUserProfile?.()); } catch { /* Account ID remains available when profile lookup is unavailable. */ }
+            database.put("profile", profile);
             // 默认会话直接复用登录建的 Agent；其余会话按需新建（共享同一登录态）
             agents.set(DEFAULT_SESSION, loginAgent);
             authPersist?.save(); // 快照会话 cookie，服务重启免重新登录
@@ -510,7 +536,7 @@ export function createWebServer(
 
     const handleAuthStatus = (res: ServerResponse): void => {
         res.writeHead(200, {"Content-Type": "application/json"});
-        res.end(JSON.stringify({authenticated}));
+        res.end(JSON.stringify({authenticated, ...(authenticated ? {profile: database.profile()} : {})}));
     };
 
     const handleAuthLogout = (res: ServerResponse): void => {
@@ -520,6 +546,7 @@ export function createWebServer(
         }
         agents.clear();
         authenticated = false;
+        database.put("auth-updated-at", Date.now());
         authPersist?.clear(); // 登出清会话存档
         res.writeHead(200, {"Content-Type": "application/json"});
         res.end(JSON.stringify({authenticated: false}));
@@ -534,13 +561,18 @@ export function createWebServer(
             return;
         }
         if (requireLogin && !authenticated) {
-            res.writeHead(401).end("请先点击右上角“登录”并完成清华账号认证");
+            res.writeHead(401).end("请先连接左下角清华账号并完成认证");
             return;
         }
         let question: string;
         let images: string[] | undefined;
+        let accessMode: AccessMode = "request-approval";
         let sessionId: string;
         let rawBody: string;
+        let messageId = newId();
+        let userMessageId = newId();
+        let displayQuestion: string | undefined;
+        let retry = false;
         try {
             rawBody = await readBody(req);
         } catch {
@@ -548,7 +580,12 @@ export function createWebServer(
             return;
         }
         try {
-            const parsed = JSON.parse(rawBody) as {question?: unknown; images?: unknown; sessionId?: unknown};
+            const parsed = JSON.parse(rawBody) as {question?: unknown; images?: unknown; sessionId?: unknown; accessMode?: unknown; messageId?: unknown; userMessageId?: unknown; displayQuestion?: unknown; retry?: unknown};
+            if (parsed.accessMode !== undefined && !isAccessMode(parsed.accessMode)) {
+                res.writeHead(400).end("invalid accessMode");
+                return;
+            }
+            accessMode = parsed.accessMode ?? "request-approval";
             const imgErr = validateImages(parsed.images);
             if (imgErr) {
                 res.writeHead(400).end(imgErr);
@@ -560,6 +597,10 @@ export function createWebServer(
             }
             images = parsed.images as string[] | undefined;
             sessionId = normalizeSessionId(parsed.sessionId);
+            if (typeof parsed.messageId === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(parsed.messageId)) messageId = parsed.messageId;
+            if (typeof parsed.userMessageId === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(parsed.userMessageId)) userMessageId = parsed.userMessageId;
+            if (typeof parsed.displayQuestion === "string") displayQuestion = parsed.displayQuestion.slice(0, 20000);
+            retry = parsed.retry === true;
             if (typeof parsed.question !== "string") throw new Error();
             question = parsed.question.trim();
             if (!question && !images) throw new Error();
@@ -568,6 +609,41 @@ export function createWebServer(
             return;
         }
 
+        if (database.history().deletedSessionIds.includes(sessionId)) {
+            res.writeHead(409).end("session was deleted");
+            return;
+        }
+        let savedTurn: Turn = {sessionId, messageId, startedAt: Date.now(), status: "running", phase: "thinking", items: []};
+        let savedUsage: Usage | undefined;
+        let savedResults: Result[] = [];
+        let lastCheckpoint = 0;
+        let usageCommitted = false;
+        database.selectSession(sessionId);
+        database.updateSession(sessionId, session => {
+            const messages: Message[] = retry ? session.messages : [...session.messages.filter(m => m.id !== userMessageId),
+                {id: userMessageId, role: "user", text: displayQuestion ?? question, images, imageCount: images?.length}];
+            return {...session, messages, results: [], title: session.title === "新对话" ? deriveTitle(messages) : session.title};
+        });
+        const checkpoint = () => {
+            database.updateSession(sessionId, session => {
+                const message: Message = {id: messageId, role: "bot", text: turnText(savedTurn), turn: savedTurn, usage: savedUsage};
+                const tokens = (session.tokens ?? 0) + (!usageCommitted ? savedUsage?.totalTokens ?? 0 : 0);
+                if (savedUsage) usageCommitted = true;
+                return {...session, tokens, results: savedResults, messages: session.messages.some(m => m.id === messageId)
+                    ? session.messages.map(m => m.id === messageId ? message : m) : [...session.messages, message]};
+            });
+            lastCheckpoint = Date.now();
+        };
+        const send = (event: string, data: Record<string, unknown>) => {
+            savedTurn = applyTurnEvent(savedTurn, {event, data});
+            if (event === "usage") savedUsage = data as unknown as Usage;
+            if (event === "qr" || event === "payform" || event === "calendar") {
+                savedResults = [...savedResults, {id: newId(), kind: event, ...data} as Result];
+            }
+            if (Date.now() - lastCheckpoint > 250 || ["answer", "usage", "done", "error", "confirm"].includes(event)) checkpoint();
+            sseSend(res, event, data);
+        };
+        checkpoint();
         busy = true;
         writeSseHeaders(res);
 
@@ -601,7 +677,7 @@ export function createWebServer(
                 try {
                     args = JSON.parse(call.function.arguments) as Record<string, unknown>;
                 } catch { /* 参数不是 JSON 就展示空表 */ }
-                sseSend(res, "confirm", {id, name: skill.name, args});
+                send("confirm", {id, name: skill.name, args});
             });
 
         let sessionAgent: Agent | undefined;
@@ -609,40 +685,42 @@ export function createWebServer(
             sessionAgent = getOrCreateAgent(sessionId);
             // 任务类 skill 需要知道归属会话（通知回传定位）；经 AsyncLocalStorage 透传
             const result = await taskSessionContext.run(sessionId, () => sessionAgent!.ask(question, {
-                onToken: (text) => sseSend(res, "token", {text}),
-                onToolEvent: (e) => sseSend(res, "tool", e),
+                accessMode,
+                onToken: (text) => send("token", {text}),
+                onReasoning: (text) => send("reasoning", {text}),
+                onToolEvent: (e) => send("tool", {...e}),
                 ...(images ? {images} : {}),
                 signal: chatAbort.signal,
             }));
             const authFailure = result.toolCalls
                 .map((toolCall) => extractAuthFailure(toolCall.result))
                 .find((message): message is string => Boolean(message));
-            if (authFailure) sseSend(res, "auth", {phase: "error", message: authFailure});
+            if (authFailure) send("auth", {phase: "error", message: authFailure});
             // 工具结果里有支付链接的，生成二维码推给前端；有支付表单的，推原始 HTML 让前端出"前往支付"按钮；
             // 预约成功的，推现成的 .ics 文本让前端出"加入日历"按钮
             for (const t of result.toolCalls) {
                 const payUrl = extractPayUrl(t.result);
                 if (payUrl) {
                     const dataUrl = await makeQrDataUrl(payUrl);
-                    sseSend(res, "qr", {url: payUrl, ...(dataUrl ? {dataUrl} : {})});
+                    send("qr", {url: payUrl, ...(dataUrl ? {dataUrl} : {})});
                 }
                 const payFormHtml = extractPayFormHtml(t.result);
                 if (payFormHtml) {
-                    sseSend(res, "payform", {html: payFormHtml});
+                    send("payform", {html: payFormHtml});
                 }
                 const cal = extractCalendarEvent(t.name, t.result);
                 if (cal) {
-                    sseSend(res, "calendar", {title: cal.title, filename: cal.filename, icsContent: cal.icsContent});
+                    send("calendar", {title: cal.title, filename: cal.filename, icsContent: cal.icsContent});
                 }
             }
-            sseSend(res, "answer", {text: result.answer});
+            send("answer", {text: result.answer});
             if (result.usage) {
                 const cost = estimateCostYuan(result.usage);
-                sseSend(res, "usage", {...result.usage, ...(cost !== undefined ? {costYuan: cost} : {})});
+                send("usage", {...result.usage, ...(cost !== undefined ? {costYuan: cost} : {})});
             }
-            sseSend(res, "done", {});
+            send("done", {});
         } catch (e) {
-            if (!chatAbort.signal.aborted) sseSend(res, "error", {message: (e as Error).message});
+            if (!chatAbort.signal.aborted) send("error", {message: (e as Error).message});
         } finally {
             if (pendingAuth) closePendingAuth();
             closePendingConfirms();
@@ -654,6 +732,9 @@ export function createWebServer(
                 activeChatDone = undefined;
                 resolveChatDone();
             }
+            if (savedTurn.status === "running") savedTurn = finishTurn(savedTurn, chatAbort.signal.aborted ? "cancelled" : "error");
+            checkpoint();
+            if (sessionAgent) database.setContext(sessionId, sessionAgent.snapshotMessages());
             // 会话上下文落盘（ask 失败时已回滚到问前状态，落盘内容一致）
             if (store && sessionAgent) store.set(sessionId, sessionAgent.snapshotMessages());
             res.end();
@@ -695,6 +776,7 @@ export function createWebServer(
         const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 12);
         const savedName = `${stamp}_${randomUUID().slice(0, 6)}_${base}`;
         const savedPath = join(uploadDir, savedName);
+        database.saveAttachment(savedPath, base, body);
         writeFileSync(savedPath, body);
         res.writeHead(200, {"Content-Type": "application/json"});
         res.end(JSON.stringify({name: base, path: savedPath, sizeBytes: body.length}));
@@ -764,6 +846,8 @@ export function createWebServer(
 
     /** 销毁后端会话上下文：前端删会话/清空历史时调用，防止残留上下文复活 */
     const handleSessionDestroy = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+        if (requireLogin && !authenticated) { res.writeHead(401).end("not authenticated"); return; }
+        if (busy) { res.writeHead(409).end("another operation is in flight"); return; }
         let parsed: {sessionId?: unknown; all?: unknown};
         try {
             parsed = JSON.parse(await readBody(req)) as {sessionId?: unknown; all?: unknown};
@@ -774,10 +858,12 @@ export function createWebServer(
         if (parsed.all === true) {
             agents.clear();
             store?.clear();
+            database.clearSessions();
         } else {
             const sid = normalizeSessionId(parsed.sessionId);
             agents.delete(sid);
             store?.delete(sid);
+            database.deleteSession(sid);
         }
         res.writeHead(200, {"Content-Type": "application/json"}).end("{}");
     };
@@ -896,6 +982,7 @@ export function createWebServer(
         titledSessions.add(sid);
         titleLlmClient ??= opts.titleLlm ?? createLlmClient();
         const title = await generateTitle(titleLlmClient, agent.snapshotMessages());
+        if (title) database.updateSession(sid, session => ({...session, title, titleLlm: true}));
         res.writeHead(200, {"Content-Type": "application/json"}).end(JSON.stringify({title: title ?? null}));
     };
 
@@ -987,12 +1074,60 @@ export function createWebServer(
         res.writeHead(200, {"Content-Type": "application/json"}).end("{}");
     };
 
-    return createServer((req, res) => {
+    let profileRequested = false;
+    const refreshProfile = () => {
+        if (!authenticated || database.profile() || profileRequested || !opts.getUserProfile) return;
+        profileRequested = true;
+        void opts.getUserProfile().then(profile => {
+            if (authenticated && !database.profile()) database.put("profile", {username: "", ...profile});
+        }).catch(() => {});
+    };
+    const workspace = () => ({preferences: database.preferences(), revision: database.revision, authenticated,
+        profile: authenticated ? database.profile() : undefined,
+        history: !requireLogin || authenticated ? database.history() : {activeId: "", sessions: [], deletedSessionIds: []}});
+    const handleWorkspace = async (req: IncomingMessage, res: ServerResponse, path: string) => {
+        res.setHeader("Cache-Control", "no-store");
+        if (req.method === "GET" && path === "/api/workspace") {
+            refreshProfile();
+            const requestedRevision = new URL(req.url!, "http://localhost").searchParams.get("revision");
+            const unchanged = requestedRevision === database.revision;
+            res.writeHead(200, {"Content-Type": "application/json"}).end(JSON.stringify(unchanged ? {unchanged: true} : workspace()));
+            return;
+        }
+        if (req.method !== "POST") { res.writeHead(405).end(); return; }
+        if (req.headers["content-type"]?.split(";")[0] !== "application/json") { res.writeHead(415).end(); return; }
+        let body;
+        try { body = JSON.parse(await readBody(req)); } catch { res.writeHead(400).end("invalid JSON"); return; }
+        if (!body || typeof body !== "object") { res.writeHead(400).end(); return; }
+        if (requireLogin && !authenticated && (body.history || path === "/api/workspace/history" || path === "/api/workspace/select")) {
+            res.writeHead(401).end("not authenticated"); return;
+        }
+        try {
+            if (path === "/api/workspace/preferences") database.savePreferences(body);
+            else if (path === "/api/workspace/import") database.importBrowser(body.history, body.preferences);
+            else if (path === "/api/workspace/select") database.selectSession(normalizeSessionId(body.activeId));
+            else if (path === "/api/workspace/history") {
+                // Reconcile a completed client snapshot, e.g. after reconnect. The server's live turn wins.
+                if (!busy) database.importBrowser(body.history, {});
+            } else { res.writeHead(404).end(); return; }
+        } catch { res.writeHead(400).end("invalid workspace data"); return; }
+        res.writeHead(200, {"Content-Type": "application/json"}).end(JSON.stringify(workspace()));
+    };
+
+    const server = createServer((req, res) => {
         void (async () => {
             const url = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
             if (req.method === "GET" && url.pathname === "/") {
-                res.writeHead(200, {"Content-Type": "text/html; charset=utf-8"});
+                res.writeHead(200, {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache"});
                 res.end(indexHtml);
+                return;
+            }
+            if (req.method === "GET" && url.pathname.startsWith("/assets/")) {
+                const asset = webAssets.get(url.pathname);
+                if (!asset) { res.writeHead(404).end("not found"); return; }
+                const types: Record<string, string> = {".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".woff2": "font/woff2"};
+                res.writeHead(200, {"Content-Type": types[extname(url.pathname)] ?? "application/octet-stream", "Cache-Control": "public, max-age=31536000, immutable"});
+                res.end(asset);
                 return;
             }
             if (req.method === "GET" && url.pathname === "/service-worker.js" && serviceWorker) {
@@ -1031,6 +1166,12 @@ export function createWebServer(
             }
             // 生命周期事件不携带业务数据；未通过 UI 口令的页面也应能在托盘退出时收到关闭信号。
             if (req.method === "GET" && url.pathname === "/api/events") return handleLifecycleEvents(req, res);
+            // Agent 任务桥使用同一 UI_TOKEN 的 Bearer 认证，另行限制本机和已登录状态。
+            if (req.method === "POST" && url.pathname === "/api/skills/tasks") {
+                return handleTaskSkillCall(req, res, {
+                    scheduler, authenticated: !requireLogin || authenticated, token: config.ui.token,
+                });
+            }
             // UI 口令守卫：豁免清单之外的一切请求，未携带正确口令 cookie 时 403
             // （前端以 403 区别于清华未登录的 401，据此弹出"输入访问口令"遮罩）
             const uiAuthExempt =
@@ -1041,6 +1182,7 @@ export function createWebServer(
                 res.writeHead(403, {"Content-Type": "application/json"}).end(JSON.stringify({uiAuth: true}));
                 return;
             }
+            if (url.pathname.startsWith("/api/workspace")) return handleWorkspace(req, res, url.pathname);
             if (req.method === "GET" && url.pathname === "/api/auth/status") return handleAuthStatus(res);
             if (req.method === "POST" && url.pathname === "/api/auth/login") return handleAuthLogin(req, res);
             if (req.method === "POST" && url.pathname === "/api/ui/auth") return handleUiAuth(req, res);
@@ -1066,4 +1208,6 @@ export function createWebServer(
             res.end(String(e));
         });
     });
+    server.once("close", () => database.close());
+    return server;
 }

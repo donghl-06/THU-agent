@@ -1,7 +1,7 @@
 /**
  * Skill: book_library_room —— 预约图书馆研讨间（写操作，真实生效）。
  *
- * 安全红线（plan4ai.md）：requiresConfirmation = true，Harness 必须先向用户
+ * 安全红线：requiresConfirmation = true，调用入口必须先向用户
  * 展示操作详情并拿到明确同意才会执行到这里。
  *
  * 模型只传语义参数（房间/类别关键词、日期、起止时间、成员学号），

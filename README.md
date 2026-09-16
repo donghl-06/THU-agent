@@ -6,30 +6,38 @@
 Agent 自主判断并组合多个校园能力（查课表 → 推理空闲时间 → 查体育场馆 → 综合建议），
 而不是把已有 App 换成聊天界面。
 
-> 详细架构原则见 [plan4ai.md](plan4ai.md)，阶段规划见 [plan4me.md](plan4me.md)，
-> 新手向落地路线图见 [ROADMAP.md](ROADMAP.md)。
+> 当前入口、能力边界与数据流见 [项目架构](docs/architecture.md)，
+> 开发约定见 [AGENTS.md](AGENTS.md)。[ROADMAP.md](ROADMAP.md) 仅保留历史开发与排障记录。
 
 ## 架构分层
 
 ```text
-LLM（Kimi/GLM/DeepSeek，OpenAI 兼容协议）← 推理与决策
-Harness             ← Agent 运行时：工具注册、Agent Loop（src/harness/）
-THU Skills          ← Agent 可调用的原子能力（src/skills/）
-ThuClient           ← 统一封装登录/会话/重试（src/client/）
-SportsClient        ← 新版体育场馆系统客户端（src/client/sports/，独立链路）
-LearnClient         ← 网络学堂客户端（src/client/learn/，封装 thu-learn-lib）
-CloudClient         ← 清华云盘客户端（src/client/cloud/，Seafile API）
-@thu-info/lib       ← 清华校园服务 SDK（npm 依赖 + 本地补丁）
-thu-learn-lib       ← 网络学堂（learn.tsinghua.edu.cn）SDK（npm 依赖）
+交互式 CLI / Web 聊天 ── Harness ↔ OpenAI 兼容 LLM ──┐
+外部 Agent ── Agent Skill + JSON CLI / MCP ─────────┤
+                                                   ▼
+                                        createAllSkills() 统一装配
+                                          │                │
+                                     校园原子工具       可选任务工具
+                                          │                │
+                             ThuClient / SportsClient   Web 常驻调度器
+                              / MyhomeClient / UseregClient
+                              / LearnClient / MailClient
+                              / CloudClient
+                                          │
+                                  SDK / 校园系统接口
 ```
+
+交互式 CLI 提供 41 个校园工具；Web 与外部 Skill CLI 提供 45 个工具（含 4 个任务工具）。
+外部 CLI 的任务调用转交常驻 Web 服务。MCP 默认提供 25 个校园只读工具和 2 个登录/用户信息工具，
+不支持写操作或任务调度。各入口复用业务实现，不自动共享跨进程的登录会话。
 
 ## 环境要求
 
 - Windows + WSL2 Ubuntu（或任意 Linux/macOS）
-- Node.js ≥ 22
+- Node.js ≥ 22.13（Web 数据库使用内置 `node:sqlite`）
 - pnpm 10（`npm install -g pnpm`）
 - 清华大学 Info 账号（用于登录校园服务）
-- 任意 OpenAI 兼容的 LLM API Key（Kimi / GLM / DeepSeek 均可）
+- 使用内置 CLI / Web 自然语言对话时，需配置 OpenAI 兼容的 LLM API；直接 Skill / MCP 调用不需要
 
 ## 配置步骤
 
@@ -50,10 +58,10 @@ cp .env.example .env
 #   LLM_API_KEY / LLM_BASE_URL / LLM_MODEL  LLM 配置（Kimi 示例见 .env.example 注释）
 ```
 
-## 和小助手对话（V0.1 里程碑 🎉）
+## 命令行对话
 
 ```bash
-pnpm agent   # 命令行 Agent：注册全部查询技能，模型自主决定调哪个
+pnpm agent   # 41 个校园查询/操作工具，写操作须在终端确认；不包含定时任务
 ```
 
 试试这些问法：
@@ -64,6 +72,46 @@ pnpm agent   # 命令行 Agent：注册全部查询技能，模型自主决定�
 今晚气膜馆羽毛球还有场吗？
 最近有什么重要的校园通知或资讯？
 ```
+
+## 供任意 AI Agent 调用
+
+仓库内置了一个遵循 Agent Skills 目录结构的项目级 Skill：
+`.agents/skills/thu-agent/SKILL.md`。兼容 Agent Skills 且能运行本地命令的
+AI Agent 可以自动发现它，并通过机器可读 CLI 使用 `createAllSkills()` 中装配的
+校园能力，不需要接入本项目自己的 LLM。目前包含 41 个直接调用的校园能力，以及
+通过常驻 Web 调度器执行的 4 个任务能力（提醒、定时抢场、任务查询与取消）。
+
+也可以直接检查这层接口：
+
+```bash
+pnpm --silent skill list
+pnpm --silent skill describe get_schedule
+pnpm --silent skill call get_schedule --input '{}'
+```
+
+输出统一为 JSON。直接校园调用需要 `THU_USERNAME` / `THU_PASSWORD`，
+`THU_FINGERPRINT` 可留空使用自动持久化的设备身份；不需要 `LLM_*` 配置。
+校园网状态查询另需 `CJY_*` 识别验证码。宿舍卫生成绩返回公示图，可使用 Skill 中的
+`scripts/extract-images.mjs` 解码成私有临时图片，再由调用方的看图能力读取。
+所有 `requiresConfirmation: true` 的预约、取消、充值、支付、作业提交、下载和发信操作默认拒绝执行；
+外部 Agent 必须先向用户展示完整操作参数并取得本次明确同意，之后才能为该次调用
+附加 `--confirmed-by-user`。确认不能跨调用复用，失败或结果不明确时也不能自动重试。
+
+任务调用复用已运行的 `pnpm web` 服务：在服务和 CLI 使用的 `.env` 配置相同的
+非空 `UI_TOKEN`，并在 Web 页面完成登录。默认连接 `http://127.0.0.1:3457`
+（或 `PORT` 指定端口）；`THU_SKILL_SERVER_URL` 可覆盖为另一个本机回环 HTTP 地址。
+`POST /api/skills/tasks` 仅接受本机、无浏览器 Origin、携带正确 Bearer 口令且已登录的请求，
+只开放任务能力，并在服务端再次检查写操作确认。
+
+任务由 Web 服务持久化和执行，通知回写到 `external_skill` 会话；必须保持服务运行至执行时间。
+`list_my_tasks` 的 `includeFinished` 参数可查询已完成/取消任务及执行结果：
+
+```bash
+pnpm --silent skill call list_my_tasks --input '{"includeFinished":true}'
+```
+
+定时抢场在创建时确认具体目标、执行时间和支付方式，到点无需再次确认；返回 `taskId`
+只表示登记成功。详细运行条件见 [Skill 运行说明](.agents/skills/thu-agent/references/runtime.md)。
 
 ⚠️ `.env` 已在 `.gitignore` 中，**绝不要**把真实凭证写进 `.env.example` 或任何会被提交的文件。
 
@@ -113,10 +161,35 @@ pnpm cloud   # 清华云盘真链验证（资料库/搜索）
 
 ### Web UI 图形化登录
 
-运行 `pnpm web` 后打开 <http://127.0.0.1:3457>，点击右上角“登录”，
+运行 `pnpm web` 后打开 <http://127.0.0.1:3457>，点击左下角“连接清华账号”，
 即可在页面输入清华 Info 学号和密码。需要二次认证时，页面会弹出 TOTP、短信或微信
-认证方式选择，并在同一窗口输入验证码；凭证只通过本机回环地址传给后端，不会写入
-浏览器本地存储。Web UI 登录成功后才会开放校园 Skill 查询。
+认证方式选择，并在同一窗口输入验证码；登录凭证传给本地后端，不会写入浏览器本地存储。
+Web UI 登录成功后才会开放校园 Skill 查询。
+
+Web 前端使用 **React + TypeScript + Vite**，界面组件位于 `src/web/components/`，
+应用状态、SSE 与历史迁移位于 `src/web/lib/`，样式统一在 `src/web/styles.css`。
+图标使用 `lucide-react`，过渡动效使用 Motion，并尊重系统的减少动态效果设置。
+
+- `pnpm web`：启动 Vite 热更新页面（默认 3457）和本机 API（默认 3458）。
+- `pnpm web:build`：构建到 `build/web/`。
+- `pnpm web:serve`：提供已构建页面和 API（默认 3457，无热更新）。
+- `pnpm build`：构建 React 前端和现有桌面发行包资源。
+- `pnpm test:web`：使用离线模拟服务运行 Playwright 浏览器回归，不连接校园服务。
+  首次运行先执行 `pnpm exec playwright install chromium`。
+
+开发时 `PORT` 控制页面端口，`WEB_API_PORT` 控制 API 端口；API 通过 Vite 同源代理访问。
+聊天历史（包括思考、工具时序、用量和已发送图片）、模型上下文、上传附件、账号展示信息及
+主题/声音/访问模式/侧栏偏好统一保存在后端 `data/qingling.sqlite`。文件权限为 `0600`；
+上传附件同时在 `data/uploads/` 生成供校园工具使用的文件副本。密码、验证码不写入工作区数据库。
+浏览器只保留当前页面的内存视图，不再使用 localStorage、sessionStorage 或 IndexedDB 保存应用数据。
+升级时登录一次，页面会把旧浏览器历史导入数据库，确认成功后清除原记录；旧后端
+`data/sessions.json` 自动迁移一次。静态离线缓存只包含界面资源，不缓存工作区 API 数据。
+数据库属于此本地单用户服务；同一服务的新浏览器也能恢复历史和偏好。备份前停止服务，再复制数据库。
+静态资源与离线壳一起打包，无需 CDN。界面截图见 [Web UI 截图](docs/web-ui.md)。
+
+非 WSL 环境默认监听 `127.0.0.1`，WSL 默认监听 `0.0.0.0`，可通过 `HOST` / `PORT` 覆盖。
+WSL 或自行开放其他网卡时不能假定仅本机可访问，应核对网络范围并配置 `UI_TOKEN`；
+不要将单用户 HTTP 服务直接暴露到公网。
 
 Web UI 启动脚本会自动配置旧版 TLS 所需的 `OPENSSL_CONF`，PowerShell 下无需手动设置。
 
@@ -173,7 +246,7 @@ pnpm package:win:mcp
 
 **触发方式（二选一）**：
 
-1. **发版本（推荐）**：本地执行 `git tag v0.2.0 && git push origin v0.2.0`——
+1. **发版本（推荐）**：创建尚未使用的 `v` 前缀版本标签并推送（版本与 `package.json` 对齐）——
    四个包并行打出后自动压缩，发布到仓库的 **Releases** 页面（永久保留，任何人可下载）；
 2. **手动试跑**：GitHub 仓库页 → Actions → 选"发布便携包" → Run workflow——
    只出产物（Artifacts，保留 90 天，需登录 GitHub 下载），不发布 Release。

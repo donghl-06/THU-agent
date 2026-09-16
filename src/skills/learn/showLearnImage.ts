@@ -113,7 +113,8 @@ export function createShowLearnImageSkill(client: ShowSource, images?: TempImage
         description:
             "把网络学堂（learn.tsinghua.edu.cn）的图片直接显示在对话里，三种来源三选一：" +
             "file 课件文件名关键词 / notice 公告标题关键词 / homework 作业标题关键词；" +
-            "公告和作业是显示正文里直接贴的内嵌图，多图时用 index 指定第几张（默认 1，对应正文里的 [图片N]）。" +
+            "公告和作业是显示正文里直接贴的内嵌图，多图时用 index 指定第几张（默认 1，对应正文里的 [图片N]）；" +
+            "公告的图在附件里时，notice 配 attachment=true 显示附件。" +
             "course 课名关键词必填；三个来源都省略且课件里只有一张图片时自动选中。" +
             "成功后必须把返回的 markdown 字段原样写进回复，图片才会显示；" +
             "图片是临时文件，用户在图片旁点「已用完」后服务端才删除。" +
@@ -131,7 +132,7 @@ export function createShowLearnImageSkill(client: ShowSource, images?: TempImage
                 },
                 notice: {
                     type: "string",
-                    description: "可选，公告标题关键词，显示该公告正文里的内嵌图片；与 file/homework 互斥",
+                    description: "可选，公告标题关键词，显示该公告正文里的内嵌图片（配 attachment=true 则显示公告附件）；与 file/homework 互斥",
                 },
                 homework: {
                     type: "string",
@@ -140,6 +141,10 @@ export function createShowLearnImageSkill(client: ShowSource, images?: TempImage
                 index: {
                     type: "number",
                     description: "可选，notice/homework 模式下正文里第几张图（1 起始，对应 [图片N]），默认 1",
+                },
+                attachment: {
+                    type: "boolean",
+                    description: "可选，仅配合 notice 使用：true 时显示公告的附件（而非正文内嵌图），默认 false",
                 },
             },
             required: ["course"],
@@ -167,6 +172,12 @@ export function createShowLearnImageSkill(client: ShowSource, images?: TempImage
             if (!Number.isInteger(index) || index <= 0) {
                 return fail("INVALID_INPUT", "index 必须是不小于 1 的整数（对应正文里的 [图片N]）");
             }
+            if (raw.attachment !== undefined && typeof raw.attachment !== "boolean") {
+                return fail("INVALID_INPUT", "attachment 必须是布尔值");
+            }
+            if (raw.attachment === true && !(typeof raw.notice === "string" && raw.notice.trim())) {
+                return fail("INVALID_INPUT", "attachment=true 只配合 notice 使用（显示公告附件）");
+            }
 
             try {
                 const {course, error} = await resolveUniqueCourse(client, raw.course as string);
@@ -182,11 +193,21 @@ export function createShowLearnImageSkill(client: ShowSource, images?: TempImage
                         await client.getNotifications(course!.id), raw.notice, "公告", courseName,
                     );
                     if (e) return e;
-                    const picked = pickInlineImage(item!.content, index, `公告「${item!.title}」`);
-                    if (picked.error) return picked.error;
-                    title = `${item!.title}（图片${index}）`;
-                    url = picked.url!;
-                    nameFallback = url;
+                    if (raw.attachment === true) {
+                        // 公告附件：老师把图当附件传的场景，downloadUrl 需登录态
+                        if (!item!.attachment) {
+                            return fail("NOT_FOUND", `公告「${item!.title}」没有附件`);
+                        }
+                        title = `${item!.title}（附件）`;
+                        url = item!.attachment.downloadUrl;
+                        nameFallback = item!.attachment.name;
+                    } else {
+                        const picked = pickInlineImage(item!.content, index, `公告「${item!.title}」`);
+                        if (picked.error) return picked.error;
+                        title = `${item!.title}（图片${index}）`;
+                        url = picked.url!;
+                        nameFallback = url;
+                    }
                 } else if (typeof raw.homework === "string" && raw.homework.trim()) {
                     const {item, error: e} = matchByTitle(
                         await client.getHomeworkList(course!.id), raw.homework, "作业", courseName,

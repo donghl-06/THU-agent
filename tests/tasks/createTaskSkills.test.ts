@@ -48,6 +48,8 @@ describe("parseRunAt / validateRunAt", () => {
         expect(parseRunAt("2026-09-05 06:00")).toBe(new Date(2026, 8, 5, 6, 0).getTime());
         expect(parseRunAt("2026-13-05 06:00")).toBeNull();
         expect(parseRunAt("明天早上")).toBeNull();
+        expect(parseRunAt("2099-01-01 24:00")).toBeNull();
+        expect(parseRunAt("2099-01-01 12:60")).toBeNull();
     });
 
     it("validateRunAt 拒绝过去的时间（1 分钟宽限）", () => {
@@ -75,6 +77,13 @@ describe("任务类 Skill", () => {
         const noPay = await skill.execute({resourceName: "气膜馆羽毛球", sessionStart: "06:00", runAt: "2099-01-01 06:00"});
         expect(noPay.success).toBe(false);
         expect((noPay as {error?: {code: string}}).error?.code).toBe("INVALID_INPUT");
+
+        const badDate = await skill.execute({
+            resourceName: "气膜馆羽毛球", sessionStart: "06:00", date: 123,
+            payType: "PAY_ONLINE", runAt: "2099-01-01 06:00",
+        });
+        expect(badDate.error?.code).toBe("INVALID_INPUT");
+        expect(s.added).toHaveLength(0);
 
         const good = await skill.execute({
             resourceName: "气膜馆羽毛球", sessionStart: "06:00", date: "2026-09-06",
