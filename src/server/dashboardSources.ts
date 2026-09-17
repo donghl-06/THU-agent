@@ -11,6 +11,7 @@ import type {LearnNoticesData} from "../skills/learn/getLearnNotices";
 import type {LearnFilesData} from "../skills/learn/getLearnFiles";
 import type {LearnCalendarData} from "../skills/learn/getLearnCalendar";
 import type {LibrarySeatsData} from "../skills/library/getLibrarySeats";
+import type {SportsResourcesData} from "../skills/sports/getSportsResources";
 import type {LibraryRoomData} from "../skills/library/getLibraryRooms";
 import type {MyLibraryBookingsData} from "../skills/library/getMyLibraryBookings";
 import type {ReportData} from "../skills/academic/getReport";
@@ -68,8 +69,8 @@ export const dashboardSources: DashboardSource[] = [
     source<CampusNewsData>("news", "校园资讯", "campus", "Info 最新通知、教务公告与校园动态", 10, "get_campus_news", d => ({
         items: d.items.map(n => ({title: n.title, subtitle: join(n.channelName, n.source), time: n.date, badge: n.topped ? "置顶" : undefined, newsRef: n.url})),
     }), () => ({limit: 30})),
-    source<ElectricityData>("electricity", "宿舍电量", "life", "剩余电量、余额与最近缴费", 5, "get_electricity", d => ({
-        metrics: [metric("剩余电量", d.kwhRemainder, "度"), metric("电费余额", money(d.remainder), "元")],
+    source<ElectricityData>("electricity", "宿舍电量", "life", "剩余电量与最近缴费", 5, "get_electricity", d => ({
+        metrics: [metric("剩余电量", d.kwhRemainder, "度")],
         items: d.recentPayRecords.map(r => ({title: `${r.amount} 元 · ${r.status}`, subtitle: r.channel, time: r.time})),
         note: join(d.building, d.room, d.meterTime ? `抄表 ${d.meterTime}` : d.kwhRemainder === null ? "电量暂不可用" : undefined, d.remainderNote),
     })),
@@ -87,6 +88,24 @@ export const dashboardSources: DashboardSource[] = [
         metrics: [metric("可用座位", d.totalAvailable, "个")],
         items: d.sections.map(s => ({title: join(s.library, s.floor, s.section), subtitle: `共 ${s.total} 个座位`, badge: `${s.available} 空位`})),
     }), () => ({day: "today"})),
+    // 体育平台对请求频率有严格限制（2026-09-17 实测：并发查询会收到「请求频繁」，客户端退避重试可恢复；
+    // 串行查 3 个项目约 44 个请求、22 秒，完全不触发限流）。看板固定串行查羽毛球/乒乓球/网球三个热门项目，
+    // 间隔 15 分钟；其他项目引导用户去对话里查。
+    source<SportsResourcesData>("sports", "体育场馆", "campus", "今日羽毛球、乒乓球、网球场地空余，其他项目请在对话中查询", 15, "get_sports_resources", d => {
+        const sessions = d.venues.flatMap(v => v.sessions.map(s => ({venue: v.name, ...s})));
+        const open = sessions.filter(s => s.availableFields.length > 0);
+        return {
+            metrics: [metric("可订时段", open.length, "个"), metric("覆盖场馆", new Set(open.map(s => s.venue)).size, "处")],
+            // 详情弹框展示所有场馆今日全部时段（含已订满），主卡片只留汇总指标
+            items: sessions.map(s => ({
+                title: `${s.venue} ${s.time}`,
+                subtitle: s.availableFields.length > 0 ? `可订 ${s.availableFields.length}/${s.total} 块场地` : `已订满（${s.total} 块场地）`,
+                badge: s.cost !== null ? `${s.cost} 元/场` : undefined,
+                ...(s.availableFields.length > 0 ? {body: `可订场地：${s.availableFields.join("、")}`} : {}),
+            })),
+            note: d.note,
+        };
+    }, () => ({resourceNames: ["羽毛球", "乒乓球", "网球"]})),
     source<LearnCoursesData>("courses", "本学期课程", "learning", "网络学堂课程、教师与上课地点", 30, "get_learn_courses", d => ({
         metrics: [metric("学堂课程", d.count, "门")],
         items: d.courses.map(c => ({title: c.name, subtitle: join(c.teacher, c.courseNumber), body: c.timeAndLocation.join("\n")})), note: d.semester,

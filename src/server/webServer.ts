@@ -920,10 +920,13 @@ export function createWebServer(
     };
 
     /**
-     * GET /api/temp-image/<token> —— 对话内临时图片（show_email_image / show_learn_image 的产物）。
-     * 取图不删除：用户刷新历史、反复查看都还在；只有用户在图片旁点「已用完」
+     * GET /api/temp-image/<token> —— 对话内临时图片/课件预览
+     * （show_email_image / show_learn_image / preview_learn_file 的产物）。
+     * 取文件不删除：用户刷新历史、反复查看都还在；只有用户点「已用完」
      * （DELETE 同路径）确认使用完毕后才删本地文件。TTL（store 内）做不点的兜底。
      * 需要登录（与 /api/upload 同级）；token 是 randomUUID，不暴露真实路径。
+     * Content-Disposition 统一给 inline + 原始文件名：PDF 才能在预览卡片的
+     * iframe 里内嵌渲染（缺省或 attachment 会被浏览器直接下载）。
      */
     const imageStore = opts.imageStore;
     const handleTempImage = async (req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> => {
@@ -954,9 +957,16 @@ export function createWebServer(
         }
         res.writeHead(200, {
             "Content-Type": entry.contentType,
+            // inline + RFC 5987 文件名：PDF 在 iframe 里渲染而非触发下载，文件名保持中文原名
+            "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(entry.filename)}`,
             // 不缓存：用户点「已用完」后刷新历史应拿到 404，前端有兜底文案
             "Cache-Control": "no-store",
         });
+        // HEAD：前端预览卡片的存活探测，只回响应头不传文件体
+        if (req.method === "HEAD") {
+            res.end();
+            return;
+        }
         const stream = createReadStream(entry.path);
         stream.on("error", () => {
             if (!res.headersSent) res.writeHead(404);
@@ -1354,7 +1364,7 @@ export function createWebServer(
             if (req.method === "POST" && url.pathname === "/api/session/title") return handleSessionTitle(req, res);
             if (req.method === "POST" && url.pathname === "/api/chat") return handleChat(req, res);
             if (req.method === "POST" && url.pathname === "/api/upload") return handleUpload(req, res, url);
-            if ((req.method === "GET" || req.method === "DELETE") && url.pathname.startsWith("/api/temp-image/")) {
+            if ((req.method === "GET" || req.method === "HEAD" || req.method === "DELETE") && url.pathname.startsWith("/api/temp-image/")) {
                 return handleTempImage(req, res, url);
             }
             if (req.method === "POST" && url.pathname === "/api/confirm") return handleConfirm(req, res);

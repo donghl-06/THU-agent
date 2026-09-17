@@ -1,5 +1,5 @@
 import {motion} from "motion/react";
-import {ArrowUpRight, BookOpen, CalendarDays, Clock3, CreditCard, Newspaper, Volleyball} from "lucide-react";
+import {ArrowUpRight, BookOpen, CalendarDays, CreditCard, GraduationCap, Newspaper, Volleyball} from "lucide-react";
 import {Brand} from "./Controls";
 import {contentReveal as reveal, staggeredReveal} from "../lib/motion";
 
@@ -7,7 +7,7 @@ export const suggestions = [
     {icon: CalendarDays, title: "今天的课表", detail: "课程、时间与上课地点", question: "我今天有什么课？"},
     {icon: Volleyball, title: "运动一下", detail: "看看今晚的场馆空位", question: "今晚哪里可以打羽毛球？"},
     {icon: BookOpen, title: "找个自习位", detail: "查询图书馆可用座位", question: "帮我看看图书馆哪里有位置"},
-    {icon: Clock3, title: "安排空闲时间", detail: "查查明天的空闲时段", question: "我明天下午有什么空闲时间？"},
+    {icon: GraduationCap, title: "网络学堂", detail: "查作业、公告，预览最新课件", question: "网络学堂最近有什么新动态？作业、公告和最新课件都帮我看看"},
     {icon: Newspaper, title: "校园动态", detail: "浏览校园通知与资讯", question: "最近有什么重要的校园通知或资讯？"},
     {icon: CreditCard, title: "校园卡余额", detail: "查看校园卡账户信息", question: "我的校园卡余额是多少？"},
 ];

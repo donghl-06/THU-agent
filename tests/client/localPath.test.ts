@@ -7,7 +7,7 @@
 import {describe, expect, it} from "vitest";
 import {homedir} from "node:os";
 import {existsSync} from "node:fs";
-import {resolveUserPath} from "../../src/utils/localPath";
+import {displayUserPath, resolveUserPath} from "../../src/utils/localPath";
 import {decodeDispositionFilename} from "../../src/client/learn/downloadSession";
 
 const onWsl = process.platform === "linux" && existsSync("/mnt/c");
@@ -46,6 +46,23 @@ describe("resolveUserPath", () => {
         if (!onWsl || !existsSync("/mnt/c")) return;
         const r = resolveUserPath("C:/Users/dongh_o/Downloads");
         expect(r).toMatchObject({ok: true, path: "/mnt/c/Users/dongh_o/Downloads"});
+    });
+});
+
+describe("displayUserPath（给用户看的路径展示形式）", () => {
+    it("WSL 下 /mnt/<盘>/ 翻译回 Windows 盘符形式；其余原样返回", () => {
+        if (onWsl) {
+            expect(displayUserPath("/mnt/c/Users/dongh_o/Downloads/课件.pdf"))
+                .toBe("C:\\Users\\dongh_o\\Downloads\\课件.pdf");
+            expect(displayUserPath("/mnt/d/大学/第三章.pptx")).toBe("D:\\大学\\第三章.pptx");
+            expect(displayUserPath("/mnt/c")).toBe("C:\\");
+            // 非挂载路径（WSL 自身文件系统）保持原样
+            expect(displayUserPath("/home/dhl/Downloads/a.pdf")).toBe("/home/dhl/Downloads/a.pdf");
+        } else {
+            // 非 WSL：即使是 /mnt/c/... 形式也不翻译（不是真实挂载）
+            expect(displayUserPath("/mnt/c/Users/x/a.pdf")).toBe("/mnt/c/Users/x/a.pdf");
+        }
+        expect(displayUserPath("C:\\Users\\x\\a.pdf")).toBe("C:\\Users\\x\\a.pdf");
     });
 });
 

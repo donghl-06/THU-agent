@@ -102,3 +102,16 @@ function detectWindowsDownloads(): string | null {
         return null;
     }
 }
+
+/**
+ * 给用户看的路径展示形式：WSL 下 /mnt/c/... 翻译回 Windows 盘符形式
+ * （C:\Users\...），用户可以直接粘到 Windows 资源管理器；其余情况原样返回。
+ * 仅用于展示（消息文案），代码内部路径操作仍用原始 WSL 路径。
+ */
+export function displayUserPath(path: string): string {
+    if (!isWsl()) return path;
+    const m = /^\/mnt\/([a-z])(\/(.*))?$/.exec(path);
+    if (!m) return path;
+    const rest = (m[3] ?? "").replaceAll("/", "\\");
+    return `${m[1].toUpperCase()}:\\${rest}`;
+}

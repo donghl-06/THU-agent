@@ -94,28 +94,37 @@ export function createGetSportsResourcesSkill(client: SportsSource): Skill {
         name: "get_sports_resources",
         description:
             "查询体育场馆在指定日期（默认今天）各时段的场地空余情况。" +
-            "resourceName 必填，支持关键词匹配场景（如“羽毛球”会同时查气膜馆、综体、西体的羽毛球场；" +
-            "“乒乓球”“网球”“篮球”“台球”“游泳”等均可）。体育平台对请求频率有严格限制，" +
-            "禁止不带关键词一次查询全部场馆（会触发限流导致查不到数据）。",
+            "resourceName（或 resourceNames 一次查多个项目）必填，支持关键词匹配场景" +
+            "（如“羽毛球”会同时查气膜馆、综体、西体的羽毛球场；“乒乓球”“网球”“篮球”“台球”“游泳”等均可）。" +
+            "体育平台对请求频率有严格限制，禁止不带关键词一次查询全部场馆（会触发限流导致查不到数据）。",
         inputSchema: {
             type: "object",
             properties: {
                 resourceName: {
                     type: "string",
-                    description: "场馆项目关键词，如“羽毛球”“气膜馆”。必填：平台限制请求频率，禁止一次查询全部场馆",
+                    description: "场馆项目关键词，如“羽毛球”“气膜馆”。必填（或用 resourceNames）：平台限制请求频率，禁止一次查询全部场馆",
+                },
+                resourceNames: {
+                    type: "array",
+                    items: {type: "string"},
+                    description: "可选，一次查询多个项目关键词，如 [\"羽毛球\",\"乒乓球\",\"网球\"]；与 resourceName 取并集",
                 },
                 date: {
                     type: "string",
                     description: "要查询的日期，格式 YYYY-MM-DD；省略时表示今天",
                 },
             },
-            required: ["resourceName"],
+            required: [],
         },
 
         async execute(input: unknown): Promise<SkillResult<SportsResourcesData>> {
-            const raw = (input ?? {}) as {resourceName?: unknown; date?: unknown};
+            const raw = (input ?? {}) as {resourceName?: unknown; resourceNames?: unknown; date?: unknown};
             if (raw.resourceName !== undefined && typeof raw.resourceName !== "string") {
                 return fail("INVALID_INPUT", "resourceName 必须是字符串");
+            }
+            if (raw.resourceNames !== undefined &&
+                (!Array.isArray(raw.resourceNames) || raw.resourceNames.some((k) => typeof k !== "string"))) {
+                return fail("INVALID_INPUT", "resourceNames 必须是字符串数组");
             }
             if (raw.date !== undefined && typeof raw.date !== "string") {
                 return fail("INVALID_INPUT", "date 必须是 YYYY-MM-DD 格式的字符串");
@@ -125,6 +134,11 @@ export function createGetSportsResourcesSkill(client: SportsSource): Skill {
                 return fail("INVALID_INPUT", `无法解析日期：${raw.date}，请使用 YYYY-MM-DD 格式`);
             }
             const dateStr = formatDate(target);
+            // 单项目 resourceName 与多项目 resourceNames 取并集，去重去空
+            const keywords = [
+                ...(typeof raw.resourceName === "string" ? [raw.resourceName] : []),
+                ...((raw.resourceNames as string[] | undefined) ?? []),
+            ].map((k) => k.trim()).filter((k, i, all) => k !== "" && all.indexOf(k) === i);
 
             try {
                 // 场景关键词匹配。必须带关键词：全场景扫描一次要发几百个请求，
@@ -132,22 +146,28 @@ export function createGetSportsResourcesSkill(client: SportsSource): Skill {
                 // 精确匹配为空时启用模糊匹配：平台场景名有错别字（"北体兵乓球"），
                 // 严格子串会让"乒乓球"永远查不到（2026-09-02 用户实测）
                 const scenes = await client.listScenes();
-                const keyword = typeof raw.resourceName === "string" ? raw.resourceName.trim() : "";
-                if (keyword === "") {
+                if (keywords.length === 0) {
                     return fail(
                         "INVALID_INPUT",
                         "请指明要查询的场馆项目（如：羽毛球、游泳、乒乓球）。" +
                         "平台限制请求频率，不支持一次查询全部场馆。",
                     );
                 }
-                const {exact, fuzzy} = matchScenes(scenes, keyword);
-                const matched = exact.length > 0 ? exact : fuzzy;
-                if (matched.length === 0) {
-                    return fail(
-                        "INVALID_INPUT",
-                        `找不到与“${keyword}”匹配的场馆。可选：${scenes.map((s) => s.sceneName).join("、")}。` +
-                        "请从以上名称中选用后重试，不要自行推测失败原因。",
-                    );
+                // 逐关键词匹配场景后按 uuid 取并集（保序），任一关键词无匹配则报错指明是哪个
+                const matched: typeof scenes = [];
+                for (const keyword of keywords) {
+                    const {exact, fuzzy} = matchScenes(scenes, keyword);
+                    const hits = exact.length > 0 ? exact : fuzzy;
+                    if (hits.length === 0) {
+                        return fail(
+                            "INVALID_INPUT",
+                            `找不到与“${keyword}”匹配的场馆。可选：${scenes.map((s) => s.sceneName).join("、")}。` +
+                            "请从以上名称中选用后重试，不要自行推测失败原因。",
+                        );
+                    }
+                    for (const hit of hits) {
+                        if (!matched.some((s) => s.uuid === hit.uuid)) matched.push(hit);
+                    }
                 }
 
                 // 串行查询：每个场景内部要走位置级联（4 级）+ 按房间查询，

@@ -106,6 +106,29 @@ describe("get_sports_resources Skill（假数据，无网络）", () => {
         expect(r.data!.note).toContain("西体羽毛球(后馆)（未开放）");
     });
 
+    it("resourceNames 一次查多个项目：按关键词逐个匹配后按 uuid 取并集", async () => {
+        const r = await exec({resourceNames: ["气膜馆", "台球", "气膜馆羽毛球"], date: "2026-08-29"});
+        expect(r.success).toBe(true);
+        // 气膜馆 + 西体台球；第三个关键词与第一个重复命中同一场景，去重后共 2 个
+        expect(r.data!.venues.map((v) => v.name)).toEqual(["气膜馆羽毛球", "西体台球"]);
+    });
+
+    it("resourceName 与 resourceNames 取并集；某个关键词无匹配时报错指明是哪个", async () => {
+        const both = await exec({resourceName: "综体", resourceNames: ["西体"], date: "2026-08-29"});
+        expect(both.success).toBe(true);
+        expect(both.data!.venues.map((v) => v.name)).toEqual(["综体羽毛球", "西体羽毛球(后馆)", "西体台球"]);
+        const bad = await exec({resourceName: "羽毛球", resourceNames: ["足球场"], date: "2026-08-29"});
+        expect(bad.success).toBe(false);
+        expect(bad.error!.code).toBe("INVALID_INPUT");
+        expect(bad.error!.message).toContain("足球场");
+    });
+
+    it("resourceNames 类型校验：必须是字符串数组", async () => {
+        const r = await exec({resourceNames: "羽毛球", date: "2026-08-29"});
+        expect(r.success).toBe(false);
+        expect(r.error!.code).toBe("INVALID_INPUT");
+    });
+
     it("关键词无匹配时报错并列出可选场景", async () => {
         const r = await exec({resourceName: "足球场", date: "2026-08-29"});
         expect(r.success).toBe(false);

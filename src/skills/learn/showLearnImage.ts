@@ -118,7 +118,7 @@ export function createShowLearnImageSkill(client: ShowSource, images?: TempImage
             "course 课名关键词必填；三个来源都省略且课件里只有一张图片时自动选中。" +
             "成功后必须把返回的 markdown 字段原样写进回复，图片才会显示；" +
             "图片是临时文件，用户在图片旁点「已用完」后服务端才删除。" +
-            "非图片课件或要长期保存文件时，用 download_learn_file。",
+            "PDF/PPT 课件预览用 preview_learn_file；其他非图片课件或要长期保存文件时，用 download_learn_file。",
         inputSchema: {
             type: "object",
             properties: {
@@ -234,10 +234,10 @@ export function createShowLearnImageSkill(client: ShowSource, images?: TempImage
                 const isImage =
                     downloaded.contentType.startsWith("image/") || IMAGE_EXT.test(displayName);
                 if (!isImage) {
-                    return fail(
-                        "INVALID_INPUT",
-                        `「${title}」不是图片。要下载到本地请用 download_learn_file。`,
-                    );
+                    const hint = /\.(pdf|pptx?)$/i.test(displayName)
+                        ? "要下载到本地请用 download_learn_file；PDF/PPT 课件也可改用 preview_learn_file 在对话里预览。"
+                        : "要下载到本地请用 download_learn_file。";
+                    return fail("INVALID_INPUT", `「${title}」不是图片。${hint}`);
                 }
                 if (downloaded.buffer.length > MAX_IMAGE_BYTES) {
                     return fail("INVALID_INPUT", `图片太大（${Math.round(downloaded.buffer.length / 1024 / 1024)}MB），不在对话里显示。`);

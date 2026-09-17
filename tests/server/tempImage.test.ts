@@ -98,6 +98,33 @@ describe("/api/temp-image 临时图片（用户确认后删除）", () => {
         expect((await fetch(`${base}/api/temp-image/nope`, {method: "DELETE"})).status).toBe(404);
     });
 
+    it("课件预览：register 的 PDF 带 inline Content-Disposition 与原文件名（iframe 内嵌渲染而非下载）", async () => {
+        await start();
+        const userFile = join(workDir, "第三章课件.pdf");
+        writeFileSync(userFile, "pdf-bytes");
+        const {url} = store.register(userFile, "application/pdf", "第三章课件.pdf");
+        const resp = await fetch(`${base}${url}`);
+        expect(resp.status).toBe(200);
+        expect(resp.headers.get("content-type")).toBe("application/pdf");
+        expect(resp.headers.get("content-disposition"))
+            .toBe(`inline; filename*=UTF-8''${encodeURIComponent("第三章课件.pdf")}`);
+        expect(Buffer.from(await resp.arrayBuffer()).toString()).toBe("pdf-bytes");
+        expect(existsSync(userFile)).toBe(true); // GET 不删用户文件
+    });
+
+    it("HEAD 存活探测：200 且不带文件体；文件删除后 404（前端预览卡片依赖）", async () => {
+        await start();
+        const {token, url} = store.put(Buffer.from("jpeg-bytes"), "image/jpeg", "a.jpg");
+        const head = await fetch(`${base}${url}`, {method: "HEAD"});
+        expect(head.status).toBe(200);
+        expect(head.headers.get("content-type")).toBe("image/jpeg");
+        expect((await head.arrayBuffer()).byteLength).toBe(0);
+        expect(store.pendingCount).toBe(1); // 探测不注销
+
+        await fetch(`${base}${url}`, {method: "DELETE"});
+        expect((await fetch(`${base}${url}`, {method: "HEAD"})).status).toBe(404);
+    });
+
     it("未登录 401", async () => {
         await start({requireLogin: true});
         const {url} = store.put(Buffer.from("x"), "image/png", "a.png");

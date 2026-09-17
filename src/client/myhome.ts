@@ -37,6 +37,22 @@ function grabSpan(html: string, spanId: string): string {
     return m?.[1]?.trim() ?? "";
 }
 
+/**
+ * 按响应真实编码解码。m.myhome 是老式 ASP.NET 站，页面是 GB2312
+ * （实测 content-type: text/html; charset=gb2312，2026-09-17），
+ * 直接 resp.text() 按 UTF-8 解码会把楼号等中文变成乱码。
+ */
+async function decodeBody(resp: Response): Promise<string> {
+    const buf = Buffer.from(await resp.arrayBuffer());
+    const charset = /charset=["']?([\w-]+)/i.exec(resp.headers.get("content-type") ?? "")?.[1]?.toLowerCase();
+    if (charset && charset !== "utf-8" && charset !== "utf8") {
+        try {
+            return new TextDecoder(charset).decode(buf);
+        } catch { /* 未知编码名：回落 UTF-8 */ }
+    }
+    return buf.toString("utf8");
+}
+
 export class MyhomeClient {
     /** 自己的 cookie jar（name → value），与 lib 的全局 jar 隔离 */
     private readonly jar = new Map<string, string>();
@@ -85,7 +101,7 @@ export class MyhomeClient {
                 body = undefined; // 重定向后变 GET
                 continue;
             }
-            return resp.text();
+            return decodeBody(resp);
         }
         throw new ThuError("UPSTREAM_ERROR", "m.myhome 重定向次数过多");
     }

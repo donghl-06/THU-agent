@@ -13,7 +13,7 @@ import {join} from "node:path";
 import type {File as LearnFile} from "thu-learn-lib";
 import {ThuError} from "../../client/errors";
 import type {LearnClient} from "../../client/learn/LearnClient";
-import {defaultDownloadDir, resolveUserPath} from "../../utils/localPath";
+import {defaultDownloadDir, displayUserPath, resolveUserPath} from "../../utils/localPath";
 import {fail, ok, type Skill, type SkillResult} from "../base/types";
 import {courseDisplayName, resolveUniqueCourse, type CourseSource} from "./courseResolve";
 
@@ -27,8 +27,8 @@ export interface DownloadLearnFileData {
 
 type DownloadSource = CourseSource & Pick<LearnClient, "getFileList" | "downloadFile">;
 
-/** 文件名清洗：去掉路径分隔符与控制字符，防止写穿目录 */
-function sanitizeFilename(name: string): string {
+/** 文件名清洗：去掉路径分隔符与控制字符，防止写穿目录（preview_learn_file 也复用） */
+export function sanitizeFilename(name: string): string {
     return name.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").trim() || "download";
 }
 
@@ -135,7 +135,8 @@ export function createDownloadLearnFileSkill(client: DownloadSource): Skill {
                     savedPath,
                     sizeBytes: downloaded.buffer.length,
                     message:
-                        `已下载「${courseName}」的课件 ${file!.title} → ${savedPath}` +
+                        // 展示路径：WSL 下给用户看 Windows 盘符形式（savedPath 字段仍是原始路径，供程序使用）
+                        `已下载「${courseName}」的课件 ${file!.title} → ${displayUserPath(savedPath)}` +
                         (pathNote ? `（${pathNote}）` : ""),
                 });
             } catch (e) {

@@ -15,6 +15,7 @@
     --muted: #8b8992;
     --line: #e7e6ec;
     --line-soft: #eeedf1;
+    --line-strong: #d4d2dc;
     --accent: #85518e;
     --accent-hover: #71417a;
     --accent-soft: #ede5f0;
@@ -46,6 +47,7 @@
     --muted: #898692;
     --line: #36353c;
     --line-soft: #2c2b32;
+    --line-strong: #4a4854;
     --accent: #b087bd;
     --accent-hover: #bd98c8;
     --accent-soft: #332a3b;
@@ -222,6 +224,17 @@ svg { display: block; }
 .cloud-media-actions a:hover { text-decoration: underline; text-underline-offset: 3px; }
 .cloud-media-error { display: inline-flex; align-items: center; gap: 6px; color: var(--danger); font-size: 11px; line-height: 1.6; }
 .cloud-media-warning { color: var(--muted); font-size: 12px; }
+.file-preview { display: flex; flex-direction: column; gap: 9px; margin: 8px 0; max-width: min(640px, 100%); border: 1px solid var(--line-soft); border-radius: 14px; background: var(--surface-soft); box-shadow: var(--shadow); overflow: hidden; }
+.file-preview-title { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 11px 11px 0; color: var(--text); font-size: 12px; font-weight: 600; }
+.file-preview-title > svg { flex: none; color: var(--accent-text); }
+.file-preview-title > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-preview-frame { display: block; width: 100%; height: 480px; border: 0; background: #fff; }
+.file-preview-hint { padding: 0 11px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.file-preview-actions { display: flex; align-items: center; gap: 12px; padding: 0 11px 11px; }
+.file-preview-actions a { display: inline-flex; align-items: center; gap: 5px; color: var(--accent-text); font-size: 11px; }
+.file-preview-actions a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.file-preview-actions .image-done { margin-top: 0; }
+.file-preview .image-note { padding: 0 11px 11px; }
 .image-done { margin-top: 6px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 12px; color: var(--secondary); font-size: 11px; }
 .image-done:hover { color: var(--accent-text); border-color: var(--accent); }
 .image-note { display: block; color: var(--muted); font-size: 12px; }

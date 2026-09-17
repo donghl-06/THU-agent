@@ -32,15 +32,15 @@ afterEach(async () => {
 });
 
 describe("dashboard aggregation", () => {
-    it("normalizes all 16 sources, exposes independent errors and never executes unlisted writes", async () => {
+    it("normalizes all 17 sources, exposes independent errors and never executes unlisted writes", async () => {
         const write = vi.fn(async () => ok({}));
         const service = make([...dashboardFixtureSkills(), {name: "recharge_campus_card", description: "write", inputSchema: {}, requiresConfirmation: true, execute: write}]);
-        expect(service.snapshot(true).panels).toHaveLength(16);
+        expect(service.snapshot(true).panels).toHaveLength(17);
         const panels = await settled(service);
         expect(panels.find(p => p.id === "card")?.data?.metrics?.[0].value).toBe("128.60");
         expect(panels.find(p => p.id === "homework")?.data?.items?.[0].attention).toBe(false);
         expect(panels.find(p => p.id === "network")).toMatchObject({status: "error", error: expect.stringContaining("验证码")});
-        expect(panels.filter(p => p.status === "ready")).toHaveLength(14);
+        expect(panels.filter(p => p.status === "ready")).toHaveLength(15);
         expect(write).not.toHaveBeenCalled();
     });
 

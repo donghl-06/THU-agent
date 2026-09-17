@@ -33,8 +33,12 @@
 .dashboard-search { display: flex; align-items: center; gap: 7px; color: var(--muted); }
 .dashboard-search input { width: 135px; padding: 8px 0; color: var(--text); background: transparent; border: 0; font-size: 12px; }
 .dashboard-search:focus-within { color: var(--accent-text); }
-.dashboard-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 38px; align-items: start; }
-.dashboard-panel { min-width: 0; padding: 23px 0 19px; border-bottom: 1px solid var(--line); scroll-margin-top: 18px; }
+/* 卡片按行拉伸等高：左右两列顶边/底边对齐，内容由「查看详情」弹框承载完整版 */
+.dashboard-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 38px; }
+.dashboard-panel { min-width: 0; padding: 23px 0 19px; border-bottom: 2px solid var(--line-strong); scroll-margin-top: 18px; display: flex; flex-direction: column; height: 100%; }
+.dashboard-panel-body { flex: 1; min-height: 0; }
+/* 卡片只放总结：一行摘要，超出省略 */
+.dashboard-summary { color: var(--secondary); font-size: 11px; line-height: 1.7; margin: 4px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dashboard-panel > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .dashboard-panel-title { display: flex; align-items: center; gap: 9px; color: var(--accent-text); min-width: 0; }
 .dashboard-panel-title h2 { font-weight: 550; font-size: 15px; color: var(--text); }
@@ -64,7 +68,7 @@ button.dashboard-item > svg { margin-left: auto; color: var(--muted); flex: none
 .dashboard-pending { display: flex; align-items: center; gap: 8px; color: var(--muted); padding: 24px 0; font-size: 12px; }
 .dashboard-empty { color: var(--muted); font-size: 11px; padding: 18px 0; }
 .dashboard-note { color: var(--secondary); font-size: 10px; line-height: 1.9; margin: 10px 0; overflow-wrap: anywhere; }
-.dashboard-panel > footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding-top: 14px; color: var(--muted); font-size: 10px; }
+.dashboard-panel > footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding-top: 14px; margin-top: auto; color: var(--muted); font-size: 10px; }
 .dashboard-panel > footer > button { display: flex; align-items: center; gap: 4px; color: var(--accent-text); font-size: 10px; white-space: nowrap; padding: 5px 0; }
 .dashboard-panel > footer svg { transition: transform .2s; }
 .dashboard-panel > footer .is-expanded { transform: rotate(180deg); }
@@ -76,6 +80,11 @@ button.dashboard-item > svg { margin-left: auto; color: var(--muted); flex: none
 .dashboard-detail { width: min(640px, calc(100vw - 32px)); }
 .dashboard-detail-meta { margin: 12px 0 23px; font-size: 12px; line-height: 1.8; color: var(--secondary); }
 .dashboard-detail-body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.9; font-size: 13px; }
+/* 板块详情弹框（卡片「查看详情」的放大态） */
+.dashboard-panel-detail { width: min(680px, calc(100vw - 32px)); max-height: calc(100vh - 64px); overflow: auto; scrollbar-width: thin; }
+.dashboard-panel-detail .dashboard-detail-meta { margin-bottom: 8px; }
+.dashboard-panel-detail-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+.dashboard-panel-detail-footer .button { flex: none; font-size: 12px; }
 .dashboard-spin, .dashboard-spin-icon svg { animation: dashboard-spin 1.2s linear infinite; }
 @keyframes dashboard-spin { to { transform: rotate(360deg); } }
 @keyframes dashboard-pulse { 50% { opacity: .35; } }

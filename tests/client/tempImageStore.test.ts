@@ -2,7 +2,7 @@
  * TempImageStore 测试：put/peek/consume 生命周期、TTL 自清理。
  */
 import {afterEach, describe, expect, it} from "vitest";
-import {existsSync, mkdtempSync, readFileSync, rmSync} from "node:fs";
+import {existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {TempImageStore} from "../../src/utils/tempImageStore";
@@ -48,6 +48,32 @@ describe("TempImageStore", () => {
         const store = setup();
         expect(store.peek("no-such-token")).toBeUndefined();
         expect(store.consume("no-such-token")).toBe(false);
+    });
+
+    it("register 登记已存在文件：不复制、peek 指向原路径；consume 删原文件", () => {
+        const store = setup();
+        const userFile = join(dir, "第三章课件.pdf");
+        writeFileSync(userFile, "pdf-bytes");
+        const {token, url} = store.register(userFile, "application/pdf", "第三章课件.pdf");
+        expect(url).toBe(`/api/temp-image/${token}`);
+        const entry = store.peek(token)!;
+        expect(entry.path).toBe(userFile); // 不复制临时副本，直接引用用户文件
+        expect(entry.contentType).toBe("application/pdf");
+        expect(store.consume(token)).toBe(true);
+        expect(existsSync(userFile)).toBe(false); // 用户点「已用完」→ 删用户文件
+        expect(store.pendingCount).toBe(0);
+    });
+
+    it("register 的文件 TTL 到期只注销 token，不删用户文件", async () => {
+        const store = setup(30); // 30ms
+        const userFile = join(dir, "课件.pptx");
+        writeFileSync(userFile, "pptx-bytes");
+        const {token} = store.register(userFile, "application/vnd.openxmlformats-officedocument.presentationml.presentation", "课件.pptx");
+        expect(store.peek(token)).toBeDefined();
+        await new Promise((r) => setTimeout(r, 120));
+        expect(store.pendingCount).toBe(0);
+        expect(store.peek(token)).toBeUndefined(); // 预览链接失效
+        expect(existsSync(userFile)).toBe(true); // 但用户文件保留
     });
 
     it("TTL 到期自动删文件并注销（用户一直不点「已用完」的兜底）", async () => {

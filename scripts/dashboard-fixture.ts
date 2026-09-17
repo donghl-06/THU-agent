@@ -31,6 +31,10 @@ export function dashboardFixtureSkills(): Skill[] {
         get_emails: {mode: "list", count: 1, emails: [{uid: 1, subject: "本周学术讲座邀请", from: "校园学术活动", date: `${date} 10:00`, seen: false}]},
         get_report: {count: 2, courses: [{name: "微积分", credit: 5, grade: "A", point: 4, semester: "2025-2026-2"}, {name: "线性代数", credit: 4, grade: "A-", point: 3.7, semester: "2025-2026-2"}]},
         get_library_rooms: {date, rooms: [{kindName: "北馆", roomName: "研讨间", devName: "301", minUser: 3, maxUser: 6, minMinute: 30, maxMinute: 180, openStart: "08:00", openEnd: "22:00", booked: [{start: "14:00", end: "16:00"}]}], failedKinds: ["法律图书馆"]},
+        get_sports_resources: {date, venues: [
+            {name: "气膜馆羽毛球", sessions: [{time: "19:00-20:00", total: 8, availableFields: ["3 号场", "5 号场"], cost: 15}, {time: "20:00-21:00", total: 8, availableFields: [], cost: 15}]},
+            {name: "综体羽毛球", sessions: [{time: "18:00-19:00", total: 6, availableFields: ["1 号场"], cost: 20}]},
+        ]},
     };
     return [
         ...Object.entries(data).map(([name, value]) => ({name, description: "Offline dashboard fixture", inputSchema: {}, execute: async () => ok(value)})),
