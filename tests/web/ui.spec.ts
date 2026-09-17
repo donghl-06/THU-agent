@@ -633,8 +633,12 @@ test("云盘视频和文件渲染为可清理的本地预览卡片", async ({pag
 
     const fileCard = page.locator(".cloud-media.file");
     await expect(fileCard).toBeVisible();
-    await expect(fileCard.locator(".cloud-media-title")).toContainText("测试讲义.pdf");
+    await expect(fileCard.locator(".cloud-file-button")).toContainText("测试讲义.pdf");
+    await expect(fileCard.getByRole("button", {name: /测试讲义\.pdf/})).toHaveAttribute("title", "点击展开 / 收起预览");
+    await expect(fileCard.getByRole("link", {name: "新窗口预览"})).toHaveAttribute("href", fileUrl);
     await expect(fileCard.getByRole("link", {name: "下载文件"})).toHaveAttribute("href", fileUrl);
+    await fileCard.locator(".cloud-file-button").click();
+    await expect(fileCard.locator(".cloud-document-preview")).toHaveAttribute("src", `${fileUrl}#toolbar=1&view=FitH`);
     await fileCard.getByRole("button", {name: "已用完，删除预览"}).click();
     await expect(page.getByText("（云盘文件预览已清理，可让清灵重新打开）", {exact: true})).toBeVisible();
 

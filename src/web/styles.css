@@ -220,7 +220,14 @@ svg { display: block; }
 .cloud-media-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .cloud-media-actions a { display: inline-flex; align-items: center; gap: 5px; color: var(--accent-text); font-size: 11px; }
 .cloud-media-actions a:hover { text-decoration: underline; text-underline-offset: 3px; }
-.cloud-media.file { max-width: min(430px, 100%); }
+.cloud-media.file { gap: 8px; max-width: min(560px, 100%); padding: 0; border: 0; background: transparent; box-shadow: none; }
+.cloud-file-button { display: flex; align-items: center; gap: 8px; align-self: flex-start; height: 54px; max-width: 260px; padding: 0 13px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--secondary); font-size: 12px; cursor: pointer; transition: border-color .2s, color .2s; }
+.cloud-file-button:hover { border-color: color-mix(in srgb, var(--accent) 40%, transparent); color: var(--text); }
+.cloud-file-button > svg:first-child { flex: none; color: var(--accent-text); }
+.cloud-file-button > svg:last-child { flex: none; margin-left: auto; color: var(--muted); }
+.cloud-file-button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cloud-document-preview { width: 100%; height: min(520px, 65vh); border: 1px solid var(--line-soft); border-radius: 10px; background: var(--surface); }
+.cloud-media.file .cloud-media-actions { justify-content: flex-start; }
 .cloud-media-actions .image-done { margin-top: 0; }
 .cloud-media-error { display: inline-flex; align-items: center; gap: 6px; color: var(--danger); font-size: 11px; line-height: 1.6; }
 .cloud-media-warning { color: var(--muted); font-size: 12px; }
