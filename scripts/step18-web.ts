@@ -25,6 +25,7 @@ import {TaskStore} from "../src/tasks/taskStore";
 import type {LoginCredentials} from "../src/client/auth";
 import {resolveStableFingerprint} from "../src/client/fingerprintStore";
 import {TempImageStore} from "../src/utils/tempImageStore";
+import {CloudFileStore} from "../src/utils/cloudFileStore";
 import {dirname, join} from "node:path";
 import {existsSync} from "node:fs";
 
@@ -49,7 +50,7 @@ const SYSTEM_PROMPT = `你是"清灵"（QingLing），一个帮清华学生查�
 4. 预约/取消/充值等写操作遵循本轮访问模式。核实对象、日期、时段、费用/金额；缺少必要参数时询问，参数明确时调用工具。付费场次需要支付方式（线上/线下）；用户没主动说就询问，不要自己猜。
 5. 用户要"明早6点帮我抢场""下午提醒我"这类未来要做的事时，用任务类工具（create_reminder / schedule_sports_booking）登记，信息齐全后按本轮访问模式创建。
 6. 用户想看邮件或网络学堂里的图片（课程群二维码、图片课件、截图等）时，调用 show_email_image 或 show_learn_image，并把返回的 markdown 字段原样写进回复，图片才会显示在对话里。
-7. 用户想打开或播放清华云盘文件（录屏、音频、普通文件）时，调用 show_cloud_file，并把返回的 markdown 字段逐字原样写进回复；尤其是 ![video:...] / ![audio:...] 不得改成普通下载链接，播放器/文件卡片才会显示。
+7. 用户想查看、打开或播放清华云盘文件（图片、录屏、音频、普通文件）时，调用 show_cloud_file，并把返回的 markdown 字段逐字原样写进回复；尤其是 ![图片名](...) / ![video:...] / ![audio:...] / ![file:...] 不得改成普通下载链接，图片、播放器和文件卡片才会显示。
 8. 用户明确要求上传、新建、重命名、移动、复制、删除清华云盘内容或生成分享链接时，先复述操作对象、目标和有效期；用户确认后使用对应云盘写工具。用户只是询问能否操作或要求整理方案时，不要执行写工具。
 9. 回答简洁口语化，像同学之间说话。`;
 
@@ -63,6 +64,7 @@ let sportsCredentials: LoginCredentials | undefined;
 const notificationHub = new NotificationHub();
 // 对话内一次性图片通道：技能（show_email_image）与 Web 端点共享同一登记处
 const imageStore = new TempImageStore(join(scriptDirectory, "..", "data", "tmp-images"));
+const cloudFileStore = new CloudFileStore();
 const authSessionPath = join(scriptDirectory, "..", "data", "auth.json");
 const deviceFingerprint = resolveStableFingerprint();
 
@@ -118,6 +120,7 @@ const server = createWebServer(
                 thuClient,
                 scheduler,
                 imageStore,
+                cloudFileStore,
             }),
             SYSTEM_PROMPT,
             undefined,
@@ -151,6 +154,7 @@ const server = createWebServer(
         scheduler,
         notificationHub,
         imageStore,
+        cloudFileStore,
     },
 );
 

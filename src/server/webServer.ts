@@ -50,6 +50,7 @@
  * 把转发目标切到本轮 SSE 连接的桥上（busy 互斥保证同时只有一轮）。
  */
 import {createServer, type IncomingMessage, type ServerResponse, type Server} from "node:http";
+import {Readable} from "node:stream";
 import {DashboardService} from "./dashboard";
 import type {Skill} from "../skills/base/types";
 import {createReadStream, mkdirSync, readFileSync, readdirSync, writeFileSync} from "node:fs";
@@ -74,6 +75,7 @@ import {generateTitle} from "./titleGen";
 import {AuthSessionStore} from "../client/authPersist";
 import {taskSessionContext} from "../tasks/sessionContext";
 import type {TempImageStore} from "../utils/tempImageStore";
+import type {CloudFileStore} from "../utils/cloudFileStore";
 import type {TaskScheduler} from "../tasks/scheduler";
 import type {LoginCredentials, TwoFactorHooks} from "../client/auth";
 import {handleTaskSkillCall} from "./taskSkillBridge";
@@ -195,27 +197,42 @@ function ensureCloudMediaMarkdown(
         try {
             const parsed = JSON.parse(call.result) as {
                 success?: boolean;
-                data?: {mediaType?: unknown; accessUrl?: unknown; markdown?: unknown};
+                data?: {
+                    mediaType?: unknown;
+                    accessUrl?: unknown;
+                    imageUrl?: unknown;
+                    previewUrl?: unknown;
+                    markdown?: unknown;
+                };
             };
             if (!parsed.success ||
-                (parsed.data?.mediaType !== "video" && parsed.data?.mediaType !== "audio") ||
+                (parsed.data?.mediaType !== "image" &&
+                    parsed.data?.mediaType !== "video" &&
+                    parsed.data?.mediaType !== "audio" &&
+                    parsed.data?.mediaType !== "file") ||
                 typeof parsed.data?.accessUrl !== "string" ||
                 typeof parsed.data?.markdown !== "string") return [];
-            return [{accessUrl: parsed.data.accessUrl, markdown: parsed.data.markdown}];
+            return [{
+                accessUrl: parsed.data.accessUrl,
+                localUrl: typeof parsed.data.previewUrl === "string"
+                    ? parsed.data.previewUrl
+                    : typeof parsed.data.imageUrl === "string" ? parsed.data.imageUrl : undefined,
+                markdown: parsed.data.markdown,
+            }];
         } catch { /* 非 JSON 或不完整工具结果不处理 */ }
         return [];
     });
 
     let result = answer;
     for (const item of media) {
-        const escapedUrl = escapeRegExp(item.accessUrl);
-        const existingMedia = new RegExp(`!\\[(?:video|audio):[^\\]]*\\]\\(${escapedUrl}(?:\\s+"[^"]*")?\\)`);
+        const urls = [item.accessUrl, item.localUrl].filter((url): url is string => typeof url === "string");
+        const escapedUrls = urls.map(escapeRegExp);
+        const existingMedia = new RegExp(
+            `!\\[(?:video|audio|file):[^\\]]*\\]\\((?:${escapedUrls.join("|")})(?:\\s+"[^"]*")?\\)`,
+        );
         if (existingMedia.test(result)) continue;
 
-        const ordinaryLink = new RegExp(
-            `\\[[^\\]]*\\]\\(${escapedUrl}(?:\\s+"[^"]*")?\\)`,
-            "g",
-        );
+        const ordinaryLink = new RegExp(`\\[[^\\]]*\\]\\((?:${escapedUrls.join("|")})(?:\\s+"[^"]*")?\\)`, "g");
         result = result.replace(ordinaryLink, item.markdown);
         if (!result.includes(item.markdown)) {
             result = `${result.trimEnd()}\n\n${item.markdown}`;
@@ -277,6 +294,8 @@ export interface WebServerOptions {
     uploadDir?: string;
     /** 对话内一次性图片通道（/api/temp-image/<token>，show_email_image 用）。不提供则该路由 404 */
     imageStore?: TempImageStore;
+    /** 云盘视频/音频/普通文件受控预览通道（/api/cloud-file/<token>）。不提供则该路由 404 */
+    cloudFileStore?: CloudFileStore;
     /** 任务调度器（Step 23）。提供时暴露 /api/tasks 查询与取消端点 */
     scheduler?: TaskScheduler;
     /** 通知中心（Step 23）。提供时暴露 /api/notifications 轮询端点 */
@@ -965,6 +984,95 @@ export function createWebServer(
         stream.pipe(res);
     };
 
+    /**
+     * /api/cloud-file/<token> —— 云盘视频/音频/普通文件的受控流式预览。
+     *
+     * 只代理 CloudFileStore 内部登记过的云盘链接，不提供任意 URL 代理；
+     * 浏览器的 Range 请求原样转发，视频可以边下边播，服务端不整包落盘。
+     * DELETE 只注销本地预览 token，不会删除清华云盘里的文件。
+     */
+    const cloudFileStore = opts.cloudFileStore;
+    const handleCloudFile = async (req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> => {
+        if (requireLogin && !authenticated) {
+            res.writeHead(401).end("请先登录");
+            return;
+        }
+        if (!cloudFileStore) {
+            res.writeHead(404).end("cloud preview unavailable");
+            return;
+        }
+        const token = decodeURIComponent(url.pathname.slice("/api/cloud-file/".length));
+        if (req.method === "DELETE") {
+            if (!cloudFileStore.consume(token)) {
+                res.writeHead(404).end("预览不存在或已被清理");
+                return;
+            }
+            res.writeHead(200, {"Content-Type": "application/json"});
+            res.end(JSON.stringify({ok: true}));
+            return;
+        }
+        if (req.method !== "GET" && req.method !== "HEAD") {
+            res.writeHead(405).end();
+            return;
+        }
+
+        const entry = cloudFileStore.peek(token);
+        if (!entry) {
+            res.writeHead(404).end("预览不存在或已被清理");
+            return;
+        }
+
+        const controller = new AbortController();
+        req.once("close", () => controller.abort());
+        let upstream: Response;
+        try {
+            const headers: Record<string, string> = {
+                "user-agent": "Mozilla/5.0 QingLing/0.2 CloudPreview",
+                accept: entry.mediaType === "file" ? "application/octet-stream, */*" : "*/*",
+            };
+            const range = req.headers.range;
+            if (typeof range === "string") headers.range = range;
+            upstream = await fetch(entry.accessUrl, {
+                method: req.method,
+                headers,
+                redirect: "follow",
+                signal: controller.signal,
+            });
+        } catch (error) {
+            if (req.destroyed) return;
+            res.writeHead(502, {"Content-Type": "text/plain; charset=utf-8"});
+            res.end(`云盘预览加载失败：${(error as Error).message}`);
+            return;
+        }
+        if (!upstream.ok && upstream.status !== 206) {
+            await upstream.arrayBuffer().catch(() => undefined);
+            res.writeHead(502, {"Content-Type": "text/plain; charset=utf-8"});
+            res.end(`云盘预览不可用（HTTP ${upstream.status}），可让清灵重新打开。`);
+            return;
+        }
+
+        const headers = new Headers({
+            "Content-Type": upstream.headers.get("content-type") ?? "application/octet-stream",
+            "Cache-Control": "no-store",
+            "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(entry.filename)}`,
+        });
+        for (const name of ["content-length", "content-range", "accept-ranges", "etag", "last-modified"]) {
+            const value = upstream.headers.get(name);
+            if (value !== null) headers.set(name, value);
+        }
+        res.writeHead(upstream.status, Object.fromEntries(headers.entries()));
+        if (req.method === "HEAD" || !upstream.body) {
+            res.end();
+            return;
+        }
+
+        const stream = Readable.fromWeb(upstream.body as import("node:stream/web").ReadableStream<Uint8Array>);
+        stream.on("error", () => {
+            if (!res.destroyed) res.destroy();
+        });
+        stream.pipe(res);
+    };
+
     const handleChatCancel = async (res: ServerResponse): Promise<void> => {
         const controller = activeChatAbort;
         const done = activeChatDone;
@@ -1356,6 +1464,10 @@ export function createWebServer(
             if (req.method === "POST" && url.pathname === "/api/upload") return handleUpload(req, res, url);
             if ((req.method === "GET" || req.method === "DELETE") && url.pathname.startsWith("/api/temp-image/")) {
                 return handleTempImage(req, res, url);
+            }
+            if ((req.method === "GET" || req.method === "HEAD" || req.method === "DELETE") &&
+                url.pathname.startsWith("/api/cloud-file/")) {
+                return handleCloudFile(req, res, url);
             }
             if (req.method === "POST" && url.pathname === "/api/confirm") return handleConfirm(req, res);
             if (req.method === "POST" && url.pathname === "/api/auth/method") return handleAuthMethod(req, res);

@@ -1,32 +1,46 @@
 /**
  * Skill: show_cloud_file —— 在对话中打开清华云盘文件。
  *
- * 大文件（尤其是录屏视频）不落本地临时目录，只向 Seafile 申请
- * 可复用的文件服务器访问链接，让浏览器按 Range 请求边下边播。
+ * 图片走与邮件/学堂图片一致的本地临时文件通道；视频、音频和普通文件
+ * 不整包落盘，由本地服务按 Range 请求代理云盘内容并支持用户主动清理预览。
  */
 import type {CloudFile, CloudLibrary, CloudSearchResult} from "../../client/cloud/CloudClient";
 import {ThuError} from "../../client/errors";
+import type {CloudFileStore} from "../../utils/cloudFileStore";
+import type {TempImageStore} from "../../utils/tempImageStore";
 import {fail, ok, type Skill, type SkillResult} from "../base/types";
 
 const VIDEO_EXT = /\.(mp4|webm|ogv|ogg|mov|m4v)$/i;
 const AUDIO_EXT = /\.(mp3|m4a|wav|ogg|oga|flac|aac)$/i;
+const IMAGE_EXT = /\.(jpe?g|png|gif|webp|bmp)$/i;
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const CLOUD_BASE = "https://cloud.tsinghua.edu.cn";
+
+interface CloudPreviewStores {
+    images?: TempImageStore;
+    cloudFiles?: CloudFileStore;
+}
 
 type CloudFileSource = {
     listLibraries: () => Promise<CloudLibrary[]>;
     searchFiles: (keyword: string) => Promise<CloudSearchResult[]>;
     getFileDetail: (repoId: string, path: string) => Promise<CloudFile>;
     getFileDownloadUrl: (repoId: string, path: string) => Promise<string>;
+    downloadFileByUrl: (accessUrl: string) => Promise<{buffer: Buffer; contentType: string}>;
 };
 
 export interface ShowCloudFileData {
     library: CloudLibrary;
     file: CloudFile;
-    mediaType: "video" | "audio" | "file";
+    mediaType: "video" | "audio" | "image" | "file";
     /** 文件服务器访问链接。reuse=1，可在有效期内多次用于播放/下载。 */
     accessUrl: string;
     /** 云盘网页端位置，供浏览器不支持该编码时兜底。 */
     webUrl: string;
+    /** 图片的本地临时 URL；非图片为空。 */
+    imageUrl?: string;
+    /** 视频/音频/普通文件的本地受控预览 URL；图片为空。 */
+    previewUrl?: string;
     /** 原样写进最终回复即可渲染视频/音频/文件卡片。 */
     markdown: string;
     note: string;
@@ -43,6 +57,7 @@ function normalizeCloudPath(input: unknown): string | undefined {
 function mediaType(name: string): ShowCloudFileData["mediaType"] {
     if (VIDEO_EXT.test(name)) return "video";
     if (AUDIO_EXT.test(name)) return "audio";
+    if (IMAGE_EXT.test(name)) return "image";
     return "file";
 }
 
@@ -57,6 +72,10 @@ function cloudWebUrl(repoId: string, path: string): string {
         .map((part) => encodeURIComponent(part))
         .join("/");
     return `${CLOUD_BASE}/lib/${encodeURIComponent(repoId)}/file/${encodedPath}`;
+}
+
+function markdownImage(alt: string, url: string): string {
+    return `![${alt}](${url})`;
 }
 
 async function resolveLibrary(
@@ -111,14 +130,14 @@ async function resolveFileByKeyword(
     return {path: candidates[0].path};
 }
 
-export function createShowCloudFileSkill(client: CloudFileSource): Skill {
+export function createShowCloudFileSkill(client: CloudFileSource, stores: CloudPreviewStores = {}): Skill {
     return {
         name: "show_cloud_file",
         description:
-            "在对话中打开或播放清华云盘文件。video/audio 会在 Web 聊天界面内渲染播放器，" +
-            "普通文件返回下载链接；不会把大文件下载到本地。" +
+            "在对话中打开清华云盘文件。图片直接预览；video/audio 显示播放器；普通文件显示文件卡片。" +
+            "Web 中内容经本地受控预览通道显示，用户可一键清理；不会把大文件整包下载到本地。" +
             "library 填资料库 ID 或唯一名称；path 填完整路径；不知道路径时可传 file 文件名关键词。" +
-            "成功后必须把返回的 markdown 字段原样写进回复，播放器/文件卡片才会显示。",
+            "成功后必须把返回的 markdown 字段原样写进回复，图片/播放器/文件卡片才会显示。",
         inputSchema: {
             type: "object",
             properties: {
@@ -180,9 +199,38 @@ export function createShowCloudFileSkill(client: CloudFileSource): Skill {
                 ]);
                 const type = mediaType(file.name);
                 const alt = markdownAlt(file.name);
-                const markdown = type === "file"
-                    ? `[下载「${alt}」](${accessUrl})`
-                    : `![${type}:${alt}](${accessUrl})`;
+                let markdown: string;
+                let imageUrl: string | undefined;
+                let previewUrl: string | undefined;
+                let note: string;
+
+                if (type === "image" && stores.images) {
+                    if ((file.sizeBytes ?? 0) > MAX_IMAGE_BYTES) {
+                        return fail("INVALID_INPUT", `图片「${file.name}」超过 ${MAX_IMAGE_BYTES / 1024 / 1024}MB，暂不支持直接预览；可让它生成分享链接或到云盘网页端查看。`);
+                    }
+                    const {buffer, contentType} = await client.downloadFileByUrl(accessUrl);
+                    if (buffer.length > MAX_IMAGE_BYTES) {
+                        return fail("INVALID_INPUT", `图片「${file.name}」实际大小超过 ${MAX_IMAGE_BYTES / 1024 / 1024}MB，暂不支持直接预览。`);
+                    }
+                    if (!contentType.startsWith("image/") || !IMAGE_EXT.test(file.name)) {
+                        return fail("INVALID_INPUT", `云盘返回的「${file.name}」不是可安全预览的图片。`);
+                    }
+                    const image = stores.images.put(buffer, contentType, file.name);
+                    imageUrl = image.url;
+                    markdown = markdownImage(alt, imageUrl);
+                    note = "把 markdown 字段原样写进回复，Web UI 会直接显示图片；用户点「已用完，删除图片」后会清理本地临时文件。";
+                } else if (type !== "image" && stores.cloudFiles) {
+                    const preview = stores.cloudFiles.put(accessUrl, file.name, type);
+                    previewUrl = preview.url;
+                    markdown = `![${type}:${alt}](${previewUrl})`;
+                    note = "把 markdown 字段原样写进回复，Web UI 会显示播放器/文件卡片；用户点删除按钮只会清理本地预览，不会删除云盘文件。";
+                } else {
+                    // CLI/MCP 没有 Web 预览通道：保留云盘签发的临时直链，由调用方按需下载。
+                    markdown = type === "file"
+                        ? `[下载「${alt}」](${accessUrl})`
+                        : `![${type}:${alt}](${accessUrl})`;
+                    note = "当前运行环境没有本地预览通道，把 markdown 字段原样写进回复；链接由云盘签发，过期后需重新调用本工具。";
+                }
 
                 return ok({
                     library,
@@ -190,10 +238,10 @@ export function createShowCloudFileSkill(client: CloudFileSource): Skill {
                     mediaType: type,
                     accessUrl,
                     webUrl: cloudWebUrl(library.id, file.path),
+                    imageUrl,
+                    previewUrl,
                     markdown,
-                    note: type === "file"
-                        ? "把 markdown 字段原样写进回复，用户可点击下载。链接由云盘签发，过期后需重新调用本工具。"
-                        : "把 markdown 字段原样写进回复，Web UI 会显示播放器。链接由云盘签发，过期后需重新调用本工具。",
+                    note,
                 });
             } catch (error) {
                 if (error instanceof ThuError) {

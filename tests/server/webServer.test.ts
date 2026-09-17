@@ -79,6 +79,20 @@ const cloudShowSkill: Skill = {
     },
 };
 
+const cloudFileShowSkill: Skill = {
+    name: "show_cloud_file",
+    description: "假云盘普通文件打开，仅测试用",
+    inputSchema: {type: "object", properties: {}},
+    async execute() {
+        return ok({
+            mediaType: "file",
+            accessUrl: "https://cloud.tsinghua.edu.cn/seafhttp/files/fixture/test.pdf",
+            previewUrl: "/api/cloud-file/fixture",
+            markdown: "![file:test.pdf](/api/cloud-file/fixture)",
+        });
+    },
+};
+
 /** 读 SSE 流，收集成事件数组，直到 done/error */
 async function readSse(resp: Response): Promise<{event: string; data: Record<string, unknown>}[]> {
     const events: {event: string; data: Record<string, unknown>}[] = [];
@@ -216,6 +230,21 @@ describe("Web 服务端", () => {
         const events = await readSse(resp);
         expect(events.find(e => e.event === "answer")?.data.text)
             .toBe(`![video:test.mp4](${accessUrl})`);
+    });
+
+    it("云盘普通文件最终回答保留受控文件卡片 Markdown", async () => {
+        await start([
+            toolCallMsg("show_cloud_file", {}),
+            textMsg("[下载 test.pdf](https://cloud.tsinghua.edu.cn/seafhttp/files/fixture/test.pdf)"),
+        ], [cloudFileShowSkill]);
+        const resp = await fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question: "打开云盘文件"}),
+        });
+        const events = await readSse(resp);
+        expect(events.find(e => e.event === "answer")?.data.text)
+            .toBe("![file:test.pdf](/api/cloud-file/fixture)");
     });
 
     it("二次认证桥：网页选择方式并提交验证码后继续", async () => {

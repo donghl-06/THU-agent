@@ -606,10 +606,20 @@ test("模型原始 HTML 不执行，日历附件可以下载", async ({page}) =>
     expect((await download).suggestedFilename()).toBe("test.ics");
 });
 
-test("云盘视频渲染为内嵌播放器并拦截非清华媒体源", async ({page}) => {
-    const mediaUrl = "https://cloud.tsinghua.edu.cn/seafhttp/files/fixture/test.mp4";
+test("云盘视频和文件渲染为可清理的本地预览卡片", async ({page}) => {
+    const videoUrl = "/api/cloud-file/video-token";
+    const fileUrl = "/api/cloud-file/file-token";
     await page.route("**/cloud.tsinghua.edu.cn/seafhttp/**", route => route.fulfill({status: 403, body: "Access token not found"}));
-    await page.route("**/api/chat", route => route.fulfill({contentType: "text/event-stream", body: `event: answer\ndata: ${JSON.stringify({text: `这是云盘录屏：\n\n![video:测试录屏.mp4](${mediaUrl})\n\n![audio:外部音频.mp3](https://example.com/test.mp3)`})}\n\nevent: done\ndata: {}\n\n`}));
+    await page.route("**/api/cloud-file/*", route => {
+        if (route.request().method() === "DELETE") {
+            return route.fulfill({status: 200, contentType: "application/json", body: '{"ok":true}'});
+        }
+        if (route.request().url().includes("video-token")) {
+            return route.fulfill({status: 200, contentType: "video/mp4", body: "video-bytes"});
+        }
+        return route.fulfill({status: 200, contentType: "application/pdf", body: "file-bytes"});
+    });
+    await page.route("**/api/chat", route => route.fulfill({contentType: "text/event-stream", body: `event: answer\ndata: ${JSON.stringify({text: `这是云盘录屏：\n\n![video:测试录屏.mp4](${videoUrl})\n\n![file:测试讲义.pdf](${fileUrl})\n\n![audio:外部音频.mp3](https://example.com/test.mp3)`})}\n\nevent: done\ndata: {}\n\n`}));
     await page.goto("/");
     await login(page);
     await page.getByRole("textbox", {name: "发送给清灵的消息"}).fill("打开云盘录屏");
@@ -617,10 +627,17 @@ test("云盘视频渲染为内嵌播放器并拦截非清华媒体源", async ({
     const card = page.locator(".cloud-media.video");
     await expect(card).toBeVisible();
     await expect(card.locator(".cloud-media-title")).toContainText("测试录屏.mp4");
-    await expect(card.locator("video")).toHaveAttribute("src", mediaUrl);
-    await expect(card.getByRole("link", {name: /新窗口打开 \/ 下载/})).toHaveAttribute("href", mediaUrl);
-    await card.locator("video").dispatchEvent("error");
-    await expect(card.getByRole("alert")).toContainText("云盘访问链接已过期");
+    await expect(card.locator("video")).toHaveAttribute("src", videoUrl);
+    await expect(card.getByRole("link", {name: /新窗口打开 \/ 下载/})).toHaveAttribute("href", videoUrl);
+    await expect(card.getByRole("button", {name: "已用完，删除预览"})).toBeVisible();
+
+    const fileCard = page.locator(".cloud-media.file");
+    await expect(fileCard).toBeVisible();
+    await expect(fileCard.locator(".cloud-media-title")).toContainText("测试讲义.pdf");
+    await expect(fileCard.getByRole("link", {name: "下载文件"})).toHaveAttribute("href", fileUrl);
+    await fileCard.getByRole("button", {name: "已用完，删除预览"}).click();
+    await expect(page.getByText("（云盘文件预览已清理，可让清灵重新打开）", {exact: true})).toBeVisible();
+
     await expect(page.getByText("云盘媒体链接无效，已停止加载。", {exact: true})).toBeVisible();
     await expect(page.locator(".cloud-media.audio")).toHaveCount(0);
 });

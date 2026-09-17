@@ -51,6 +51,7 @@ import {createTransferCloudItemSkill} from "./cloud/transferCloudItem";
 import {createDeleteCloudItemSkill} from "./cloud/deleteCloudItem";
 import {createCloudShareLinkSkill} from "./cloud/createCloudShareLink";
 import type {TempImageStore} from "../utils/tempImageStore";
+import type {CloudFileStore} from "../utils/cloudFileStore";
 import {resolveStableFingerprint} from "../client/fingerprintStore";
 import {createChaojiyingSolver, createChaojiyingCodeSolver} from "../client/captcha/chaojiying";
 import {UseregClient, UseregAuthError} from "../client/usereg";
@@ -77,6 +78,8 @@ export interface SkillAssemblyOptions {
     taskExecutor?: (name: string, input: unknown) => Promise<SkillResult>;
     /** 对话内图片通道（Web UI 提供）。缺失时 show_email_image 报 NOT_SUPPORTED */
     imageStore?: TempImageStore;
+    /** 云盘媒体/文件受控预览通道（Web UI 提供）。缺失时 show_cloud_file 返回云盘直链 */
+    cloudFileStore?: CloudFileStore;
 }
 
 /** 求解器决策：显式传入优先，其次 .env 里的超级鹰配置（导出以便单测） */
@@ -178,7 +181,7 @@ export function createAllSkills(opts: SkillAssemblyOptions = {}): Skill[] {
         createGetCloudLibrariesSkill(cloud),
         createGetCloudDirectorySkill(cloud),
         createSearchCloudFilesSkill(cloud),
-        createShowCloudFileSkill(cloud),
+        createShowCloudFileSkill(cloud, {images: opts.imageStore, cloudFiles: opts.cloudFileStore}),
         // 云盘写操作：和预约/发邮件一样走 Web UI 确认；MCP 默认隐藏
         createUploadCloudFileSkill(cloud),
         createCreateCloudFolderSkill(cloud),

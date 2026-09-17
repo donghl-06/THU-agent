@@ -217,9 +217,11 @@ svg { display: block; }
 .cloud-media-title > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cloud-media video { display: block; width: 100%; max-height: 360px; border-radius: 10px; background: #000; }
 .cloud-media audio { display: block; width: 100%; }
-.cloud-media-actions { display: flex; align-items: center; }
+.cloud-media-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .cloud-media-actions a { display: inline-flex; align-items: center; gap: 5px; color: var(--accent-text); font-size: 11px; }
 .cloud-media-actions a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.cloud-media.file { max-width: min(430px, 100%); }
+.cloud-media-actions .image-done { margin-top: 0; }
 .cloud-media-error { display: inline-flex; align-items: center; gap: 6px; color: var(--danger); font-size: 11px; line-height: 1.6; }
 .cloud-media-warning { color: var(--muted); font-size: 12px; }
 .image-done { margin-top: 6px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 12px; color: var(--secondary); font-size: 11px; }

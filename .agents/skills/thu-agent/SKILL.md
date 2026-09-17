@@ -43,7 +43,7 @@ When combining capabilities, prefer independent read calls and use their returne
 
 ## Tsinghua Cloud Drive
 
-Use `get_cloud_libraries`, `get_cloud_directory`, and `search_cloud_files` to resolve the exact library and path before any cloud-drive write. `show_cloud_file` returns an access card for a video, audio, or ordinary file; do not claim to open a file unless the returned result reports success.
+Use `get_cloud_libraries`, `get_cloud_directory`, and `search_cloud_files` to resolve the exact library and path before any cloud-drive write. `show_cloud_file` returns an access card for an image, video, audio, or ordinary file; do not claim to open a file unless the returned result reports success.
 
 Cloud-drive upload, folder creation, rename, copy/move, delete, and share-link creation are real writes. Resolve and show the exact source path, target library/folder, destination name, operation, and effect before requesting confirmation. Share links expose data to whoever receives them; deletion is destructive and may require web-side recovery. Never perform or retry these writes without fresh user approval for the exact parameters.
 

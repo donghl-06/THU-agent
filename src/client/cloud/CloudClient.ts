@@ -641,6 +641,22 @@ export class CloudClient {
         return body;
     }
 
+    /** 下载较小的云盘图片到本地临时图片通道；大视频/音频继续走流式代理。 */
+    async downloadFileByUrl(accessUrl: string): Promise<{buffer: Buffer; contentType: string}> {
+        let response: Response;
+        try {
+            response = await fetch(accessUrl, {signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)});
+        } catch (error) {
+            throw new ThuError("NETWORK_ERROR", `清华云盘图片下载失败：${(error as Error).message}`, error);
+        }
+        if (!response.ok) {
+            throw new ThuError("UPSTREAM_ERROR", `清华云盘图片下载失败（HTTP ${response.status}）`);
+        }
+        const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim() || "";
+        const bytes = await response.arrayBuffer();
+        return {buffer: Buffer.from(bytes), contentType};
+    }
+
     /**
      * 生成只读分享链接。默认不设置密码、不开放编辑/上传权限；
      * expireDays 由上层校验，未传时遵循云盘默认的永久有效策略。

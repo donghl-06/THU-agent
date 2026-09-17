@@ -26,6 +26,8 @@ import {createRenameCloudItemSkill} from "../../src/skills/cloud/renameCloudItem
 import {createTransferCloudItemSkill} from "../../src/skills/cloud/transferCloudItem";
 import {createDeleteCloudItemSkill} from "../../src/skills/cloud/deleteCloudItem";
 import {createCloudShareLinkSkill} from "../../src/skills/cloud/createCloudShareLink";
+import {CloudFileStore} from "../../src/utils/cloudFileStore";
+import {TempImageStore} from "../../src/utils/tempImageStore";
 
 const library: CloudLibrary = {
     id: "repo-1",
@@ -97,6 +99,7 @@ function makeClient() {
         searchFiles: vi.fn(async () => searchResults),
         getFileDetail: vi.fn(async () => recording),
         getFileDownloadUrl: vi.fn(async () => "https://cloud.tsinghua.edu.cn/seafhttp/files/token/2025010550.mp4"),
+        downloadFileByUrl: vi.fn(async () => ({buffer: Buffer.from("png-bytes"), contentType: "image/png"})),
         uploadFile: vi.fn(async () => [{name: "上传文件.pdf"}]),
         createFolder: vi.fn(async (_repoId: string, path: string) => path),
         renameDirent: vi.fn(async (
@@ -217,6 +220,51 @@ describe("cloud skills", () => {
         expect(client.getFileDownloadUrl).toHaveBeenCalledWith("repo-1", "/2025010550.mp4");
         expect(result.data?.markdown).toContain("![video:2025010550.mp4]");
         expect(result.data?.markdown).toContain("https://cloud.tsinghua.edu.cn/seafhttp/files/");
+    });
+
+    it("downloads small cloud images into the temporary image channel", async () => {
+        const client = makeClient();
+        const image = {...recording, path: "/二维码.png", name: "二维码.png", sizeBytes: 9};
+        client.getFileDetail.mockResolvedValue(image);
+        const dir = await mkdtemp(join(tmpdir(), "qingling-cloud-image-"));
+        const images = new TempImageStore(join(dir, "images"));
+        try {
+            const result = await createShowCloudFileSkill(client, {images}).execute({
+                library: "学习资料",
+                path: "/二维码.png",
+            }) as SkillResult<ShowCloudFileData>;
+
+            expect(result.success).toBe(true);
+            expect(client.downloadFileByUrl).toHaveBeenCalledWith("https://cloud.tsinghua.edu.cn/seafhttp/files/token/2025010550.mp4");
+            expect(result.data?.mediaType).toBe("image");
+            expect(result.data?.markdown).toMatch(/^!\[二维码\.png\]\(\/api\/temp-image\/[^/]+\)$/);
+            expect(result.data?.imageUrl).toMatch(/^\/api\/temp-image\//);
+            expect(images.pendingCount).toBe(1);
+        } finally {
+            await rm(dir, {recursive: true, force: true});
+        }
+    });
+
+    it("registers cloud video and ordinary files as managed local previews", async () => {
+        const client = makeClient();
+        const cloudFiles = new CloudFileStore();
+        const video = await createShowCloudFileSkill(client, {cloudFiles}).execute({
+            library: "学习资料",
+            path: "/2025010550.mp4",
+        }) as SkillResult<ShowCloudFileData>;
+
+        const pdf = {...recording, path: "/outline.pdf", name: "outline.pdf", sizeBytes: 2048};
+        client.getFileDetail.mockResolvedValue(pdf);
+        const file = await createShowCloudFileSkill(client, {cloudFiles}).execute({
+            library: "学习资料",
+            path: "/outline.pdf",
+        }) as SkillResult<ShowCloudFileData>;
+
+        expect(video.data?.markdown).toMatch(/^!\[video:2025010550\.mp4\]\(\/api\/cloud-file\/[^/]+\)$/);
+        expect(video.data?.previewUrl).toMatch(/^\/api\/cloud-file\//);
+        expect(file.data?.markdown).toMatch(/^!\[file:outline\.pdf\]\(\/api\/cloud-file\/[^/]+\)$/);
+        expect(file.data?.previewUrl).toMatch(/^\/api\/cloud-file\//);
+        expect(cloudFiles.pendingCount).toBe(2);
     });
 
     it("resolves a cloud file by keyword and returns a download message for ordinary files", async () => {
