@@ -40,7 +40,6 @@ function CloudMedia({src, alt}: {src?: string; alt?: string}) {
     const [gone, setGone] = useState(false);
     const [deleting, setDeleting] = useState(false);
     const [deleteError, setDeleteError] = useState(false);
-    const [documentPreviewOpen, setDocumentPreviewOpen] = useState(false);
     if (!kind || typeof src !== "string") return null;
     const previewUrl = src;
 
@@ -73,13 +72,7 @@ function CloudMedia({src, alt}: {src?: string; alt?: string}) {
 
     if (gone) return <span className="image-note">（云盘文件预览已清理，可让清灵重新打开）</span>;
 
-    const filename = name;
-    const documentPreviewable = kind === "file" && /\.pdf$/i.test(filename);
     function openFilePreview() {
-        if (documentPreviewable) {
-            setDocumentPreviewOpen(open => !open);
-            return;
-        }
         window.open(previewUrl, "_blank", "noopener,noreferrer");
     }
 
@@ -88,11 +81,11 @@ function CloudMedia({src, alt}: {src?: string; alt?: string}) {
             ? <button
                 className="cloud-file-button"
                 type="button"
-                title={documentPreviewable ? "点击展开 / 收起预览" : "点击打开预览"}
+                title="点击在新窗口预览"
                 onClick={openFilePreview}
             >
                 <Icon size={19}/>
-                <span title={filename}>{filename}</span>
+                <span title={name}>{name}</span>
                 <ExternalLink size={13}/>
             </button>
             : <span className="cloud-media-title">
@@ -103,18 +96,8 @@ function CloudMedia({src, alt}: {src?: string; alt?: string}) {
             ? <video controls preload="metadata" src={src} onError={() => setFailed(true)}/>
             : kind === "audio"
                 ? <audio controls preload="metadata" src={src} onError={() => setFailed(true)}/>
-                : documentPreviewOpen
-                    ? <iframe
-                        className="cloud-document-preview"
-                        src={`${previewUrl}#toolbar=1&view=FitH`}
-                        title={`${filename} 预览`}
-                    />
-                    : null}
+                : null}
         <span className="cloud-media-actions">
-            {kind === "file" && <a href={src} target="_blank" rel="noopener noreferrer">
-                新窗口预览
-                <ExternalLink size={12}/>
-            </a>}
             <a href={src} target="_blank" rel="noopener noreferrer" download={name}>
                 {kind === "video" ? "新窗口打开 / 下载" : kind === "audio" ? "下载音频" : "下载文件"}
                 <ExternalLink size={12}/>

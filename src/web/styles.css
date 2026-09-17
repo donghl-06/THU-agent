@@ -226,7 +226,6 @@ svg { display: block; }
 .cloud-file-button > svg:first-child { flex: none; color: var(--accent-text); }
 .cloud-file-button > svg:last-child { flex: none; margin-left: auto; color: var(--muted); }
 .cloud-file-button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cloud-document-preview { width: 100%; height: min(520px, 65vh); border: 1px solid var(--line-soft); border-radius: 10px; background: var(--surface); }
 .cloud-media.file .cloud-media-actions { justify-content: flex-start; }
 .cloud-media-actions .image-done { margin-top: 0; }
 .cloud-media-error { display: inline-flex; align-items: center; gap: 6px; color: var(--danger); font-size: 11px; line-height: 1.6; }
