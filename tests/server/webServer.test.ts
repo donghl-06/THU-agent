@@ -65,6 +65,20 @@ const paySkill: Skill = {
     },
 };
 
+/** 返回云盘视频卡片 Markdown 的假 Skill（验证最终回答不被模型改写） */
+const cloudShowSkill: Skill = {
+    name: "show_cloud_file",
+    description: "假云盘打开，仅测试用",
+    inputSchema: {type: "object", properties: {}},
+    async execute() {
+        return ok({
+            mediaType: "video",
+            accessUrl: "https://cloud.tsinghua.edu.cn/seafhttp/files/fixture/test.mp4",
+            markdown: "![video:test.mp4](https://cloud.tsinghua.edu.cn/seafhttp/files/fixture/test.mp4)",
+        });
+    },
+};
+
 /** 读 SSE 流，收集成事件数组，直到 done/error */
 async function readSse(resp: Response): Promise<{event: string; data: Record<string, unknown>}[]> {
     const events: {event: string; data: Record<string, unknown>}[] = [];
@@ -186,6 +200,22 @@ describe("Web 服务端", () => {
         const answer = events.find((e) => e.event === "answer");
         expect(answer?.data.text).toBe("你好呀");
         expect(events.some((e) => e.event === "done")).toBe(true);
+    });
+
+    it("云盘视频最终回答保留内嵌播放 Markdown，而不是普通下载链接", async () => {
+        const accessUrl = "https://cloud.tsinghua.edu.cn/seafhttp/files/fixture/test.mp4";
+        await start([
+            toolCallMsg("show_cloud_file", {}),
+            textMsg(`[下载 test.mp4](${accessUrl})`),
+        ], [cloudShowSkill]);
+        const resp = await fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question: "打开云盘视频"}),
+        });
+        const events = await readSse(resp);
+        expect(events.find(e => e.event === "answer")?.data.text)
+            .toBe(`![video:test.mp4](${accessUrl})`);
     });
 
     it("二次认证桥：网页选择方式并提交验证码后继续", async () => {

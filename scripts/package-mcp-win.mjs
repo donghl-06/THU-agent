@@ -1,5 +1,6 @@
-import {cp, mkdir, rm, writeFile} from "node:fs/promises";
+import {cp, mkdir, readdir, rm, writeFile} from "node:fs/promises";
 import {execFileSync} from "node:child_process";
+import {existsSync} from "node:fs";
 import {dirname, join, resolve} from "node:path";
 import {fileURLToPath} from "node:url";
 
@@ -10,19 +11,32 @@ const mcpEntry = join(root, "dist", "scripts", "mcp-server.cjs");
 const loginEntry = join(root, "dist", "scripts", "mcp-login.cjs");
 const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 
-await rm(release, {recursive: true, force: true});
-await mkdir(runtime, {recursive: true});
-
 execFileSync(pnpmCommand, ["run", "build"], {
     cwd: root,
     stdio: "inherit",
     ...(process.platform === "win32" ? {shell: true} : {}),
 });
+
+// 先构建再清理：构建失败时不能把可用的发布包先删掉。
+// Codex 可能正从这个目录运行 runtime/node.exe。Windows 会锁定正在运行的 exe，
+// 因此这里不能删除整个 release 目录；同时保留用户本机的 .env，避免重新打包丢凭证。
+await mkdir(release, {recursive: true});
+for (const entry of await readdir(release, {withFileTypes: true})) {
+    if (entry.name === "runtime" || entry.name === ".env") continue;
+    await rm(join(release, entry.name), {recursive: true, force: true});
+}
+await mkdir(runtime, {recursive: true});
+
 await cp(mcpEntry, join(release, "mcp-server.cjs"));
 await cp(loginEntry, join(release, "login.cjs"));
 await cp(join(root, "openssl.cnf"), join(release, "openssl.cnf"));
 await cp(join(root, "packaging", "mcp.env.example"), join(release, ".env.example"));
-await cp(process.execPath, join(runtime, "node.exe"));
+const nodeExecutable = join(runtime, "node.exe");
+if (existsSync(nodeExecutable)) {
+    console.warn(`MCP runtime 正在使用或已存在，保留现有文件：${nodeExecutable}`);
+} else {
+    await cp(process.execPath, nodeExecutable);
+}
 await writeFile(join(release, "登录清华账号.cmd"), `@echo off\r\nchcp 65001 >nul\r\ncd /d "%~dp0"\r\n"%~dp0runtime\\node.exe" "%~dp0login.cjs"\r\necho.\r\npause\r\n`);
 
 await writeFile(join(release, "README.txt"), `清灵 MCP 连接包（Windows 便携版）

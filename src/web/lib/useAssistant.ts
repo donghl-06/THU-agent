@@ -390,9 +390,10 @@ export function useAssistant() {
         if ((!question.trim() && !images.length && !files.length) || chatAbort.current || loginAbort.current || lifecycle) return;
         if (!authenticatedRef.current) { openLogin(); return; }
         const sessionId = historyRef.current.activeId;
-        const display = [question.trim(), ...(files.length ? [`📎 ${files.map(file => file.name).join("、")}`] : [])].filter(Boolean).join("\n");
+        const displayFiles = files.filter(file => !file.isImage);
+        const display = [question.trim(), ...(displayFiles.length ? [`📎 ${displayFiles.map(file => file.name).join("、")}`] : [])].filter(Boolean).join("\n");
         const agentText = files.length ? files.map(file =>
-            `（用户已上传文件「${file.name}」，保存在本机路径：${file.path}。需要本地文件路径的工具（如 submit_learn_homework 的 filePath）可直接使用该路径。）`,
+            `（用户已上传文件「${file.name}」，保存在本机路径：${file.path}。需要本地文件路径的工具（如 submit_learn_homework 的 filePath、upload_cloud_file 的 localFilePath）可直接使用该路径。）`,
         ).join("\n") + "\n\n" + (question.trim() || "（用户上传了上述文件，请结合对话确认它的用途。）") : question.trim();
         commit(state => updateSession(state, sessionId, session => {
             const messages: Message[] = [...session.messages, {id: newId(), role: "user", text: display, images, imageCount: images.length}];

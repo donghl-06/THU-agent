@@ -177,6 +177,53 @@ function extractAuthFailure(toolResultJson: string): string | undefined {
     return undefined;
 }
 
+function escapeRegExp(text: string): string {
+    return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * 云盘视频/音频依赖 `![video:name](url)` 这类专用 Markdown 渲染。
+ * 有些模型会在最后一段把工具结果改写成普通下载链接；这里用工具返回的
+ * 新鲜链接做兜底，保证用户最终拿到的是可流式播放的媒体卡片。
+ */
+function ensureCloudMediaMarkdown(
+    answer: string,
+    toolCalls: {name: string; result: string}[],
+): string {
+    const media = toolCalls.flatMap((call) => {
+        if (call.name !== "show_cloud_file") return [];
+        try {
+            const parsed = JSON.parse(call.result) as {
+                success?: boolean;
+                data?: {mediaType?: unknown; accessUrl?: unknown; markdown?: unknown};
+            };
+            if (!parsed.success ||
+                (parsed.data?.mediaType !== "video" && parsed.data?.mediaType !== "audio") ||
+                typeof parsed.data?.accessUrl !== "string" ||
+                typeof parsed.data?.markdown !== "string") return [];
+            return [{accessUrl: parsed.data.accessUrl, markdown: parsed.data.markdown}];
+        } catch { /* 非 JSON 或不完整工具结果不处理 */ }
+        return [];
+    });
+
+    let result = answer;
+    for (const item of media) {
+        const escapedUrl = escapeRegExp(item.accessUrl);
+        const existingMedia = new RegExp(`!\\[(?:video|audio):[^\\]]*\\]\\(${escapedUrl}(?:\\s+"[^"]*")?\\)`);
+        if (existingMedia.test(result)) continue;
+
+        const ordinaryLink = new RegExp(
+            `\\[[^\\]]*\\]\\(${escapedUrl}(?:\\s+"[^"]*")?\\)`,
+            "g",
+        );
+        result = result.replace(ordinaryLink, item.markdown);
+        if (!result.includes(item.markdown)) {
+            result = `${result.trimEnd()}\n\n${item.markdown}`;
+        }
+    }
+    return result;
+}
+
 /** 按 .env 单价（元/百万 token）估算本轮费用；单价没配齐就不显示费用 */
 function estimateCostYuan(usage: TokenUsage): number | undefined {
     const pin = config.llm.priceIn;
@@ -803,7 +850,7 @@ export function createWebServer(
                     send("calendar", {title: cal.title, filename: cal.filename, icsContent: cal.icsContent});
                 }
             }
-            send("answer", {text: result.answer});
+            send("answer", {text: ensureCloudMediaMarkdown(result.answer, result.toolCalls)});
             if (result.usage) {
                 const cost = estimateCostYuan(result.usage);
                 send("usage", {...result.usage, ...(cost !== undefined ? {costYuan: cost} : {})});

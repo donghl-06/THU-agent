@@ -1,6 +1,7 @@
 import {afterEach, describe, expect, it} from "vitest";
 import {mkdtempSync, readFileSync, rmSync, statSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
+import {platform} from "node:process";
 import {join} from "node:path";
 import type {AddressInfo} from "node:net";
 import type {Server} from "node:http";
@@ -35,7 +36,8 @@ describe("后端 SQLite 工作区", () => {
         expect(database.preferences()).toMatchObject({theme: "dark", sound: false});
         expect(database.profile()).toMatchObject({name: "测试同学"});
         expect(database.getContext("s_saved")?.[0].content).toBe("记住我的问题");
-        expect(statSync(path).mode & 0o777).toBe(0o600);
+        // Windows 将 POSIX 权限映射到 ACL/只读位，statSync 会显示 0666；仅 POSIX 检查 0600。
+        if (platform !== "win32") expect(statSync(path).mode & 0o777).toBe(0o600);
         expect(readFileSync(path).subarray(0, 15).toString()).toBe("SQLite format 3");
     });
 

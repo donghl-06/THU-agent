@@ -22,12 +22,13 @@ Agent 自主判断并组合多个校园能力（查课表 → 推理空闲时间
                              ThuClient / SportsClient   Web 常驻调度器
                               / MyhomeClient / UseregClient
                               / LearnClient / MailClient
+                              / CloudClient
                                           │
                                   SDK / 校园系统接口
 ```
 
-交互式 CLI 提供 31 个校园工具；Web 与外部 Skill CLI 提供 35 个工具（含 4 个任务工具）。
-外部 CLI 的任务调用转交常驻 Web 服务。MCP 默认提供 21 个校园只读工具和 2 个登录/用户信息工具，
+交互式 CLI 提供 41 个校园工具；Web 与外部 Skill CLI 提供 45 个工具（含 4 个任务工具）。
+外部 CLI 的任务调用转交常驻 Web 服务。MCP 默认提供 25 个校园只读工具和 2 个登录/用户信息工具，
 不支持写操作或任务调度。各入口复用业务实现，不自动共享跨进程的登录会话。
 
 ## 环境要求
@@ -60,7 +61,7 @@ cp .env.example .env
 ## 命令行对话
 
 ```bash
-pnpm agent   # 31 个校园查询/操作工具，写操作须在终端确认；不包含定时任务
+pnpm agent   # 41 个校园查询/操作工具，写操作须在终端确认；不包含定时任务
 ```
 
 试试这些问法：
@@ -100,7 +101,7 @@ pnpm agent   # 31 个校园查询/操作工具，写操作须在终端确认；�
 仓库内置了一个遵循 Agent Skills 目录结构的项目级 Skill：
 `.agents/skills/thu-agent/SKILL.md`。兼容 Agent Skills 且能运行本地命令的
 AI Agent 可以自动发现它，并通过机器可读 CLI 使用 `createAllSkills()` 中装配的
-校园能力，不需要接入本项目自己的 LLM。目前包含 31 个直接调用的校园能力，以及
+校园能力，不需要接入本项目自己的 LLM。目前包含 41 个直接调用的校园能力，以及
 通过常驻 Web 调度器执行的 4 个任务能力（提醒、定时抢场、任务查询与取消）。
 
 也可以直接检查这层接口：
@@ -146,6 +147,7 @@ pnpm step1   # InfoHelper 实例化（不联网）
 pnpm step2   # 真实登录 + 获取用户信息
 pnpm step3   # 获取真实课表
 pnpm learn   # 网络学堂真链验证（课程/通知/作业/课件/日历）
+pnpm cloud   # 清华云盘真链验证（资料库/搜索）
 ```
 
 ### 网络学堂（learn.tsinghua.edu.cn）
@@ -159,6 +161,26 @@ pnpm learn   # 网络学堂真链验证（课程/通知/作业/课件/日历）
 
 可以试试：「我有什么作业要交？」「数据结构最近有什么通知？」
 「帮我把桌面上的 hw3.pdf 交到数据结构的第三次作业」。
+
+### 清华云盘（cloud.tsinghua.edu.cn）
+
+清灵已接入清华云盘的查询、打开与核心写入能力。登录复用清华统一身份认证账号和本机信任设备：
+
+- `get_cloud_libraries`：列出云盘资料库；
+- `get_cloud_directory`：浏览某个资料库的一层目录；
+- `search_cloud_files`：全局搜索文件名。
+- `show_cloud_file`：在对话中打开/播放文件；视频和音频直接显示播放器，普通文件给下载链接。
+- `upload_cloud_file`：把本机文件上传到云盘（需确认）；
+- `create_cloud_folder`：创建文件夹（需确认）；
+- `rename_cloud_item`：重命名文件/文件夹（需确认）；
+- `transfer_cloud_item`：复制或移动文件/文件夹（需确认）；
+- `delete_cloud_item`：删除文件/文件夹（需确认，删除后可在云盘网页端回收站尝试恢复）。
+- `create_cloud_share_link`：为文件/文件夹生成只读分享链接（需确认，可设置有效天数）。
+
+可以试试：「我云盘里有哪些资料库？」「帮我找数据结构课件」「打开程序设计训练录屏里的 2025010550.mp4」；
+也可以在点击附件上传本机文件或图片后说「把它上传到学习资料的课件目录」。
+大文件不会先下载到本地：Web UI 使用云盘签发的可复用临时链接，让浏览器按需拉取视频数据。
+云盘写操作都会先弹出确认框；资料库管理、回收站管理和版本回滚暂未实现。云盘 API Token 只保留在进程内存，不写入日志。
 
 ### Web UI 图形化登录
 
@@ -269,7 +291,7 @@ pnpm --silent mcp # 以 MCP stdio 模式启动，供 Codex 调用校园 Skill
 
 项目同时提供本地 MCP Server，可让 Codex 直接调用清华校园查询 Skill。MCP Server 不替代现有 Web/EXE 模式：Codex 负责理解和规划，服务器复用 `src/skills/` 与 `src/client/`；预约、取消、充值等写操作在 MCP 模式下默认拒绝，继续使用 Web/EXE 的确认界面完成。
 
-详细配置步骤见 [docs/codex-mcp.md](docs/codex-mcp.md)。开发者构建后的 MCP 入口为 `dist/scripts/mcp-server.cjs`，普通用户应直接下载 `清灵-MCP` 发布包。MCP 模式同样支持查询校园动态/资讯详情。
+详细配置步骤见 [docs/codex-mcp.md](docs/codex-mcp.md)。开发者构建后的 MCP 入口为 `dist/scripts/mcp-server.cjs`，普通用户应直接下载 `清灵-MCP` 发布包。MCP 模式同样支持查询校园动态/资讯与清华云盘只读信息。
 
 ## 注意事项
 

@@ -8,7 +8,11 @@ import {IconButton} from "./Controls";
 import {AccessModePicker} from "./AccessModePicker";
 
 export function Composer({app, value, setValue, onSend}: {app: Assistant; value: string; setValue: (text: string) => void; onSend: (text: string, images: string[], files: UploadedFile[]) => void}) {
-    const [images, setImages] = useState<string[]>([]);
+    interface PendingImage {
+        dataUrl: string;
+        file?: UploadedFile;
+    }
+    const [images, setImages] = useState<PendingImage[]>([]);
     const [files, setFiles] = useState<UploadedFile[]>([]);
     const [uploading, setUploading] = useState(false);
     const textarea = useRef<HTMLTextAreaElement>(null);
@@ -55,8 +59,27 @@ export function Composer({app, value, setValue, onSend}: {app: Assistant; value:
                             reader.readAsDataURL(file);
                         });
                         if (generation !== uploadGeneration.current) break;
-                        setImages(prev => [...prev, image]);
+                        const pendingImage = {dataUrl: image};
+                        setImages(prev => [...prev, pendingImage]);
                         imageCount++;
+                        // 图片同时落盘：视觉模型继续用 dataUrl，云盘上传/作业提交等工具使用真实本机路径。
+                        try {
+                            const response = await fetch(`/api/upload?name=${encodeURIComponent(file.name)}`, {method: "POST", body: file});
+                            if (generation !== uploadGeneration.current) break;
+                            if (response.status === 401) {
+                                app.notify(`「${file.name}」可用于识图；请重新登录后才能作为云盘上传源`, "error");
+                            } else if (!response.ok) {
+                                throw new Error("upload failed");
+                            } else {
+                                const saved = await response.json() as UploadedFile;
+                                if (generation !== uploadGeneration.current) break;
+                                setImages(prev => prev.map(item => item === pendingImage ? {...item, file: {...saved, isImage: true}} : item));
+                            }
+                        } catch {
+                            if (generation === uploadGeneration.current) {
+                                app.notify(`「${file.name}」可用于识图，但暂不能作为云盘上传源`, "error");
+                            }
+                        }
                     } catch { if (generation === uploadGeneration.current) app.notify("无法读取图片，请重试", "error"); }
                     continue;
                 }
@@ -81,13 +104,14 @@ export function Composer({app, value, setValue, onSend}: {app: Assistant; value:
     function send() {
         if (busy || uploading || app.backgroundRunning) return;
         speech.stop();
-        onSend(value.trim(), images, files);
+        const imageFiles = images.map(item => item.file).filter((file): file is UploadedFile => Boolean(file));
+        onSend(value.trim(), images.map(item => item.dataUrl), [...files, ...imageFiles]);
         if (app.authenticated) { setImages([]); setFiles([]); }
     }
     return <div className="composer-area">
         <motion.div className={`composer ${speech.listening ? "listening" : ""}`} initial={{opacity: 0, y: 14}} animate={{opacity: 1, y: 0}} transition={{duration: .45, delay: .1}}>
             <AnimatePresence>{(images.length > 0 || files.length > 0) && <motion.div className="attachments" initial={{height: 0, opacity: 0}} animate={{height: "auto", opacity: 1}} exit={{height: 0, opacity: 0}}>
-                {images.map((url, index) => <div key={url} className="attachment"><img src={url} alt={`待发送图片 ${index + 1}`}/><IconButton icon={X} label={`移除图片 ${index + 1}`} onClick={() => setImages(prev => prev.filter((_, i) => i !== index))}/></div>)}
+                {images.map((image, index) => <div key={image.dataUrl} className="attachment" title={image.file?.path ?? (image.dataUrl ? "仅用于视觉理解，暂无本机路径" : "正在读取图片…")}><img src={image.dataUrl} alt={`待发送图片 ${index + 1}`}/><IconButton icon={X} label={`移除图片 ${index + 1}`} onClick={() => setImages(prev => prev.filter((_, i) => i !== index))}/></div>)}
                 {files.map(file => <div key={file.path} className="attachment"><span className="file-attachment"><FileUp size={19}/><span>{file.name}</span></span><IconButton icon={X} label={`移除文件 ${file.name}`} onClick={() => setFiles(prev => prev.filter(item => item.path !== file.path))}/></div>)}
             </motion.div>}</AnimatePresence>
             <textarea ref={textarea} aria-label="发送给清灵的消息" placeholder={speech.listening ? "正在聆听，点击麦克风结束…" : "发消息给清灵…"} rows={1} value={value} onChange={e => setValue(e.target.value)} onKeyDown={e => {

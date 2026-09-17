@@ -211,6 +211,17 @@ svg { display: block; }
 .file-attachment > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .inline-image { display: block; margin: 8px 0; }
 .markdown .inline-image img { display: block; max-width: min(260px, 100%); border-radius: 10px; cursor: zoom-in; }
+.cloud-media { display: flex; flex-direction: column; gap: 9px; margin: 8px 0; padding: 11px; max-width: min(560px, 100%); border: 1px solid var(--line-soft); border-radius: 14px; background: var(--surface-soft); box-shadow: var(--shadow); }
+.cloud-media-title { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--text); font-size: 12px; font-weight: 600; }
+.cloud-media-title > svg { flex: none; color: var(--accent-text); }
+.cloud-media-title > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cloud-media video { display: block; width: 100%; max-height: 360px; border-radius: 10px; background: #000; }
+.cloud-media audio { display: block; width: 100%; }
+.cloud-media-actions { display: flex; align-items: center; }
+.cloud-media-actions a { display: inline-flex; align-items: center; gap: 5px; color: var(--accent-text); font-size: 11px; }
+.cloud-media-actions a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.cloud-media-error { display: inline-flex; align-items: center; gap: 6px; color: var(--danger); font-size: 11px; line-height: 1.6; }
+.cloud-media-warning { color: var(--muted); font-size: 12px; }
 .image-done { margin-top: 6px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 12px; color: var(--secondary); font-size: 11px; }
 .image-done:hover { color: var(--accent-text); border-color: var(--accent); }
 .image-note { display: block; color: var(--muted); font-size: 12px; }

@@ -385,7 +385,10 @@ test("完全访问统一应用于界面操作，删除和退出不再弹出确�
 });
 
 test("同一个附件入口可同时选择图片与文件", async ({page}) => {
-    await page.route("**/api/upload?*", route => route.fulfill({json: {name: "作业.pdf", path: "/fixture/homework.pdf", sizeBytes: 12}}));
+    await page.route("**/api/upload?*", route => {
+        const name = new URL(route.request().url()).searchParams.get("name") ?? "附件";
+        return route.fulfill({json: {name, path: `/fixture/${name}`, sizeBytes: 12}});
+    });
     await page.goto("/");
     await login(page);
     const chooser = page.waitForEvent("filechooser");
@@ -400,7 +403,8 @@ test("同一个附件入口可同时选择图片与文件", async ({page}) => {
     await page.getByRole("button", {name: "发送消息"}).click();
     const body = (await request).postDataJSON();
     expect(body.images).toHaveLength(1);
-    expect(body.question).toContain("/fixture/homework.pdf");
+    expect(body.question).toContain("/fixture/fixture.png");
+    expect(body.question).toContain("/fixture/作业.pdf");
     await expect(page.locator(".markdown table")).toBeVisible();
 });
 
@@ -602,6 +606,25 @@ test("模型原始 HTML 不执行，日历附件可以下载", async ({page}) =>
     expect((await download).suggestedFilename()).toBe("test.ics");
 });
 
+test("云盘视频渲染为内嵌播放器并拦截非清华媒体源", async ({page}) => {
+    const mediaUrl = "https://cloud.tsinghua.edu.cn/seafhttp/files/fixture/test.mp4";
+    await page.route("**/cloud.tsinghua.edu.cn/seafhttp/**", route => route.fulfill({status: 403, body: "Access token not found"}));
+    await page.route("**/api/chat", route => route.fulfill({contentType: "text/event-stream", body: `event: answer\ndata: ${JSON.stringify({text: `这是云盘录屏：\n\n![video:测试录屏.mp4](${mediaUrl})\n\n![audio:外部音频.mp3](https://example.com/test.mp3)`})}\n\nevent: done\ndata: {}\n\n`}));
+    await page.goto("/");
+    await login(page);
+    await page.getByRole("textbox", {name: "发送给清灵的消息"}).fill("打开云盘录屏");
+    await page.getByRole("button", {name: "发送消息"}).click();
+    const card = page.locator(".cloud-media.video");
+    await expect(card).toBeVisible();
+    await expect(card.locator(".cloud-media-title")).toContainText("测试录屏.mp4");
+    await expect(card.locator("video")).toHaveAttribute("src", mediaUrl);
+    await expect(card.getByRole("link", {name: /新窗口打开 \/ 下载/})).toHaveAttribute("href", mediaUrl);
+    await card.locator("video").dispatchEvent("error");
+    await expect(card.getByRole("alert")).toContainText("云盘访问链接已过期");
+    await expect(page.getByText("云盘媒体链接无效，已停止加载。", {exact: true})).toBeVisible();
+    await expect(page.locator(".cloud-media.audio")).toHaveCount(0);
+});
+
 test("二次认证方式、验证码和密码清理", async ({page}) => {
     await page.goto("/");
     await login(page, "2000000000");
@@ -643,10 +666,12 @@ test("手机布局、抽屉、弹窗焦点和减少动态效果", async ({page})
 });
 
 test("图片附件与输入法 Enter 不会误发", async ({page}) => {
+    await page.route("**/api/upload?*", route => route.fulfill({status: 500}));
     await page.goto("/");
     await login(page);
     await page.getByLabel("选择附件").setInputFiles({name: "fixture.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6SAAAAABJRU5ErkJggg==", "base64")});
     await expect(page.getByAltText("待发送图片 1")).toBeVisible();
+    await expect(page.getByText("「fixture.png」可用于识图，但暂不能作为云盘上传源", {exact: true})).toBeVisible();
     await page.getByRole("button", {name: "移除图片 1"}).click();
     await expect(page.getByAltText("待发送图片 1")).not.toBeVisible();
     const input = page.getByRole("textbox", {name: "发送给清灵的消息"});
@@ -656,6 +681,24 @@ test("图片附件与输入法 Enter 不会误发", async ({page}) => {
     await expect(input).toHaveValue("中文输入中");
     await input.press("Shift+Enter");
     await expect(input).toHaveValue("中文输入中\n");
+});
+
+test("图片落盘失败时仍可作为视觉输入发送", async ({page}) => {
+    await page.route("**/api/upload?*", route => route.fulfill({status: 500}));
+    await page.route("**/api/chat", route => route.fulfill({contentType: "text/event-stream", body: 'event: answer\ndata: {"text":"已看到图片。"}\n\nevent: done\ndata: {}\n\n'}));
+    await page.goto("/");
+    await login(page);
+    await page.getByLabel("选择附件").setInputFiles({name: "视觉.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6SAAAAABJRU5ErkJggg==", "base64")});
+    await expect(page.getByAltText("待发送图片 1")).toBeVisible();
+    await expect(page.getByText("「视觉.png」可用于识图，但暂不能作为云盘上传源", {exact: true})).toBeVisible();
+    await page.getByRole("textbox", {name: "发送给清灵的消息"}).fill("这张图里是什么？");
+    const sent = page.waitForRequest("**/api/chat");
+    await page.getByRole("button", {name: "发送消息"}).click();
+    const body = (await sent).postDataJSON();
+    expect(body.images).toHaveLength(1);
+    expect(body.question).not.toContain("/fixture/");
+    expect(body.question).toContain("这张图里是什么？");
+    await expect(page.getByText("已看到图片。", {exact: true})).toBeVisible();
 });
 
 test("文件上传不依赖视觉模型，发送保留文件上下文且历史只显示文件名", async ({page}) => {

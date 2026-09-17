@@ -60,6 +60,10 @@ export const toolLabels: Record<string, string> = {
     submit_learn_homework: "提交学堂作业", get_learn_files: "学堂课件", download_learn_file: "下载学堂课件",
     get_learn_calendar: "学堂日历", show_learn_image: "学堂图片",
     get_emails: "清华邮箱", send_email: "发送邮件", show_email_image: "邮件图片",
+    get_cloud_libraries: "云盘资料库", get_cloud_directory: "云盘目录", search_cloud_files: "云盘搜索",
+    show_cloud_file: "云盘文件", upload_cloud_file: "上传到云盘", create_cloud_folder: "新建云盘文件夹",
+    rename_cloud_item: "重命名云盘项目", transfer_cloud_item: "复制/移动云盘项目",
+    delete_cloud_item: "删除云盘项目", create_cloud_share_link: "生成云盘分享链接",
     create_reminder: "创建提醒", schedule_sports_booking: "定时预约", list_my_tasks: "我的任务", cancel_task: "取消任务",
 };
 

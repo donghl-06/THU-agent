@@ -4,6 +4,7 @@ import type {AddressInfo} from "node:net";
 import {mkdtempSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
+import {setTimeout as delay} from "node:timers/promises";
 import {Agent} from "../../src/harness/agentLoop";
 import type {LlmClient} from "../../src/harness/llmClient";
 import type {ChatMessage} from "../../src/harness/types";
@@ -14,9 +15,35 @@ import type {WorkspaceData} from "../../src/shared/workspace";
 
 let server: Server | undefined;
 let directory: string | undefined;
+
+async function closeServer(): Promise<void> {
+    if (!server) return;
+    const closing = server;
+    closing.closeAllConnections();
+    await new Promise<void>(resolve => closing.close(() => resolve()));
+    // Windows may need one event-loop turn before the async close hook releases SQLite.
+    await delay(25);
+    if (server === closing) server = undefined;
+}
+
+async function removeDirectory(): Promise<void> {
+    if (!directory) return;
+    const path = directory;
+    directory = undefined;
+    for (let attempt = 0; ; attempt++) {
+        try {
+            rmSync(path, {recursive: true, force: true});
+            return;
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "EBUSY" || attempt >= 9) throw error;
+            await delay(20);
+        }
+    }
+}
+
 afterEach(async () => {
-    if (server) { server.closeAllConnections(); await new Promise<void>(resolve => server!.close(() => resolve())); server = undefined; }
-    if (directory) { rmSync(directory, {recursive: true, force: true}); directory = undefined; }
+    await closeServer();
+    await removeDirectory();
     vi.unstubAllEnvs();
 });
 
@@ -138,9 +165,7 @@ describe("scheduled task HTTP and conversations", () => {
         const task = await f.create();
         await f.post("/api/scheduled-tasks/run", {id: task.id});
         await expect.poll(async () => (await f.snapshot()).runs[0].status).toBe("completed");
-        server!.closeAllConnections(); await new Promise<void>(resolve => server!.close(() => resolve()));
-        // The close hook waits for background work before closing the database.
-        await new Promise(resolve => setImmediate(resolve));
+        await closeServer();
         const seen: ChatMessage[][] = [];
         f = await start({persistent: true, llm: {chat: async messages => { seen.push(messages); return {role: "assistant", content: "继续回答"}; }}});
         expect((await f.snapshot()).tasks[0].id).toBe(task.id);

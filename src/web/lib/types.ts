@@ -2,6 +2,8 @@ export interface UploadedFile {
     name: string;
     path: string;
     sizeBytes: number;
+    /** 图片附件已落盘时标记为 true：模型仍需要路径，但用户气泡已有预览，不再显示文件名。 */
+    isImage?: boolean;
 }
 
 export interface Usage {

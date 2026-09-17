@@ -21,7 +21,7 @@
                                              ▼
                                   createAllSkills() 统一装配
                                     │                  │
-                           31 个校园原子工具       4 个任务工具（可选）
+                           41 个校园原子工具       4 个任务工具（可选）
                                     │                  │
                               领域客户端       Web 常驻 TaskScheduler
                                     │                  │
@@ -35,10 +35,10 @@ JSON CLI 的任务调用通过本机 HTTP 桥接到已运行的 Web 服务；它
 
 | 入口 | 实现 | 使用本项目 LLM | 当前能力 | 写操作确认 |
 | --- | --- | --- | --- | --- |
-| `pnpm agent` | `scripts/step10-agent.ts` | 是 | 31 个校园工具：21 读、10 写；无任务调度器 | 终端展示参数，输入 `y` / `yes` |
-| `pnpm web` | `scripts/web-dev.mjs` → Vite / `scripts/step18-web.ts` → `src/server/webServer.ts` | 对话及提示词定时任务需要 | 31 个校园工具 + 4 个任务工具；定时 Agent 任务管理页 | 对话可切换访问模式；后台 Agent 写操作留待用户确认 |
-| `pnpm --silent skill …` | `src/skillCli.ts` | 否 | 35 个工具；任务依赖 Web | 宿主先取得用户明确同意，再逐次传 `--confirmed-by-user` |
-| `pnpm --silent mcp` | `scripts/mcp-server.ts` → `src/mcp/server.ts` | 否 | 默认 21 个校园读工具 + `thu_login` / `get_user_info` | 当前不支持写操作确认，拒绝执行写工具 |
+| `pnpm agent` | `scripts/step10-agent.ts` | 是 | 41 个校园工具：25 读、16 写；无任务调度器 | 终端展示参数，输入 `y` / `yes` |
+| `pnpm web` | `scripts/web-dev.mjs` → Vite / `scripts/step18-web.ts` → `src/server/webServer.ts` | 对话及提示词定时任务需要 | 41 个校园工具 + 4 个任务工具；定时 Agent 任务管理页、状态看板 | 对话可切换访问模式；后台 Agent 写操作留待用户确认 |
+| `pnpm --silent skill …` | `src/skillCli.ts` | 否 | 45 个工具；任务依赖 Web | 宿主先取得用户明确同意，再逐次传 `--confirmed-by-user` |
+| `pnpm --silent mcp` | `scripts/mcp-server.ts` → `src/mcp/server.ts` | 否 | 默认 25 个校园读工具 + `thu_login` / `get_user_info` | 当前不支持写操作确认，拒绝执行写工具 |
 
 `pnpm dev` 的 `src/index.ts` 仍是提示入口，不是 Agent 或 Web 启动命令。
 Windows EXE / macOS 应用封装的是同一套本地 Web 服务及启动、托盘、通知能力，
@@ -78,8 +78,9 @@ React 渲染并跳过原始 HTML。`POST /api/chat` 以 SSE 返回文本、工�
 思考、工具和中间正文，最终回复保持可见。过程可重新展开，随浏览器历史保存。
 停止、错误及未收到 `done` 的断流保留已有内容并显示未完成状态；旧版纯文本历史仍可读取。
 
-输入框的 Cross 入口统一选择图片和文件；支持视觉的模型将可用图片作为图片输入，其余附件
-通过上传接口提供给工具。语音输入紧邻发送按钮，消息底部的用量与复制操作同步在悬停或键盘
+输入框的 Cross 入口统一选择图片和文件；支持视觉的模型将可用图片作为图片输入，图片会同时
+通过上传接口保存为本机文件，供云盘上传、作业提交等工具使用，其余附件也通过上传接口提供给工具。
+语音输入紧邻发送按钮，消息底部的用量与复制操作同步在悬停或键盘
 聚焦时显示；触摸设备保留可见操作。
 
 #### 操作访问模式
@@ -155,11 +156,12 @@ Web 层还提供图形化登录与二次认证、停止生成、多会话与历�
 [createAllSkills](../src/skills/index.ts) 是统一装配入口，向 CLI、Web 和 MCP 提供同一套实现。
 注入客户端、验证码求解器和调度器也使工具可以脱离网络、模型和 UI 独立测试。
 
-- 21 个校园读工具：课表、校园卡、教室、图书馆座位/研讨间、体育资源、成绩单、
+- 25 个校园读工具：课表、校园卡、教室、图书馆座位/研讨间、体育资源、成绩单、
   宿舍电费、宿舍卫生、校园网状态、我的图书馆预约，以及校园资讯列表/详情、
-  学堂课程/通知/作业/课件/日历/图片、邮箱列表与正文/图片。
-- 10 个校园写工具：体育预约、图书馆座位/研讨间预约、取消图书馆预约、电费充值、
-  体育订单支付、校园卡充值、提交学堂作业、下载课件、发送邮件。
+  学堂课程/通知/作业/课件/日历/图片、邮箱列表与正文/图片，云盘资料库/目录/搜索/文件展示。
+- 16 个校园写工具：体育预约、图书馆座位/研讨间预约、取消图书馆预约、电费充值、
+  体育订单支付、校园卡充值、提交学堂作业、下载课件、发送邮件，云盘上传、新建文件夹、
+  重命名、复制/移动、删除与生成分享链接。
 - 4 个任务工具：`create_reminder`、`schedule_sports_booking`、`list_my_tasks`、
   `cancel_task`；其中仅任务查询为只读，其余均要求确认。
 
@@ -180,7 +182,7 @@ Web 层还提供图形化登录与二次认证、停止生成、多会话与历�
 
 ### 外部 Agent Skill：`.agents/skills/thu-agent/`
 
-这是**一个**供兼容宿主发现和加载的 Skill 包，不是 35 份独立 Skill：
+这是**一个**供兼容宿主发现和加载的 Skill 包，不是 45 份独立 Skill：
 
 - `SKILL.md`：触发场景、工具发现流程、逐次确认和敏感数据处理规则。
 - `scripts/thu-agent.mjs`：从任意工作目录定位本仓库，再启动机器 CLI。
@@ -213,6 +215,7 @@ MCP 是另一种协议适配，不是 Agent Skill 本身。当前 MCP 不装配�
 | `src/client/sports/SportsClient.ts` | 独立对接新版体育系统，处理资源、预约和支付接口 |
 | `src/client/myhome.ts` | 使用独立 Cookie 会话读取宿舍电量，补充 SDK 电费数据 |
 | `src/client/usereg.ts` | 校园网自助服务，独立 Cookie 会话、RSA 登录与字符验证码；登录名从 Info 的 `emailName` 获取 |
+| `src/client/cloud/CloudClient.ts` | 清华云盘（Seafile）客户端：SSO 登录、资料库/目录/搜索、文件访问链接与上传/分享等写操作 |
 | `src/client/taskSkillClient.ts` | 仅供外部任务调用连接本机 Web 服务，不连接校园系统 |
 
 SDK 的 Node.js 兼容性修复通过 `patches/` 和 pnpm patch 应用。新增能力优先复用客户端；

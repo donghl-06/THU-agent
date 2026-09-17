@@ -1,6 +1,6 @@
 ---
 name: thu-agent
-description: Use QingLing / THU-agent for Tsinghua campus queries, library and sports bookings, payments, dorm hygiene scores, campus network status, reminders and scheduled bookings. Applies to campus-service requests through the user's local checkout or connected QingLing MCP; not general university research.
+description: Use QingLing / THU-agent for Tsinghua campus queries, library and sports bookings, payments, dorm hygiene scores, campus network status, Tsinghua Cloud Drive file operations, reminders and scheduled bookings. Applies to campus-service requests through the user's local checkout or connected QingLing MCP; not general university research.
 ---
 
 # THU Agent
@@ -41,6 +41,12 @@ When combining capabilities, prefer independent read calls and use their returne
 
 `get_sports_resources` now requires a nonempty `resourceName` keyword. Query a specific sport/venue and serialize sports queries; avoid parallel scans of all venues. Treat returned warnings or partial results as incomplete information, not proof that everything is unavailable.
 
+## Tsinghua Cloud Drive
+
+Use `get_cloud_libraries`, `get_cloud_directory`, and `search_cloud_files` to resolve the exact library and path before any cloud-drive write. `show_cloud_file` returns an access card for a video, audio, or ordinary file; do not claim to open a file unless the returned result reports success.
+
+Cloud-drive upload, folder creation, rename, copy/move, delete, and share-link creation are real writes. Resolve and show the exact source path, target library/folder, destination name, operation, and effect before requesting confirmation. Share links expose data to whoever receives them; deletion is destructive and may require web-side recovery. Never perform or retry these writes without fresh user approval for the exact parameters.
+
 ## Image results
 
 `get_dorm_score` returns a hygiene-score chart in `data.imagesBase64`, not numeric grades. Decode it without pasting base64 into the conversation:
@@ -61,7 +67,7 @@ For scheduled booking, obtain explicit approval of the execution time, target da
 
 ## Connected MCP
 
-If the host already has QingLing MCP connected, use its listed tools for supported campus queries. MCP additionally provides `thu_login` and `get_user_info`; these are not CLI capability names. MCP defaults to read tools and rejects write tools even when `THU_MCP_INCLUDE_WRITE_TOOLS=1`; the CLI confirmation flag does not apply to MCP. Task capabilities need the Web bridge above. MCP currently returns hygiene images as JSON text too, so they still need image decoding. See [references/runtime.md](references/runtime.md) for source/package entrypoints.
+If the host already has QingLing MCP connected, use its listed tools for supported campus queries, including cloud-drive libraries, directories, search, and file display. MCP additionally provides `thu_login` and `get_user_info`; these are not CLI capability names. MCP defaults to read tools and rejects write tools even when `THU_MCP_INCLUDE_WRITE_TOOLS=1`; cloud-drive writes and share-link creation are therefore unavailable through MCP. The CLI confirmation flag does not apply to MCP. Task capabilities need the Web bridge above. MCP currently returns hygiene images as JSON text too, so they still need image decoding. See [references/runtime.md](references/runtime.md) for source/package entrypoints.
 
 ## Write operations
 
