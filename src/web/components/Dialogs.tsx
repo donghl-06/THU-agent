@@ -52,12 +52,13 @@ function ConfirmDialog({app}: {app: Assistant}) {
     const confirmation = app.confirmation!;
     const isWrite = confirmation.kind === "write";
     const isDelete = confirmation.kind === "delete";
-    const title = isWrite ? "确认这次操作" : isDelete ? "删除对话？" : "退出登录？";
+    const isBankRecharge = isWrite && confirmation.name === "recharge_campus_card" && confirmation.args.method === "bank";
+    const title = isBankRecharge ? "确认银行卡充值" : isWrite ? "确认这次操作" : isDelete ? "删除对话？" : "退出登录？";
     const Icon = isWrite ? Hand : isDelete ? Trash2 : LogOut;
     return <Modal title={title} close={app.confirmBusy ? undefined : () => void app.respond(false)}>
         <span className={`dialog-icon ${isDelete ? "danger" : ""}`}><Icon size={27}/></span>
-        <p className="dialog-description">{isWrite ? "请核对以下信息，确认后清灵才会执行。" : isDelete ? `“${confirmation.session.title}”将被删除，此操作无法撤销。` : "退出后历史对话会隐藏，重新登录即可继续查看。"}</p>
-        {isWrite && <dl className="confirmation-details"><div><dt>操作</dt><dd>{toolLabels[confirmation.name] ?? confirmation.name}</dd></div>{Object.entries(confirmation.args).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{typeof value === "object" ? JSON.stringify(value) : String(value)}</dd></div>)}</dl>}
+        <p className="dialog-description">{isBankRecharge ? "确认后将直接从校园卡系统绑定的银行卡扣款，为你的校园卡充值，无需扫码。" : isWrite ? "请核对以下信息，确认后清灵才会执行。" : isDelete ? `“${confirmation.session.title}”将被删除，此操作无法撤销。` : "退出后历史对话会隐藏，重新登录即可继续查看。"}</p>
+        {isWrite && <dl className="confirmation-details"><div><dt>操作</dt><dd>{toolLabels[confirmation.name] ?? confirmation.name}</dd></div>{Object.entries(confirmation.args).map(([key, value]) => <div key={key}><dt>{isBankRecharge ? ({amountYuan: "充值金额", method: "支付方式"} as Record<string, string>)[key] ?? key : key}</dt><dd>{isBankRecharge && key === "method" ? "银行卡直接扣款" : isBankRecharge && key === "amountYuan" ? `${String(value)} 元` : typeof value === "object" ? JSON.stringify(value) : String(value)}</dd></div>)}</dl>}
         <div className="modal-actions"><button className="button secondary" disabled={app.confirmBusy} onClick={() => void app.respond(false)}>取消</button><button className={`button ${isDelete ? "destructive" : "primary"}`} disabled={app.confirmBusy} onClick={() => void app.respond(true)}>{app.confirmBusy ? <LoaderCircle className="spin" size={16}/> : <Check size={16}/>}<span>{isWrite ? "确认执行" : isDelete ? "删除对话" : "确认退出"}</span></button></div>
     </Modal>;
 }

@@ -7,7 +7,11 @@ import {applyTurnEvent, finishTurn, turnText} from "./turn";
 import {isAccessMode, type AccessMode} from "../../harness/accessMode";
 import type {AuthState, Confirmation, Message, Notice, Result, SessionsState, Turn, UploadedFile, Usage} from "./types";
 
+type WorkspacePage = "chat" | "tasks" | "dashboard";
+const pageFromHash = (): WorkspacePage => window.location.hash === "#dashboard" ? "dashboard" : window.location.hash === "#tasks" ? "tasks" : "chat";
+
 export function useAssistant() {
+    const [page, setPage] = useState<WorkspacePage>(pageFromHash);
     const [preferences, setPreferences] = useState<Preferences>(defaultPreferences);
     const [profile, setProfile] = useState<UserProfile>();
     const [workspaceReady, setWorkspaceReady] = useState(false);
@@ -40,6 +44,38 @@ export function useAssistant() {
     const cancellation = useRef<Promise<unknown> | null>(null);
     const lastQuestion = useRef<{question: string; images: string[]; messageId?: string} | null>(null);
     const noticeTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+    function navigate(next: WorkspacePage) {
+        setPage(next);
+        const hash = next === "chat" ? "" : `#${next}`;
+        if (window.location.hash !== hash) window.location.hash = hash;
+    }
+    function openTasks() {
+        if (chatAbort.current || loginAbort.current) { notify("请等待当前操作完成"); return; }
+        navigate("tasks");
+    }
+    function openDashboard() {
+        if (chatAbort.current || loginAbort.current) { notify("请等待当前操作完成"); return; }
+        navigate("dashboard");
+    }
+    async function openTaskSession(id: string) {
+        if (chatAbort.current || loginAbort.current) { notify("请等待当前操作完成"); return; }
+        try {
+            const data = await (await request("/api/workspace")).json() as WorkspaceData;
+            applyWorkspace(data);
+            if (!data.history.sessions.some(session => session.id === id)) { notify("此次执行的会话已被删除或尚未生成。", "error"); return; }
+            switchSession(id);
+        } catch (error) { notify(errorMessage(error), "error"); }
+    }
+
+    useEffect(() => {
+        const changed = () => {
+            if (chatAbort.current || loginAbort.current) return;
+            setPage(pageFromHash());
+        };
+        window.addEventListener("hashchange", changed);
+        return () => window.removeEventListener("hashchange", changed);
+    }, []);
 
     function changeAccessMode(mode: AccessMode) {
         if (chatAbort.current || loginAbort.current || confirmBusy || !isAccessMode(mode)) return;
@@ -350,6 +386,7 @@ export function useAssistant() {
     }
 
     async function send(question: string, images: string[] = [], files: UploadedFile[] = []) {
+        if (backgroundRunning) { notify("定时任务正在执行，请等待完成后继续对话。"); return; }
         if ((!question.trim() && !images.length && !files.length) || chatAbort.current || loginAbort.current || lifecycle) return;
         if (!authenticatedRef.current) { openLogin(); return; }
         const sessionId = historyRef.current.activeId;
@@ -373,6 +410,7 @@ export function useAssistant() {
     }
 
     function retry() {
+        if (backgroundRunning) { notify("定时任务正在执行，请等待完成后继续对话。"); return; }
         const last = lastQuestion.current;
         if (last && authenticatedRef.current) return generate(last.question, last.images, last.messageId);
         const session = historyRef.current.sessions.find(s => s.id === historyRef.current.activeId);
@@ -384,6 +422,7 @@ export function useAssistant() {
     function switchSession(id: string) {
         if (chatAbort.current || loginAbort.current) { notify("请等待当前操作完成"); return; }
         if (!authenticatedRef.current) return;
+        navigate("chat");
         commit(state => ({...state, activeId: id}));
         selectRemote(id);
         setError(null);
@@ -393,6 +432,7 @@ export function useAssistant() {
 
     function newChat() {
         if (chatAbort.current || loginAbort.current) { notify("请等待当前操作完成"); return; }
+        navigate("chat");
         const id = newId();
         commit(state => ({...state, activeId: id}));
         selectRemote(id);
@@ -437,7 +477,9 @@ export function useAssistant() {
     }
 
     const session = history.sessions.find(s => s.id === history.activeId);
-    return {preferences, changePreferences, profile, workspaceReady, history, session, messages: authenticated ? session?.messages ?? [] : [], authenticated, authChecked, accessMode, changeAccessMode,
+    const backgroundSession = history.sessions.find(item => item.scheduledRunId && item.id !== turn?.sessionId && item.messages.some(message => message.turn?.status === "running"));
+    const backgroundRunning = Boolean(authenticated && backgroundSession);
+    return {page, openTasks, openDashboard, openTaskSession, backgroundSession, backgroundRunning, preferences, changePreferences, profile, workspaceReady, history, session, messages: authenticated ? session?.messages ?? [] : [], authenticated, authChecked, accessMode, changeAccessMode,
         auth, authBusy, loginPending, uiLocked, lifecycle, turn, stopping, confirmation, confirmBusy, results, error, vision, notices,
         notify, openLogin, startLogin, cancelAuth, submitAuth, unlock, send, stop, retry, switchSession, newChat, respond, requestConfirmation};
 }

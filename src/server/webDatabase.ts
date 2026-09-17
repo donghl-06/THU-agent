@@ -81,7 +81,8 @@ export class WebDatabase {
                 // Existing server messages are authoritative; imports only fill missing messages.
                 merged.sessions = merged.sessions.map(session => {
                     const current = saved.sessions.find(item => item.id === session.id);
-                    return current ? {...session, messages: mergeMessages(session.messages, current.messages, session.id)} : session;
+                    return current ? {...session, scheduledTaskId: current.scheduledTaskId, scheduledRunId: current.scheduledRunId,
+                        messages: mergeMessages(session.messages, current.messages, session.id)} : session;
                 });
                 if (!saved.sessions.length) merged.activeId = incoming.activeId;
                 this.put("history", merged);

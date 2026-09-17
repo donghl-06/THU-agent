@@ -7,7 +7,8 @@
 ## 1. 总体设计：一套能力，多个入口
 
 清灵既是一个可独立使用的校园 Agent，也是供其他 Agent 调用的校园工具集。
-只有内置自然语言对话需要本项目的 LLM；直接工具调用和定时任务执行不经过模型。
+内置自然语言对话和 Web 中按提示词运行的定时任务使用本项目的 LLM；直接工具调用、
+原有的提醒和定时预约不经过模型。
 
 ```text
 终端用户 ── pnpm agent ───────────────────────┐
@@ -35,7 +36,7 @@ JSON CLI 的任务调用通过本机 HTTP 桥接到已运行的 Web 服务；它
 | 入口 | 实现 | 使用本项目 LLM | 当前能力 | 写操作确认 |
 | --- | --- | --- | --- | --- |
 | `pnpm agent` | `scripts/step10-agent.ts` | 是 | 41 个校园工具：25 读、16 写；无任务调度器 | 终端展示参数，输入 `y` / `yes` |
-| `pnpm web` | `scripts/web-dev.mjs` → Vite / `scripts/step18-web.ts` → `src/server/webServer.ts` | 对话需要；任务执行不需要 | 41 个校园工具 + 4 个任务工具 | 请求批准 / 完全访问，可在输入框切换 |
+| `pnpm web` | `scripts/web-dev.mjs` → Vite / `scripts/step18-web.ts` → `src/server/webServer.ts` | 对话及提示词定时任务需要 | 41 个校园工具 + 4 个任务工具；定时 Agent 任务管理页、状态看板 | 对话可切换访问模式；后台 Agent 写操作留待用户确认 |
 | `pnpm --silent skill …` | `src/skillCli.ts` | 否 | 45 个工具；任务依赖 Web | 宿主先取得用户明确同意，再逐次传 `--confirmed-by-user` |
 | `pnpm --silent mcp` | `scripts/mcp-server.ts` → `src/mcp/server.ts` | 否 | 默认 25 个校园读工具 + `thu_login` / `get_user_info` | 当前不支持写操作确认，拒绝执行写工具 |
 
@@ -119,6 +120,31 @@ Web 层还提供图形化登录与二次认证、停止生成、多会话与历�
 `HOST` / `PORT` 可覆盖。绑定所有网卡不等于仅本机可访问，部署时应核对网络可达范围，
 按需配置 `UI_TOKEN`，不要把这个单用户 HTTP 服务直接暴露到公网。
 
+### Web 状态看板
+
+`/#dashboard` 对应 `DashboardPage` 和 `useDashboard`。`src/server/dashboardSources.ts` 定义 16 项
+展示映射，执行入口仍来自 `createAllSkills()`。`DashboardService` 不实例化 Agent 或调用 LLM，
+仅执行白名单中的只读 Skill，并再次检查 `requiresConfirmation`；任意工具名不能通过 HTTP 传入执行。
+
+| 接口 | 行为 |
+| --- | --- |
+| `GET /api/dashboard` | 返回当前快照，后台查询过期项，结果逐项可见 |
+| `GET /api/dashboard?poll=1` | 只读快照，不发起新的周期查询 |
+| `GET /api/dashboard?refresh=all` | 手动刷新所有项；单项可用 `refresh=card` 等展示 ID |
+| `GET /api/dashboard/news?ref=…` | 仅允许读取当前资讯列表返回的原始详情标识 |
+
+以上接口沿用 UI_TOKEN 和校园登录守卫，响应均为 `no-store`。缓存仅保存在进程内，重新登录和退出
+时清空；运行时密码不落盘。看板首次查询时若有运行时／环境凭证，重新建立一次 Info 会话，避免只凭
+旧 Cookie 文件误判已认证；无密码时使用已有会话，失效则提示重新连接。看板客户端不借用对话的
+交互式二次认证回调。聊天／登录忙碌时不启动新查询。
+前端查询中每 2 秒取快照，空闲时每 15 秒检查过期项；校园查询按各项的 2–60 分钟 TTL 触发，
+手动刷新至少间隔 15 秒。隐藏页面和离开看板会取消前端请求和计时器，服务端没有常驻刷新计时器。
+
+聚合层最多同时执行 4 个 Skill；网络学堂批次串行，复用课程缓存。每项 45 秒超时后保留旧数据，
+不把异常内容返回浏览器。底层 Skill 尚不支持取消，超时请求实际结束前仍占并发槽，禁止叠加重试。
+已排队的这一批查询仍可完成。空结果、不可用、错误和更新时间分开表示；已恢复数据可独立更新。
+资讯正文、通知和作业文本由 React 转义，文件链接仅允许 HTTP(S)。
+
 ## 3. Skills 的两个含义
 
 ### 内部原子工具：`src/skills/`
@@ -141,6 +167,18 @@ Web 层还提供图形化登录与二次认证、停止生成、多会话与历�
 
 宿舍卫生成绩工具返回公示图片 `imagesBase64`，不是已识别的分数。
 体育资源查询要求明确 `resourceName`；不要把“工具存在”理解为无参数即可遍历全校资源。
+
+校园卡充值 `recharge_campus_card` 支持 `method: "bank"`，从校园卡系统绑定的银行卡
+直接发起扣款，无需扫码；必须明确授权本次金额及银行卡通道。银行卡直充开放 10–200
+整数元，保留写操作确认，未指定通道仍默认支付宝扫码。银行卡结果的
+`paymentStatus: "submitted"` 只表示请求已提交，不能当作扣款或到账凭证；
+异常返回 `PAYMENT_STATUS_UNKNOWN` 时应核对余额、充值记录和银行卡扣款，不自动重试
+或切换付款通道。微信／支付宝结果为 `paymentStatus: "awaiting_payment"`，仍返回 `payUrl`。
+本功能不包含余额阈值监控或周期性自动充值。
+
+依赖核查（2026-09-16）：npm 官方 registry 的 `@thu-info/lib` 最新正式版仍为 3.15.2，
+因此未升级，也未修改已有补丁。该版本银行卡调用不校验内层 `returncode` 且不返回
+交易凭证，Agent 只报告提交状态。后续正式发布版本可更新后再验证到账判定。
 
 ### 外部 Agent Skill：`.agents/skills/thu-agent/`
 
@@ -185,6 +223,39 @@ SDK 的 Node.js 兼容性修复通过 `patches/` 和 pnpm patch 应用。新增�
 
 ## 5. 定时任务与外部调用链路
 
+### Web 定时 Agent 任务
+
+侧栏“新建对话”下方的“定时任务”进入 `/#tasks`。`TasksPage` 提供提示词任务的
+创建、编辑、暂停/启用、立即运行、删除，以及可搜索和筛选的执行历史；旧有的提醒和预约也在此展示、取消。
+删除任务保留历史和会话；删除一条执行记录会同时删除该次会话及后续对话。
+
+`src/tasks/scheduledTasks.ts` 随 Web 服务监听启动，每 5 秒检查任务，使用北京时间
+（Asia/Shanghai，UTC+8），支持单次、每天和每周多日计划。任务定义和执行快照保存在
+`data/qingling.sqlite` 的 `scheduled-tasks` 文档中。立即运行不改变原计划，暂停不停止
+已开始的执行，可在执行历史中单独停止。编辑已暂停或结束的任务后，需要显式启用。
+
+调度与交互式登录/聊天共用执行互斥：忙时等待，错过超过 10 分钟则记录为“已错过”，
+周期任务推进至下一次未来时间，不追补积压。每次执行前先持久化执行记录及下一次时间；
+进程重启将未结束的记录标为“已中断”，不自动重放。单次运行上限为 10 分钟。
+仍需保持本地服务运行及校园登录可用，不提供跨进程的严格一次执行保证。
+
+`src/server/scheduledRun.ts` 通过同一 Agent 和工具集执行，强制使用 `request-approval`；
+后台确认回调拒绝写操作并标记“待处理”，不会继承普通聊天的完全访问偏好。
+用户进入会话继续提问后使用正常聊天确认流程。停止会中止模型等待，已发出的只读校园请求可能仍在返回。
+
+每次运行保存独立的消息时间线、用量与模型上下文，并带有 `scheduledTaskId` / `scheduledRunId`。
+执行不会改变当前选中的聊天；侧栏历史过滤任务会话，后续续聊和旧浏览器快照合并也保留归属。
+会话从执行历史进入，复用正常聊天界面和上下文恢复机制。
+
+API：`GET /api/scheduled-tasks` 返回 `{tasks, runs, busy}`；`POST /api/scheduled-tasks/`
+下的 `create`、`update`、`toggle`、`delete`、`run`、`stop`、`delete-run` 分别对应管理操作。
+创建/编辑接受 `{title, prompt, schedule: {frequency, time, date?, weekdays?}}`，
+星期一至星期日编码为 1–7；其他操作传 `{id}`，启停计划另传 `enabled`。
+这些接口要求 Web 登录；写请求要求同源 JSON。`run` 以 202 返回执行记录，页面每 2 秒刷新状态。
+这一组提示词任务独立于旧任务工具，当前不经 JSON CLI 的四个任务工具暴露。
+
+### 原有提醒、预约与外部工具
+
 `TaskScheduler` 随 `pnpm web` 启动，每 30 秒检查任务；`TaskStore` 将状态保存到
 `data/tasks.json`。提醒/抢场在创建时确认；到点直接执行确定性代码，不再次调用 LLM，
 也不再次弹出确认。抢场创建时必须明确目标、执行时间与支付方式。
@@ -219,7 +290,8 @@ SDK 的 Node.js 兼容性修复通过 `patches/` 和 pnpm patch 应用。新增�
 | Web 登录凭证 | 登录界面传给本地后端的运行时凭证，不自动写入 CLI 的 `.env` |
 | 稳定设备指纹 | 系统状态目录中的 `QingLing/device.json`，可用 `QINGLING_DEVICE_FILE` 覆盖；共享的是设备身份，不是 Cookie |
 | Web Info 会话票据 | `data/auth.json`，私有权限保存，退出登录时清理；恢复快照不代表票据仍有效 |
-| Web 对话与任务 | `data/sessions.json` / `data/tasks.json`；浏览器另有本地会话展示缓存 |
+| Web 对话、设置与定时 Agent 任务 | `data/qingling.sqlite`；浏览器仅保留内存视图，旧 `sessions.json` 可迁移 |
+| 原有提醒与预约任务 | `data/tasks.json`，由 `TaskScheduler` / `TaskStore` 管理 |
 
 `SessionStore` 不保存 system 消息，并将多模态消息中的图片 parts 转为文本；
 这不是对任意工具 JSON 字符串的全面脱敏。对话、图片、任务和会话票据都属于私有数据，

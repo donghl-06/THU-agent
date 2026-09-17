@@ -26,6 +26,8 @@ export interface Message {
 
 export interface Session {
     id: string;
+    scheduledTaskId?: string;
+    scheduledRunId?: string;
     title: string;
     createdAt: number;
     updatedAt?: number;

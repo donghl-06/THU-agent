@@ -1,7 +1,8 @@
-import {describe, expect, it} from "vitest";
+import {describe, expect, it, vi} from "vitest";
 import {ok, type Skill} from "../../src/skills/base/types";
 import {createAllSkills} from "../../src/skills/index";
 import {runSkillCli} from "../../src/skillCli";
+import {createRechargeCampusCardSkill} from "../../src/skills/card/rechargeCampusCard";
 
 const echoSkill: Skill = {
     name: "echo",
@@ -99,5 +100,22 @@ describe("外部 Agent Skill CLI", () => {
         expect(result.exitCode).toBe(1);
         expect(result.body.error?.code).toBe("INTERNAL_ERROR");
         expect(JSON.stringify(result.body)).not.toContain("secret-cookie-value");
+    });
+
+    it("银行卡充值必须带本次确认标记，成功结果不含二维码", async () => {
+        const bank = vi.fn().mockResolvedValue(undefined);
+        const qr = vi.fn();
+        const skill = createRechargeCampusCardSkill({rechargeCampusCardBank: bank, rechargeCampusCardQr: qr});
+        const args = ["call", skill.name, "--input", JSON.stringify({amountYuan: 100, method: "bank"})];
+        const blocked = await runSkillCli(args, [skill]);
+        expect(blocked.body.error?.code).toBe("CONFIRMATION_REQUIRED");
+        expect(bank).not.toHaveBeenCalled();
+        const approved = await runSkillCli([...args, "--confirmed-by-user"], [skill]);
+        expect(approved.exitCode).toBe(0);
+        expect(approved.body.data).toMatchObject({method: "bank", paymentStatus: "submitted"});
+        expect(approved.body.data).not.toHaveProperty("payUrl");
+        expect(bank).toHaveBeenCalledTimes(1);
+        expect(bank).toHaveBeenCalledWith(100);
+        expect(qr).not.toHaveBeenCalled();
     });
 });

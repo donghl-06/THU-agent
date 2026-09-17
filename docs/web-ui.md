@@ -37,6 +37,17 @@
 
 ![手机账户菜单](screenshots/web-account-menu-mobile.png)
 
+### 状态看板
+
+“定时任务”下方的入口打开独立看板，展示 16 类校园信息；支持分类搜索、自动／手动刷新、
+公告正文、错误重试和旧数据标识。以下截图全部使用合成数据，网络和宿舍卫生故意模拟不可用状态。
+
+![看板浅色](screenshots/web-dashboard-light.png)
+
+![看板深色](screenshots/web-dashboard-dark.png)
+
+![看板手机](screenshots/web-dashboard-mobile.png)
+
 ## 后端数据
 
 工作区使用 `data/qingling.sqlite` 保存对话、处理时序、图片与附件、用量、模型上下文、

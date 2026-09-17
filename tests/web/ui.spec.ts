@@ -15,6 +15,31 @@ test.beforeEach(async ({page, request}) => {
     await request.post("/__fixture/reset", {data: {}});
 });
 
+for (const approved of [true, false]) {
+    test(`银行卡充值显示直接扣款金额，${approved ? "确认提交" : "取消付款"}后没有二维码`, async ({page}) => {
+        await page.goto("/");
+        await login(page);
+        await page.getByRole("textbox", {name: "发送给清灵的消息"}).fill("银行卡充值 100 元");
+        await page.getByRole("button", {name: "发送消息"}).click();
+        const dialog = page.getByRole("dialog", {name: "确认银行卡充值"});
+        await expect(dialog).toBeVisible();
+        await expect(dialog).toContainText("直接从校园卡系统绑定的银行卡扣款");
+        await expect(dialog).toContainText("充值金额");
+        await expect(dialog).toContainText("100 元");
+        await expect(dialog).toContainText("银行卡直接扣款");
+        if (approved) {
+            await expect(dialog).toHaveCSS("opacity", "1");
+            await mkdir("docs/screenshots", {recursive: true});
+            await page.screenshot({path: "docs/screenshots/web-bank-recharge-confirm.png", animations: "disabled"});
+        }
+        await dialog.getByRole("button", {name: approved ? "确认执行" : "取消", exact: true}).click();
+        await expect(dialog).not.toBeVisible();
+        await expect(page.locator(".markdown")).toContainText(approved ? "尚未核实扣款和到账" : "已取消，未执行银行卡充值");
+        await expect(page.locator(".qr-result")).toHaveCount(0);
+        await expect(page.getByRole("button", {name: "前往支付"})).toHaveCount(0);
+    });
+}
+
 test("桌面浅色/深色界面、Lucide 图标与偏好持久化", async ({page}) => {
     const errors: string[] = [];
     page.on("pageerror", error => errors.push(error.message));

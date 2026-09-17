@@ -20,6 +20,7 @@ import {createWebServer} from "../../src/server/webServer";
 import {NotificationHub} from "../../src/server/notificationHub";
 import {TaskScheduler} from "../../src/tasks/scheduler";
 import {currentSessionId} from "../../src/tasks/sessionContext";
+import {createRechargeCampusCardSkill} from "../../src/skills/card/rechargeCampusCard";
 
 /** 脚本化假 LLM（沿用 harness 测试的模式）；seen 记录每轮收到的完整 messages */
 function fakeLlm(script: ChatMessage[]): LlmClient & {seen: ChatMessage[][]} {
@@ -438,6 +439,30 @@ describe("Web 服务端", () => {
         const qr = events.find((e) => e.event === "qr");
         expect(qr?.data.url).toBe("https://qr.alipay.com/fake-test-code");
         expect(String(qr?.data.dataUrl ?? "")).toMatch(/^data:image\/png/);
+    });
+
+    it.each([true, false])("银行卡充值遵循 Web 确认（批准=%s），不会生成付款码", async (approved) => {
+        const payments: number[] = [];
+        let qrCalls = 0;
+        const skill = createRechargeCampusCardSkill({
+            rechargeCampusCardBank: async (amount) => { payments.push(amount); },
+            rechargeCampusCardQr: async () => { qrCalls++; return "https://qr.alipay.com/synthetic"; },
+        });
+        await start([toolCallMsg(skill.name, {amountYuan: 100, method: "bank"}), textMsg(approved ? "充值请求已提交，到账待核实" : "已取消")], [skill]);
+        const response = await fetch(`${base}/api/chat`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({question: "用银行卡给校园卡充 100 元"}),
+        });
+        const events = await readSseAnsweringConfirms(base, response, approved);
+        expect(events.find((event) => event.event === "confirm")?.data).toMatchObject({
+            name: skill.name,
+            args: {amountYuan: 100, method: "bank"},
+        });
+        expect(payments).toEqual(approved ? [100] : []);
+        expect(qrCalls).toBe(0);
+        expect(events.some((event) => event.event === "qr" || event.event === "payform")).toBe(false);
+        expect(events.at(-1)?.event).toBe("done");
     });
 
     it("ask 返回 usage 时发 usage 事件", async () => {

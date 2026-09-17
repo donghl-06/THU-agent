@@ -26,7 +26,7 @@ export default defineConfig({
         host: process.env.HOST ?? (process.env.WSL_DISTRO_NAME ? "0.0.0.0" : "127.0.0.1"),
         port: Number(process.env.PORT ?? 3457),
         strictPort: true,
-        proxy: {"/api": {target: `http://127.0.0.1:${process.env.WEB_API_PORT ?? 3458}`, changeOrigin: true}},
+        proxy: {"/api": {target: `http://127.0.0.1:${process.env.WEB_API_PORT ?? 3458}`, changeOrigin: false}},
         fs: {strict: true},
     },
 });

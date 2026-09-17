@@ -102,7 +102,7 @@ export function Composer({app, value, setValue, onSend}: {app: Assistant; value:
         }
     }
     function send() {
-        if (busy || uploading) return;
+        if (busy || uploading || app.backgroundRunning) return;
         speech.stop();
         const imageFiles = images.map(item => item.file).filter((file): file is UploadedFile => Boolean(file));
         onSend(value.trim(), images.map(item => item.dataUrl), [...files, ...imageFiles]);
@@ -122,7 +122,7 @@ export function Composer({app, value, setValue, onSend}: {app: Assistant; value:
                 <AccessModePicker mode={app.accessMode} change={app.changeAccessMode} disabled={busy || app.loginPending || app.confirmBusy || Boolean(app.lifecycle)}/>
             </div><div className="composer-send-actions">
                 <IconButton icon={Mic} label={speech.listening ? "停止语音输入" : "语音输入"} className={speech.listening ? "recording" : ""} aria-pressed={speech.listening} disabled={busy} onClick={speech.toggle}/>
-                <button className={`send-button ${busy ? "stop-button" : ""}`} aria-label={app.stopping ? "正在停止" : busy ? "停止生成" : "发送消息"} title={busy ? "停止生成" : "发送消息"} disabled={app.stopping || uploading || app.loginPending || Boolean(app.lifecycle) || (!busy && !value.trim() && !images.length && !files.length)} onClick={() => busy ? app.stop() : send()}>{app.stopping ? <LoaderCircle size={19} className="spin"/> : busy ? <Square size={16} fill="currentColor"/> : <ArrowUp size={21} strokeWidth={2}/>}</button>
+                <button className={`send-button ${busy ? "stop-button" : ""}`} aria-label={app.stopping ? "正在停止" : busy ? "停止生成" : "发送消息"} title={busy ? "停止生成" : "发送消息"} disabled={app.backgroundRunning || app.stopping || uploading || app.loginPending || Boolean(app.lifecycle) || (!busy && !value.trim() && !images.length && !files.length)} onClick={() => busy ? app.stop() : send()}>{app.stopping ? <LoaderCircle size={19} className="spin"/> : busy ? <Square size={16} fill="currentColor"/> : <ArrowUp size={21} strokeWidth={2}/>}</button>
             </div></div>
             <input ref={input} type="file" aria-label="选择附件" multiple hidden onChange={event => void selectAttachments(event)}/>
         </motion.div>

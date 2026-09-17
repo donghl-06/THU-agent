@@ -1,4 +1,4 @@
-/** Offline UI fixture. No THU clients, scheduler, or real LLM calls. */
+/** Offline UI fixture. Scheduled runs use this fake Agent; no THU clients or real LLM calls. */
 import {setTimeout as delay} from "node:timers/promises";
 import {createWebServer} from "../src/server/webServer";
 import type {Agent} from "../src/harness/agentLoop";
@@ -7,9 +7,15 @@ import {ToolRegistry} from "../src/harness/toolRegistry";
 import {WebDatabase} from "../src/server/webDatabase";
 import {defaultPreferences} from "../src/shared/workspace";
 import {newId} from "../src/web/lib/history";
+import {createRechargeCampusCardSkill} from "../src/skills/card/rechargeCampusCard";
+import {dashboardFixtureSkills} from "./dashboard-fixture";
 process.env.UI_TOKEN = "";
 process.env.LLM_VISION = "1";
 const fakeWrite: Skill = {name: "book_library_seat", description: "UI 测试预约", inputSchema: {}, requiresConfirmation: true, execute: async () => ({success: true})};
+const fakeRecharge = createRechargeCampusCardSkill({
+    rechargeCampusCardBank: async () => {},
+    rechargeCampusCardQr: async () => "https://qr.alipay.com/synthetic-ui-test",
+});
 const database = new WebDatabase();
 const server = createWebServer((confirm, authHooks, credentials) => ({
     login: async () => {
@@ -47,6 +53,17 @@ const server = createWebServer((confirm, authHooks, credentials) => ({
             return {answer, toolCalls: [], usage: {promptTokens: 256, completionTokens: 128, totalTokens: 384}};
         }
         if (question.includes("错误")) throw new Error("Fixture service unavailable");
+        if (question.includes("银行卡充值")) {
+            const input = JSON.stringify({amountYuan: 100, method: "bank"});
+            const result = await new ToolRegistry([fakeRecharge], confirm).execute({
+                id: "bank_test_call", type: "function", function: {name: fakeRecharge.name, arguments: input},
+            }, options?.accessMode);
+            const parsed = JSON.parse(result) as {success: boolean; data?: {message: string}};
+            return {
+                answer: parsed.success ? parsed.data!.message : "已取消，未执行银行卡充值。",
+                toolCalls: [{name: fakeRecharge.name, input, result}],
+            };
+        }
         if (question.includes("预约")) {
             const result = await new ToolRegistry([fakeWrite], confirm).execute({id: "test_call", type: "function", function: {name: fakeWrite.name, arguments: JSON.stringify({图书馆: "测试图书馆", 座位: "A101", 时间: "14:00–16:00"})}}, options?.accessMode);
             const approved = (JSON.parse(result) as {success: boolean}).success;
@@ -66,7 +83,7 @@ const server = createWebServer((confirm, authHooks, credentials) => ({
     snapshotMessages: () => [],
     loadMessages: () => {},
     appendAssistantMessage: () => {},
-}) as unknown as Agent, {port: 3461, database, getUserProfile: async () => ({name: "测试同学", email: "fixture@tsinghua.edu.cn"}), requireLogin: true, titleLlm: {chat: async () => ({role: "assistant", content: "今日课程安排"})}});
+}) as unknown as Agent, {port: 3461, database, createDashboardSkills: dashboardFixtureSkills, getUserProfile: async () => ({name: "测试同学", email: "fixture@tsinghua.edu.cn"}), requireLogin: true, titleLlm: {chat: async () => ({role: "assistant", content: "今日课程安排"})}});
 // Fixture-only reset; production never exposes this route.
 const handlers = server.listeners("request");
 server.removeAllListeners("request");

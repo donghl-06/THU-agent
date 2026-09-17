@@ -129,6 +129,18 @@ const server = createWebServer(
         port: PORT,
         indexHtmlPath,
         databasePath: join(scriptDirectory, "..", "data", "qingling.sqlite"),
+        createDashboardSkills: credentials => {
+            const dashboardCredentials = credentials ? {...credentials, fingerprint: deviceFingerprint} : undefined;
+            const dashboardClient = new ThuClient({}, dashboardCredentials, authSessionPath);
+            // A persisted cookie file does not prove the upstream session is still valid.
+            // Re-establish it once when credentials are available; concurrent reads share login().
+            if (dashboardCredentials || (process.env.THU_USERNAME && process.env.THU_PASSWORD)) dashboardClient.logout();
+            return createAllSkills({
+                credentials: dashboardCredentials,
+                // A polling query must never borrow the chat's interactive 2FA callbacks.
+                thuClient: dashboardClient,
+            });
+        },
         getUserProfile: async () => {
             thuClient ??= new ThuClient({}, undefined, authSessionPath);
             const info = await thuClient.getUserInfo();
