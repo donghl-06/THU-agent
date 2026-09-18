@@ -31,7 +31,7 @@ describe("Agent turn 时间线", () => {
         expect(turnText(turn)).toBe("最终回答。");
         send("done", {});
         expect(turn.status).toBe("completed");
-        expect(turn.items.every(item => item.status === "done")).toBe(true);
+        expect(turn.items.every(item => item.kind === "qr" || item.status === "done")).toBe(true);
         const record = {activeId: "session", deletedSessionIds: [], sessions: [{id: "session", title: "测试", createdAt: 1, messages: [{id: "answer", role: "bot", text: turnText(turn), turn}]}]};
         expect(parseHistory(JSON.stringify(record)).sessions[0].messages[0].turn).toEqual(turn);
     });
@@ -41,7 +41,7 @@ describe("Agent turn 时间线", () => {
         for (const toolCallId of ["first", "second"]) turn = applyTurnEvent(turn, {event: "tool", data: {phase: "start", name: "get_schedule", toolCallId}});
         const ids = turn.items.map(item => item.id);
         turn = applyTurnEvent(turn, {event: "tool", data: {phase: "end", name: "get_schedule", toolCallId: "second", success: false, ms: 100}});
-        expect(turn.items[0].status).toBe("running");
+        expect(turn.items[0]).toMatchObject({status: "running"});
         expect(turn.items[1]).toMatchObject({status: "error", ms: 100});
         expect(turn.items.map(item => item.id)).toEqual(ids);
         expect(turn.phase).toBe("tool");
@@ -55,7 +55,7 @@ describe("Agent turn 时间线", () => {
         turn = finishTurn(turn, "cancelled", 500);
         expect(turnText(turn)).toBe("");
         expect(turn.finalItemId).toBeUndefined();
-        expect(turn.items[1].status).toBe("interrupted");
+        expect(turn.items[1]).toMatchObject({status: "interrupted"});
         const state = parseHistory(JSON.stringify({activeId: "session", sessions: [{id: "session", createdAt: 1, messages: [{role: "bot", text: "", turn}]}]}));
         expect(state.sessions[0].messages[0].turn).toEqual(turn);
         expect(applyTurnEvent(turn, {event: "token", data: {text: "迟到的内容"}})).toBe(turn);

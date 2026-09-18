@@ -10,6 +10,8 @@ import type {LlmClient} from "../../src/harness/llmClient";
 import type {ChatMessage} from "../../src/harness/types";
 import type {Skill} from "../../src/skills/base/types";
 import {createWebServer} from "../../src/server/webServer";
+import {shouldAutoApproveScheduledWrite} from "../../src/server/scheduledRun";
+import type {ToolCall} from "../../src/harness/types";
 import type {ScheduledSnapshot} from "../../src/tasks/scheduledTypes";
 import type {WorkspaceData} from "../../src/shared/workspace";
 
@@ -67,6 +69,23 @@ async function start(options: {llm?: LlmClient; skills?: Skill[]; requireLogin?:
     return {base, post, snapshot, workspace, create};
 }
 
+describe("shouldAutoApproveScheduledWrite（定时任务写操作放行策略）", () => {
+    const call = (name: string, args: unknown): ToolCall =>
+        ({id: "1", type: "function", function: {name, arguments: typeof args === "string" ? args : JSON.stringify(args)}});
+    it("只放行 50 元以内的电费充值下单", () => {
+        expect(shouldAutoApproveScheduledWrite(call("recharge_electricity", {amountYuan: 10}))).toBe(true);
+        expect(shouldAutoApproveScheduledWrite(call("recharge_electricity", {amountYuan: 50}))).toBe(true);
+    });
+    it("超上限、非正数、缺金额、参数损坏、其他写技能一律拒绝", () => {
+        expect(shouldAutoApproveScheduledWrite(call("recharge_electricity", {amountYuan: 50.01}))).toBe(false);
+        expect(shouldAutoApproveScheduledWrite(call("recharge_electricity", {amountYuan: -5}))).toBe(false);
+        expect(shouldAutoApproveScheduledWrite(call("recharge_electricity", {}))).toBe(false);
+        expect(shouldAutoApproveScheduledWrite(call("recharge_electricity", "not-json"))).toBe(false);
+        expect(shouldAutoApproveScheduledWrite(call("recharge_campus_card", {amountYuan: 10}))).toBe(false);
+        expect(shouldAutoApproveScheduledWrite(call("send_email", {}))).toBe(false);
+    });
+});
+
 describe("scheduled task HTTP and conversations", () => {
     it("persists a separate background conversation, preserves selection, and resumes its actual LLM context", async () => {
         const seen: ChatMessage[][] = [];
@@ -93,6 +112,41 @@ describe("scheduled task HTTP and conversations", () => {
         delete stale.sessions[0].scheduledRunId;
         await f.post("/api/workspace/history", {history: stale});
         expect((await f.workspace()).history.sessions[0].scheduledTaskId).toBe(task.id);
+    });
+
+    it("auto-approves small electricity recharge orders and persists the payment QR in the run timeline", async () => {
+        let charged = 0;
+        const recharge: Skill = {name: "recharge_electricity", description: "电费充值下单", inputSchema: {}, requiresConfirmation: true,
+            execute: async () => { charged++; return {success: true, data: {amountYuan: 10, payUrl: "https://pay.example.com/qr-10", message: "ok"}}; }};
+        let call = 0;
+        const f = await start({skills: [recharge], llm: {chat: async () => ++call === 1 ? {
+            role: "assistant", content: null,
+            tool_calls: [{id: "r1", type: "function", function: {name: "recharge_electricity", arguments: "{\"amountYuan\":10}"}}],
+        } : {role: "assistant", content: "已生成 10 元付款码。"}}});
+        const task = await f.create("电费低于 5 度就充 10 元");
+        await f.post("/api/scheduled-tasks/run", {id: task.id});
+        await expect.poll(async () => (await f.snapshot()).runs[0].status).toBe("completed");
+        expect(charged).toBe(1);
+        // 付款码持久化在执行记录的时间线里，用户打开任务历史即可扫码
+        const session = (await f.workspace()).history.sessions[0];
+        const qrItems = session.messages.at(-1)?.turn?.items.filter(item => item.kind === "qr") ?? [];
+        expect(qrItems.length).toBe(1);
+        expect((qrItems[0] as {url: string}).url).toBe("https://pay.example.com/qr-10");
+    });
+
+    it("rejects over-cap recharge amounts in scheduled runs (needs_attention, no order)", async () => {
+        let charged = 0;
+        const recharge: Skill = {name: "recharge_electricity", description: "电费充值下单", inputSchema: {}, requiresConfirmation: true,
+            execute: async () => { charged++; return {success: true, data: {}}; }};
+        let call = 0;
+        const f = await start({skills: [recharge], llm: {chat: async () => ++call === 1 ? {
+            role: "assistant", content: null,
+            tool_calls: [{id: "r1", type: "function", function: {name: "recharge_electricity", arguments: "{\"amountYuan\":100}"}}],
+        } : {role: "assistant", content: "金额超限，需要你确认。"}}});
+        const task = await f.create("电费低了充 100 元");
+        await f.post("/api/scheduled-tasks/run", {id: task.id});
+        await expect.poll(async () => (await f.snapshot()).runs[0].status).toBe("needs_attention");
+        expect(charged).toBe(0);
     });
 
     it("never auto-approves a write, including with full-access preferences, and permits later interactive approval", async () => {

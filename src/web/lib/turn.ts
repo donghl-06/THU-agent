@@ -4,7 +4,7 @@ import type {Turn, TurnItem} from "./types";
 // Array position is the creation order. Tool completions update their original
 // entry, so concurrent calls cannot reorder the surrounding prose/reasoning.
 function closeText(items: TurnItem[]): TurnItem[] {
-    return items.map(item => item.kind !== "tool" && item.status === "streaming" ? {...item, status: "done"} : item);
+    return items.map(item => (item.kind === "text" || item.kind === "reasoning") && item.status === "streaming" ? {...item, status: "done"} : item);
 }
 
 export function finishTurn(turn: Turn, status: Exclude<Turn["status"], "running">, now = Date.now()): Turn {
@@ -42,6 +42,13 @@ export function applyTurnEvent(turn: Turn, {event, data}: StreamEvent): Turn {
         return {...turn, phase: items.some(item => item.kind === "tool" && item.status === "running") ? "tool" : "thinking", items};
     }
     if (event === "confirm") return {...turn, phase: "confirm", items: closeText(turn.items)};
+    // 付款码（定时任务后台下单的产物）：作为时间线条目持久化，执行历史里可扫码
+    if (event === "qr") {
+        const url = typeof data.url === "string" ? data.url : "";
+        if (!url) return turn;
+        return {...turn, items: [...closeText(turn.items), {id, kind: "qr", url,
+            dataUrl: typeof data.dataUrl === "string" ? data.dataUrl : undefined}]};
+    }
     if (event === "answer") {
         const text = typeof data.text === "string" ? data.text : "";
         const items = closeText(turn.items);

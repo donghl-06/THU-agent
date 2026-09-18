@@ -1,7 +1,7 @@
 import {lazy, memo, Suspense, useEffect, useId, useState} from "react";
 import {Brain, Check, ChevronRight, CirclePause, LoaderCircle, ShieldCheck, TriangleAlert, Wrench} from "lucide-react";
 import {toolLabels} from "../lib/api";
-import type {TextStep, ToolStep, Turn, TurnItem} from "../lib/types";
+import type {QrStep, TextStep, ToolStep, Turn, TurnItem} from "../lib/types";
 
 const MarkdownContent = lazy(() => import("./MarkdownContent"));
 
@@ -37,6 +37,8 @@ function Tool({item, active}: {item: ToolStep; active: boolean}) {
 }
 
 const TimelineItem = memo(function TimelineItem({item, active}: {item: TurnItem; active: boolean}) {
+    // 付款码不进折叠过程区，由 AgentTurn 在正文下方单独渲染
+    if (item.kind === "qr") return null;
     return <div className={`timeline-item timeline-${item.kind}`} data-kind={item.kind}>
         {item.kind === "tool" ? <Tool item={item} active={active}/>
             : item.kind === "reasoning" ? <Reasoning item={item} active={active}/>
@@ -62,7 +64,8 @@ export function AgentTurn({turn, active}: {turn: Turn; active: boolean}) {
     }, [running, turn.startedAt]);
     const elapsed = Math.max(0, Math.floor(((turn.finishedAt ?? now) - turn.startedAt) / 1000));
     const final = status === "completed" ? turn.items.find(item => item.id === turn.finalItemId && item.kind === "text") : undefined;
-    const process = turn.items.filter(item => item !== final);
+    const qrs = turn.items.filter((item): item is QrStep => item.kind === "qr");
+    const process = turn.items.filter(item => item !== final && item.kind !== "qr");
     const label = status === "completed" ? "已处理" : status === "cancelled" ? "已停止" : status === "error" ? "未完成" : status === "interrupted" ? "已中断"
         : {thinking: "正在思考", tool: "正在查询校园服务", generating: "正在整理回答", confirm: "等待你的确认"}[turn.phase];
     const Icon = running ? (turn.phase === "confirm" ? ShieldCheck : LoaderCircle) : status === "completed" ? Check : CirclePause;
@@ -80,5 +83,6 @@ export function AgentTurn({turn, active}: {turn: Turn; active: boolean}) {
             </div>
         </>}
         {final && final.kind === "text" && <div className="turn-answer"><Prose text={final.text} streaming={false}/></div>}
+        {qrs.map(qr => <div className="result-panel qr-result" key={qr.id}>{qr.dataUrl && <img src={qr.dataUrl} alt="支付二维码"/>}<strong>使用支付宝扫码付款</strong><p>{qr.url}</p></div>)}
     </div>;
 }

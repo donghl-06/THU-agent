@@ -79,7 +79,8 @@ import type {LoginCredentials, TwoFactorHooks} from "../client/auth";
 import {handleTaskSkillCall} from "./taskSkillBridge";
 import {ScheduledTasks, TaskBusyError, TaskInputError} from "../tasks/scheduledTasks";
 import type {ScheduledState} from "../tasks/scheduledTypes";
-import {executeScheduledRun} from "./scheduledRun";
+import {executeScheduledRun, shouldAutoApproveScheduledWrite} from "./scheduledRun";
+import {extractPayFormHtml, extractPayUrl, makeQrDataUrl} from "./toolResultExtras";
 
 /** 确认请求 5 分钟不应答按拒绝处理（防 Promise 悬挂） */
 const CONFIRM_TIMEOUT_MS = 5 * 60 * 1000;
@@ -137,33 +138,8 @@ interface PendingConfirm {
     timer: NodeJS.Timeout;
 }
 
-/** 把支付链接转成二维码 data URL（qrcode 为可选依赖：装了就发图，没装前端只显示链接） */
-async function makeQrDataUrl(url: string): Promise<string | undefined> {
-    try {
-        const qrcode = await import("qrcode");
-        return await qrcode.toDataURL(url, {width: 320, margin: 1});
-    } catch {
-        return undefined;
-    }
-}
+/** 支付链接二维码 / 工具结果里支付产物的提取逻辑见 ./toolResultExtras（对话与定时任务共用） */
 
-/** 从工具结果 JSON 里找支付链接（电费等充值技能会返回 payUrl） */
-function extractPayUrl(toolResultJson: string): string | undefined {
-    try {
-        const parsed = JSON.parse(toolResultJson) as {success?: boolean; data?: {payUrl?: string}};
-        if (parsed.success && typeof parsed.data?.payUrl === "string") return parsed.data.payUrl;
-    } catch { /* 不是 JSON 或没有 payUrl */ }
-    return undefined;
-}
-
-/** 从工具结果 JSON 里找自动提交的支付表单 HTML（体育订单 form 模式） */
-function extractPayFormHtml(toolResultJson: string): string | undefined {
-    try {
-        const parsed = JSON.parse(toolResultJson) as {success?: boolean; data?: {payFormHtml?: string}};
-        if (parsed.success && typeof parsed.data?.payFormHtml === "string") return parsed.data.payFormHtml;
-    } catch { /* 同上 */ }
-    return undefined;
-}
 
 function extractAuthFailure(toolResultJson: string): string | undefined {
     try {
@@ -452,7 +428,13 @@ export function createWebServer(
         execute: async (task, run, signal) => {
             busy = true;
             let needsAttention = false;
-            currentConfirm = async () => { needsAttention = true; return false; };
+            // 定时任务无人值守，写操作一律 fail closed，唯一例外见 shouldAutoApproveScheduledWrite
+            // （电费充值下单只生成付款码，扫码前钱不动、订单自动过期，金额硬顶 50 元）
+            currentConfirm = async (call) => {
+                if (shouldAutoApproveScheduledWrite(call)) return true;
+                needsAttention = true;
+                return false;
+            };
             currentAuthHooks = {
                 twoFactorMethodHook: async () => { needsAttention = true; return undefined; },
                 twoFactorAuthHook: async () => { needsAttention = true; return undefined; },
@@ -460,7 +442,10 @@ export function createWebServer(
             try {
                 const result = await executeScheduledRun(database, getOrCreateAgent(run.sessionId!), task, run, signal, () => needsAttention);
                 // The run already contains the full reply; notify without appending a duplicate message.
-                hub?.push(task.id, task.title, result.status === "completed" ? "定时任务已完成，可在执行历史中查看。" : result.summary);
+                // 生成了付款码的运行（电费自动下单）在通知里直接说清，用户扫码即付款
+                hub?.push(task.id, task.title,
+                    result.payUrl ? "已生成电费付款码，打开执行记录扫码付款。"
+                        : result.status === "completed" ? "定时任务已完成，可在执行历史中查看。" : result.summary);
                 return result;
             } finally {
                 busy = false;

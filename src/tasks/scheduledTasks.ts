@@ -58,7 +58,7 @@ interface ScheduledHooks {
     load: () => ScheduledState | undefined;
     save: (state: ScheduledState) => void;
     canRun: () => boolean;
-    execute: (task: ScheduledTask, run: ScheduledRun, signal: AbortSignal) => Promise<{status: "completed" | "failed" | "needs_attention"; summary: string}>;
+    execute: (task: ScheduledTask, run: ScheduledRun, signal: AbortSignal) => Promise<{status: "completed" | "failed" | "needs_attention"; summary: string; /** 生成的付款链接（电费充值下单成功时），用于通知文案 */ payUrl?: string}>;
     now?: () => number;
 }
 

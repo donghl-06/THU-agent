@@ -59,7 +59,15 @@ export interface TextStep {
     status: "streaming" | "done";
 }
 
-export type TurnItem = ToolStep | TextStep;
+/** 支付二维码（定时任务后台下单的付款码会持久化在执行记录里） */
+export interface QrStep {
+    id: string;
+    kind: "qr";
+    url: string;
+    dataUrl?: string;
+}
+
+export type TurnItem = ToolStep | TextStep | QrStep;
 
 export interface Turn {
     sessionId: string;
