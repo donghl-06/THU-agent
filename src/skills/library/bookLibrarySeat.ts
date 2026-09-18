@@ -29,6 +29,14 @@ type SeatBooker = Pick<
     "getLibraryList" | "getLibraryFloorList" | "getLibrarySectionList" | "getLibrarySeatList" | "bookLibrarySeat"
 >;
 
+/**
+ * 空白/连接符不敏感的包含匹配：座位系统的区域路径写作「文科馆 - 三层 - A 区」，
+ * 用户/模型口述的"三层A区"（无空格、无连接符）按朴素 includes 永远匹配不上
+ * （2026-09-17 实测：section="三层A区" 被判 NOT_FOUND）。剥离空白与连字符再比。
+ */
+const squash = (s: string) => s.replace(/[\s\-–—]+/g, "");
+const includesLoose = (target: string, keyword: string) => squash(target).includes(squash(keyword));
+
 export function createBookLibrarySeatSkill(client: SeatBooker): Skill {
     return {
         name: "book_library_seat",
@@ -51,7 +59,7 @@ export function createBookLibrarySeatSkill(client: SeatBooker): Skill {
                 },
                 section: {
                     type: "string",
-                    description: "区域名关键词，如“三层”“B区”。可选，用于缩小座位范围",
+                    description: "区域名关键词，如“三层”“B区”“三层A区”（空格不敏感）。可选，用于缩小座位范围",
                 },
                 seatName: {
                     type: "string",
@@ -94,7 +102,7 @@ export function createBookLibrarySeatSkill(client: SeatBooker): Skill {
                 )).flat().filter((s) => s.valid);
                 if (typeof raw.section === "string" && raw.section.trim()) {
                     const secKw = raw.section.trim();
-                    sections = sections.filter((s) => s.zhName.includes(secKw) || s.zhNameTrace.includes(secKw));
+                    sections = sections.filter((s) => includesLoose(s.zhName, secKw) || includesLoose(s.zhNameTrace, secKw));
                     if (sections.length === 0) return fail("NOT_FOUND", `${libs[0].zhName} 里找不到名称含“${secKw}”的区域`);
                 }
                 sections = sections.filter((s) => s.available > 0);
@@ -118,7 +126,7 @@ export function createBookLibrarySeatSkill(client: SeatBooker): Skill {
                 let chosen = availableSeats[0];
                 if (typeof raw.seatName === "string" && raw.seatName.trim()) {
                     const seatKw = raw.seatName.trim();
-                    const named = availableSeats.filter((s) => s.seat.zhName.includes(seatKw));
+                    const named = availableSeats.filter((s) => includesLoose(s.seat.zhName, seatKw));
                     if (named.length === 0) {
                         return fail("NOT_AVAILABLE", `座位“${seatKw}”当前不可约。可约：${availableSeats.slice(0, 5).map((s) => s.seat.zhName).join("、")} 等`);
                     }

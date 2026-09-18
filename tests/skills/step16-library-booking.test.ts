@@ -113,6 +113,15 @@ describe("book_library_seat Skill", () => {
         expect(r.data!.seatName).toBe("A001");
     });
 
+    it("区域关键词空格不敏感：「三层A区」能匹配 trace「总馆 - 三层 A区」（2026-09-17 文科馆实测）", async () => {
+        const skill = createBookLibrarySeatSkill(seatClient);
+        for (const section of ["三层A区", "三层 A区", "总馆三层A区"]) {
+            const r = (await skill.execute({library: "总馆", section})) as R<BookLibrarySeatData>;
+            expect(r.success).toBe(true);
+            expect(r.data!.seatName).toBe("A001");
+        }
+    });
+
     it("指定座位号不可约时报 NOT_AVAILABLE 并列出可约座位", async () => {
         const skill = createBookLibrarySeatSkill(seatClient);
         const r = await skill.execute({library: "总馆", seatName: "A002"});
