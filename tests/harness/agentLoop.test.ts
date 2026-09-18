@@ -115,6 +115,26 @@ describe("ToolRegistry", () => {
 });
 
 describe("Agent Loop", () => {
+    it("函数形式的系统提示词在每次 ask 时重新求值，并刷新恢复出的旧 system 消息", async () => {
+        // 回归：系统提示词若在进程启动时固化，服务跨天后"明天"会被算错一天（2026-09-18 乒乓球实锤）
+        let day = 17;
+        const llm = fakeLlm([textMsg("回答一"), textMsg("回答二")]);
+        const agent = new Agent([echoSkill], () => `今天是 9 月 ${day} 日`, llm);
+        await agent.ask("问题一");
+        expect(String(llm.seen[0][0].content)).toBe("今天是 9 月 17 日");
+        day = 18; // 跨天，进程未重启
+        await agent.ask("问题二");
+        expect(String(llm.seen[1][0].content)).toBe("今天是 9 月 18 日");
+        // 从持久化恢复的旧上下文（system 里仍是旧日期）也会被刷新
+        const stale = agent.snapshotMessages();
+        (stale[0] as {content: string}).content = "今天是 9 月 17 日";
+        const llm2 = fakeLlm([textMsg("回答三")]);
+        const restored = new Agent([echoSkill], () => `今天是 9 月 ${day} 日`, llm2);
+        restored.loadMessages(stale);
+        await restored.ask("问题三");
+        expect(String(llm2.seen[0][0].content)).toBe("今天是 9 月 18 日");
+    });
+
     it("整轮工具共享显式模式，切回请求批准后重新审批且旧授权不进入消息历史", async () => {
         let executed = 0;
         let approvals = 0;

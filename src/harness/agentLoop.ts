@@ -95,17 +95,19 @@ export class Agent {
     private readonly messages: ChatMessage[] = [];
     private readonly loginHandler?: () => Promise<void>;
     private readonly trim: TrimOptions;
+    /** 传函数时每次 ask 重新求值并刷新 messages[0]（日期/教学周跨天不过期） */
+    private readonly systemPrompt: string | (() => string);
 
     /**
      * @param skills 注册的技能清单
-     * @param systemPrompt 系统提示词
+     * @param systemPrompt 系统提示词；传函数则每次提问重新生成（用于日期等动态上下文）
      * @param llm 可选注入（测试用假 LLM）
      * @param confirm 写操作的用户确认回调；不写则写操作一律拒绝执行
      * @param trim 上下文裁剪配置（缺省用 DEFAULT_TRIM）
      */
     constructor(
         skills: Skill[],
-        systemPrompt: string,
+        systemPrompt: string | (() => string),
         llm?: LlmClient,
         confirm?: ConfirmFn,
         loginHandler?: () => Promise<void>,
@@ -115,11 +117,12 @@ export class Agent {
         this.registry = new ToolRegistry(skills, confirm);
         this.skillsByName = new Map(skills.map((s) => [s.name, s]));
         this.loginHandler = loginHandler;
+        this.systemPrompt = systemPrompt;
         this.trim = {
             maxTurns: trim?.maxTurns ?? DEFAULT_TRIM.maxTurns,
             toolResultKeepChars: trim?.toolResultKeepChars ?? DEFAULT_TRIM.toolResultKeepChars,
         };
-        this.messages.push({role: "system", content: systemPrompt});
+        this.messages.push({role: "system", content: typeof systemPrompt === "function" ? systemPrompt() : systemPrompt});
     }
 
     /** 建立校园服务登录态；认证交互由注入的 hooks 转发给 Web UI。 */
@@ -146,6 +149,12 @@ export class Agent {
 
     /** 问一个问题，拿到最终回答。多轮对话通过 messages 数组自然延续 */
     async ask(question: string, opts: AskOptions = {}): Promise<AgentRunResult> {
+        // 动态系统提示词（含日期/教学周）：每次提问重新生成。
+        // 服务跨天不重启时，固化的"今天是X月X日"会让模型把"明天"算错一天（2026-09-18 乒乓球查错日期实锤）。
+        // 恢复出的历史上下文（loadMessages）里的旧 system 消息同样在此被刷新。
+        if (typeof this.systemPrompt === "function" && this.messages[0]?.role === "system") {
+            this.messages[0] = {role: "system", content: this.systemPrompt()};
+        }
         const messageCheckpoint = this.messages.length;
         // 带图片时构造多模态 parts（OpenAI vision 协议）；纯文本保持字符串不变
         const content: ChatMessage["content"] = opts.images?.length
