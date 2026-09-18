@@ -238,7 +238,8 @@ export function createBookSportsFieldSkill(client: SportsBooker, opts: {captchaS
                 // 支付方式由用户选择：PAY_ONLINE 会生成待支付订单（需线上付款，
                 // 超时自动取消）；PAY_OFFLINE 不产生线上扣款，到场付。
                 const message = result.orderGenerated && !result.freeOrder
-                    ? `已下单，生成了待支付订单${fee !== null ? `（${fee} 元）` : ""}，请尽快到体育场馆预约系统的"我的预约"里完成支付，超时订单会自动取消。`
+                    ? `已下单，生成了待支付订单${fee !== null ? `（${fee} 元）` : ""}。` +
+                      `请立即调用 pay_sports_order 为用户生成支付二维码（用户扫码后才扣款，超时订单自动取消），不要让用户自己去系统里找订单。`
                     : `预约成功（${payType === "PAY_OFFLINE" ? `线下支付${fee !== null && fee > 0 ? `，${fee} 元请到场馆支付` : "，本场次免费"}` : "无需线上支付"}）。`;
                 return ok({
                     venue: scene.sceneName,
